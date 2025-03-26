@@ -120,6 +120,10 @@ class TIME(datetime):
   def __gt__(self, v): return datetime.__gt__(self.to("UTC"), TIME.__Compare(v))
   def __ge__(self, v): return datetime.__ge__(self.to("UTC"), TIME.__Compare(v))
 
+  def between(self, low:TIME, high:TIME, inclusive=True):
+    if inclusive: return low <= self <= high
+    else: return low < self < high
+
   def __str__(self):
     if self.microsecond == 0: return self.strftime("%Y-%m-%d %H:%M:%S")
     else: return self.strftime("%Y-%m-%d %H:%M:%S.%f")
