@@ -41,7 +41,7 @@ from xaeian.crc import crc16_modbus
 config = JSON.load("config")
 CSV.save("export", [{"name": "Jan", "score": 95}, {"name": "Anna", "score": 88}])
 # Time arithmetic
-deadline = Time("2025-03-01") + "2w"  # + 2 weeks
+deadline = Time("2025-03-01") + "2w" # + 2 weeks
 if Time() > deadline:
   print("Overdue!")
 # CRC protection
