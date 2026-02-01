@@ -8,8 +8,9 @@ Usage:
 
 import ast, sys
 from pathlib import Path
+from xaeian import FILE
 
-#------------------------------------------------------------------------------------ Config
+#--------------------------------------------------------------------------------------- Config
 
 MODULE_EXTRAS = {
   "xtime": ("time", ["pytz", "tzlocal"]),
@@ -24,7 +25,7 @@ SUBPACKAGE_EXTRAS = {
   },
 }
 
-#----------------------------------------------------------------------------------- Analysis
+#------------------------------------------------------------------------------------- Analysis
 
 def scan_package(pkg_dir:Path) -> tuple[set[str], set[str]]:
   """Return (modules, subpackages) present in package."""
@@ -63,12 +64,7 @@ def build_extras(modules:set[str], subpackages:set[str]) -> dict[str, list[str]]
 
 
 def get_meta(pkg_dir:Path) -> dict:
-  """
-  Extract metadata from __init__.py.
-
-  Supported:
-    __version__, __repo__, __python__, __description__, __author__, __keywords__
-  """
+  """Extract metadata from __init__.py."""
   meta = {
     "version": "0.1.0",
     "repo": "",
@@ -80,7 +76,7 @@ def get_meta(pkg_dir:Path) -> dict:
   init = pkg_dir / "__init__.py"
   if not init.exists(): return meta
   try:
-    tree = ast.parse(init.read_text())
+    tree = ast.parse(FILE.load(str(init)))
     for node in ast.walk(tree):
       if isinstance(node, ast.Assign):
         for t in node.targets:
@@ -101,7 +97,7 @@ def get_meta(pkg_dir:Path) -> dict:
   return meta
 
 
-#----------------------------------------------------------------------------------- Generate
+#------------------------------------------------------------------------------------- Generate
 
 def generate_toml(pkg_name:str, meta:dict, extras:dict[str, list[str]]) -> str:
   """Generate pyproject.toml content."""
@@ -143,7 +139,7 @@ def generate_toml(pkg_name:str, meta:dict, extras:dict[str, list[str]]) -> str:
   return "\n".join(lines)
 
 
-#--------------------------------------------------------------------------------------- Main
+#----------------------------------------------------------------------------------------- Main
 
 def main():
   import argparse
@@ -172,8 +168,8 @@ def main():
       print(f"  [{name}]: {', '.join(deps)}")
 
   toml = generate_toml(pkg_name, meta, extras)
-  out = Path(args.output) if args.output else pkg_dir.parent / "pyproject.toml"
-  out.write_text(toml)
+  out = str(args.output) if args.output else str(pkg_dir.parent / "pyproject.toml")
+  FILE.save(out, toml)
   print(f"Generated: {out}")
 
 

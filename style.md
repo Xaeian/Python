@@ -48,11 +48,11 @@ config = {
 
 ## Naming
 ```python
-snake_case     # variables, functions
-PascalCase     # classes
-UPPER_CASE     # constants
-_prefix        # private
-timeout_ms     # unit suffix
+snake_case  # variables, functions
+PascalCase  # classes
+UPPER_CASE  # constants, namespaces
+_prefix     # private
+freq_Hz     # unit suffix
 ```
 
 ## Separators
