@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xaeian"
+version = "0.1.0"
+description = "Python utilities for files, strings, time, serial, structs, and database"
+readme = "readme.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [{name = "xaeian"}]
+keywords = ["utilities", "files", "database", "serial", "crc", "struct"]
+dependencies = []
+
+[project.optional-dependencies]
+db = ["psycopg2-binary", "pymysql"]
+db-async = ["aiomysql", "aiosqlite", "asyncpg"]
+serial = ["pyserial"]
+time = ["pytz", "tzlocal"]
+all = ["aiomysql", "aiosqlite", "asyncpg", "psycopg2-binary", "pymysql", "pyserial", "pytz", "tzlocal"]
+
+[project.urls]
+Repository = "https://github.com/Xaeian/Python"
+
+[tool.setuptools.packages.find]
+include = ["xaeian*"]
