@@ -1,4 +1,4 @@
-# xaeian modules
+# `xaeian` modules
 
 Detailed usage examples. For database see [db/readme.md](db/readme.md).
 

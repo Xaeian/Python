@@ -1,4 +1,4 @@
-# xaeian
+# `xaeian`
 
 Python utilities for files, strings, time, serial, structs, and database.
 
