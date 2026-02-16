@@ -42,7 +42,7 @@ class PostgresDatabase(AbstractDatabase):
     self.password = password
     self.db_name = db_name
     self.log = log
-    self.ph = "$"
+    self.ph = "%s"
 
   def conn(self):
     import psycopg2

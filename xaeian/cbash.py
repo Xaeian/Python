@@ -1,5 +1,7 @@
 # xaeian/cbash.py
 
+__extras__ = ("serial", ["pyserial"])
+
 """
 Serial console client for embedded devices (CBash firmware).
 
@@ -47,7 +49,7 @@ def convert_value(value:str|None):
     try: return float(value)
     except ValueError: return value
 
-#------------------------------------------------------------------------------------------ CBash
+#---------------------------------------------------------------------------------------- CBash
 
 class CBash(SerialPort):
   """
@@ -107,7 +109,7 @@ class CBash(SerialPort):
       print_console, print_file, time_disp, time_utc, time_format,
       address, print_limit, crc, logger, debug)
 
-  #----------------------------------------------------------------------------------- Command exec
+  #------------------------------------------------------------------------------- Command exec
 
   def exec(
     self,
@@ -176,12 +178,17 @@ class CBash(SerialPort):
       return resp.strip()
     return resp
 
-  #----------------------------------------------------------------------------------- Basic commands
+  #----------------------------------------------------------------------------- Basic commands
 
-  def ping(self) -> bool:
-    resp = self.exec("PING")
-    if not resp: return False
-    return "pong" in resp.lower()
+  def ping(self, retries:int=3, retry_delay:float=0.5) -> bool:
+    """Ping device. Returns True if device responds with 'pong'."""
+    resp = self.exec(
+      "PING",
+      retries = retries,
+      retry_delay = retry_delay,
+      validator = lambda r: "pong" in r.lower(),
+    )
+    return resp is not None
 
   def uid(self) -> bytes|None:
     """Get device UID as bytes (12 bytes / 24 hex chars)."""
@@ -191,7 +198,7 @@ class CBash(SerialPort):
     if match: return bytes.fromhex(match.group())
     return None
 
-  #----------------------------------------------------------------------------------- File operations
+  #---------------------------------------------------------------------------- File operations
 
   def file_list(self, refresh:bool=False) -> list[str]:
     """Get list of available files. Cached unless refresh=True."""
@@ -273,7 +280,7 @@ class CBash(SerialPort):
     if data is None: return None
     return self.bytes_to_string(data, strict=strict)
 
-  #-------------------------------------------------------------------------------------------- RTC
+  #---------------------------------------------------------------------------------------- RTC
 
   def set_time(self, utc:bool|None=None):
     """Set device RTC to current time."""
@@ -289,7 +296,7 @@ class CBash(SerialPort):
     if match: return datetime.strptime(match.group(), "%Y-%m-%d %H:%M:%S")
     return None
 
-  #------------------------------------------------------------------------------------------ Power
+  #-------------------------------------------------------------------------------------- Power
 
   def reboot(self, immediate:bool=False):
     """Reboot device. If immediate=True, reboot without delay."""

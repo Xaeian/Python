@@ -1,5 +1,7 @@
 # xaeian/serial_port.py
 
+__extras__ = ("serial", ["pyserial"])
+
 """
 Serial port communication with colored console output.
 

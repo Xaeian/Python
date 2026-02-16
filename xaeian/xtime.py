@@ -1,5 +1,9 @@
 # xaeian/xtime.py
 
+from __future__ import annotations
+
+__extras__ = ("time", ["pytz", "tzlocal"])
+
 """
 Extended datetime with human-friendly interface.
 
@@ -21,7 +25,6 @@ Example:
   >>> t.round("h")            # round to hour
 """
 
-from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Union, overload
 import calendar

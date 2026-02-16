@@ -15,12 +15,10 @@ Example:
   2025-01-15 14:32:01 INF Server started on port 8080
 """
 
-import logging
+import sys, logging
 from logging.handlers import RotatingFileHandler
-import os
-import sys
-
 from .colors import Color
+from .files import DIR
 
 PANIC = 60
 logging.addLevelName(PANIC, "PNC")
@@ -31,7 +29,6 @@ def _datefmt(date:bool, time:bool) -> str:
   if date: parts.append("%Y-%m-%d")
   if time: parts.append("%H:%M:%S")
   return " ".join(parts)
-
 
 def _fmt(date:bool, time:bool) -> str:
   """Build log format string from flags."""
@@ -64,13 +61,12 @@ class ColorFormatter(LogFormatter):
   Colors: `DBG`=green, `INF`=blue, `WRN`=yellow, `ERR`=red,
   `CRT`=magenta, `PNC`=gold.
   """
-
   COLORS = {
     "DBG": Color.GREEN,
     "INF": Color.BLUE,
     "WRN": Color.YELLOW,
     "ERR": Color.RED,
-    "CRT": Color.MAGENTA,
+    "CRT": Color.MAGNTA,
     "PNC": Color.GOLD,
   }
   def __init__(self, date:bool=True, time:bool=True):
@@ -158,8 +154,7 @@ class Logger(logging.Logger):
       self._file_handler = None
       self._file_path = ""
     if not file: return
-    d = os.path.dirname(file)
-    if d: os.makedirs(d, exist_ok=True)
+    DIR.ensure(file, is_file=True)
     fh = RotatingFileHandler(file, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8")
     fh.setLevel(level)
     fh.setFormatter(LogFormatter(_fmt(date, time), _datefmt(date, time)))

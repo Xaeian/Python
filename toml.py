@@ -1,60 +1,84 @@
+# toml.py
+
 """
 Auto-generate pyproject.toml from package source analysis.
-Scans Python files, detects modules, generates optional extras.
+Scans Python files, detects modules, reads __extras__ declarations.
 
-Usage:
-  python gen_toml.py <package_dir> [-o pyproject.toml]
+Each module/subpackage declares its own extras via __extras__:
+  Tuple form: __extras__ = ("group", ["pkg1", "pkg2"])
+  Dict form:  __extras__ = {"group": ["pkg1"], "group-async": ["pkg2"]}
+
+Example:
+  >>> from toml import generate
+  >>> generate("xaeian")
+
+CLI:
+  py toml.py xaeian
+  py toml.py xaeian -o pyproject.toml
 """
 
 import ast, sys
-from pathlib import Path
-from xaeian import FILE
+from xaeian import FILE, DIR, PATH, Color, Ico
 
-#--------------------------------------------------------------------------------------- Config
+#----------------------------------------------------------------------------------- Internals
 
-MODULE_EXTRAS = {
-  "xtime": ("time", ["pytz", "tzlocal"]),
-  "serial_port": ("serial", ["pyserial"]),
-  "cbash": ("serial", ["pyserial"]),
-}
+def _parse_extras(node) -> dict[str, list[str]]:
+  """Extract extras from AST node value (tuple or dict)."""
+  if isinstance(node, ast.Tuple) and len(node.elts) == 2:
+    name_node, list_node = node.elts
+    if isinstance(name_node, ast.Constant) and isinstance(list_node, ast.List):
+      pkgs = [e.value for e in list_node.elts if isinstance(e, ast.Constant)]
+      return {str(name_node.value): pkgs}
+  elif isinstance(node, ast.Dict):
+    result = {}
+    for k, v in zip(node.keys, node.values):
+      if isinstance(k, ast.Constant) and isinstance(v, ast.List):
+        pkgs = [e.value for e in v.elts if isinstance(e, ast.Constant)]
+        result[str(k.value)] = pkgs
+    return result
+  return {}
 
-SUBPACKAGE_EXTRAS = {
-  "db": {
-    "db": ["pymysql", "psycopg2-binary"],
-    "db-async": ["aiomysql", "asyncpg", "aiosqlite"],
-  },
-}
+
+def _scan_extras_from_file(path:str) -> dict[str, list[str]]:
+  """Parse `__extras__` from a Python file."""
+  if not PATH.is_file(path): return {}
+  try:
+    tree = ast.parse(FILE.load(path))
+  except Exception:
+    return {}
+  for node in ast.walk(tree):
+    if isinstance(node, ast.Assign):
+      for t in node.targets:
+        if isinstance(t, ast.Name) and t.id == "__extras__":
+          return _parse_extras(node.value)
+  return {}
 
 #------------------------------------------------------------------------------------- Analysis
 
-def scan_package(pkg_dir:Path) -> tuple[set[str], set[str]]:
+def scan_package(pkg_dir:str) -> tuple[set[str], set[str]]:
   """Return (modules, subpackages) present in package."""
   modules = set()
   subpackages = set()
-  for pyfile in pkg_dir.glob("*.py"):
-    if not pyfile.stem.startswith("__"):
-      modules.add(pyfile.stem)
-  for subdir in pkg_dir.iterdir():
-    if subdir.is_dir() and (subdir / "__init__.py").exists():
-      subpackages.add(subdir.name)
+  for name in DIR.file_list(pkg_dir, local=True):
+    if name.endswith(".py") and not name.startswith("__") and "/" not in name:
+      modules.add(name.removesuffix(".py"))
+  for name in DIR.folder_list(pkg_dir, basename=True):
+    if PATH.is_file(PATH.join(pkg_dir, name, "__init__.py")):
+      subpackages.add(name)
   return modules, subpackages
 
 
-def build_extras(modules:set[str], subpackages:set[str]) -> dict[str, list[str]]:
-  """Build extras dict from present modules and subpackages."""
+def build_extras(pkg_dir:str, modules:set[str], subpackages:set[str]) -> dict[str, list[str]]:
+  """Build extras dict by scanning `__extras__` in modules and subpackages."""
   extras: dict[str, set[str]] = {}
   for mod in modules:
-    if mod in MODULE_EXTRAS:
-      extra_name, pkgs = MODULE_EXTRAS[mod]
-      if extra_name not in extras:
-        extras[extra_name] = set()
-      extras[extra_name].update(pkgs)
+    found = _scan_extras_from_file(PATH.join(pkg_dir, f"{mod}.py"))
+    for name, pkgs in found.items():
+      extras.setdefault(name, set()).update(pkgs)
   for subpkg in subpackages:
-    if subpkg in SUBPACKAGE_EXTRAS:
-      for extra_name, pkgs in SUBPACKAGE_EXTRAS[subpkg].items():
-        if extra_name not in extras:
-          extras[extra_name] = set()
-        extras[extra_name].update(pkgs)
+    found = _scan_extras_from_file(PATH.join(pkg_dir, subpkg, "__init__.py"))
+    for name, pkgs in found.items():
+      extras.setdefault(name, set()).update(pkgs)
   if extras:
     all_deps = set()
     for deps in extras.values():
@@ -63,8 +87,8 @@ def build_extras(modules:set[str], subpackages:set[str]) -> dict[str, list[str]]
   return {k: sorted(v) for k, v in extras.items()}
 
 
-def get_meta(pkg_dir:Path) -> dict:
-  """Extract metadata from __init__.py."""
+def get_meta(pkg_dir:str) -> dict:
+  """Extract metadata from `__init__.py`."""
   meta = {
     "version": "0.1.0",
     "repo": "",
@@ -73,10 +97,10 @@ def get_meta(pkg_dir:Path) -> dict:
     "author": "",
     "keywords": [],
   }
-  init = pkg_dir / "__init__.py"
-  if not init.exists(): return meta
+  init = PATH.join(pkg_dir, "__init__.py")
+  if not PATH.is_file(init): return meta
   try:
-    tree = ast.parse(FILE.load(str(init)))
+    tree = ast.parse(FILE.load(init))
     for node in ast.walk(tree):
       if isinstance(node, ast.Assign):
         for t in node.targets:
@@ -95,7 +119,6 @@ def get_meta(pkg_dir:Path) -> dict:
             ]
   except Exception: pass
   return meta
-
 
 #------------------------------------------------------------------------------------- Generate
 
@@ -138,40 +161,68 @@ def generate_toml(pkg_name:str, meta:dict, extras:dict[str, list[str]]) -> str:
   lines.append('')
   return "\n".join(lines)
 
+#-------------------------------------------------------------------------------------- Public
 
-#----------------------------------------------------------------------------------------- Main
+def generate(package:str, output:str|None=None):
+  """Generate pyproject.toml for given package directory.
 
-def main():
-  import argparse
-  parser = argparse.ArgumentParser(description="Generate pyproject.toml")
-  parser.add_argument("package", help="Package directory")
-  parser.add_argument("-o", "--output", help="Output file (default: parent/pyproject.toml)")
-  args = parser.parse_args()
-
-  pkg_dir = Path(args.package).resolve()
-  if not pkg_dir.is_dir():
-    print(f"Error: {pkg_dir} is not a directory")
+  Args:
+    package: Package directory path.
+    output: Output file path (default: parent/pyproject.toml).
+  """
+  pkg_dir = PATH.resolve(package)
+  if not PATH.is_dir(pkg_dir):
+    print(f"{Ico.ERR} {Color.ORANGE}{pkg_dir}{Color.END} is not a directory")
     sys.exit(1)
-
-  pkg_name = pkg_dir.name
+  pkg_name = PATH.basename(pkg_dir)
   meta = get_meta(pkg_dir)
   modules, subpackages = scan_package(pkg_dir)
-  extras = build_extras(modules, subpackages)
-
-  print(f"Package: {pkg_name} v{meta['version']}")
-  if meta["repo"]: print(f"Repo: github.com/{meta['repo']}")
-  print(f"Modules: {', '.join(sorted(modules))}")
-  if subpackages: print(f"Subpackages: {', '.join(sorted(subpackages))}")
+  extras = build_extras(pkg_dir, modules, subpackages)
+  print(f"{Ico.INF} Package: {Color.TURQUS}{pkg_name}{Color.END} {meta['version']}")
+  if meta["repo"]:
+    print(f"{Ico.GAP} https://github.com/{Color.SKY}{meta['repo']}{Color.END}")
+  print(f"{Ico.INF} Modules: {Color.GREY}{', '.join(sorted(modules))}{Color.END}")
+  if subpackages:
+    print(f"{Ico.INF} Subpackages: {Color.GREY}{', '.join(sorted(subpackages))}{Color.END}")
   if extras:
-    print("Extras:")
     for name, deps in sorted(extras.items(), key=lambda x: (x[0] == "all", x[0])):
-      print(f"  [{name}]: {', '.join(deps)}")
-
+      print(f"{Ico.DOT} [{Color.CREAM}{name}{Color.END}]: {Color.GREY}{', '.join(deps)}{Color.END}")
   toml = generate_toml(pkg_name, meta, extras)
-  out = str(args.output) if args.output else str(pkg_dir.parent / "pyproject.toml")
+  out = output or PATH.join(PATH.dirname(pkg_dir), "pyproject.toml")
   FILE.save(out, toml)
-  print(f"Generated: {out}")
+  print(f"{Ico.OK} Generated {Color.ORANGE}{out}{Color.END}")
 
+#----------------------------------------------------------------------------------------- CLI
+
+EXAMPLES = """
+examples:
+  py toml.py xaeian              Generate from package dir
+  py toml.py xaeian -o out.toml  Custom output path
+"""
 
 if __name__ == "__main__":
-  main()
+  import argparse
+
+  def fmt(prog):
+    return argparse.RawDescriptionHelpFormatter(prog, max_help_position=34, width=90)
+
+  class TomlParser(argparse.ArgumentParser):
+    def format_help(self):
+      return "\n" + super().format_help().rstrip() + "\n\n"
+
+  p = TomlParser(
+    description=f"Generate {Color.ORANGE}pyproject.toml{Color.END} from package source",
+    formatter_class=fmt,
+    add_help=False,
+    usage=argparse.SUPPRESS,
+    epilog=EXAMPLES,
+  )
+  p.add_argument("package", metavar="PACKAGE",
+    help="Package directory to scan")
+  p.add_argument("-o", "--output", default=None, metavar="PATH",
+    help="Output file (default: parent/pyproject.toml)")
+  p.add_argument("-h", "--help", action="help",
+    help="Show this help message and exit")
+
+  a = p.parse_args()
+  generate(a.package, a.output)

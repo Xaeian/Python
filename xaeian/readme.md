@@ -8,7 +8,7 @@ File operations with context-based paths.
 
 ```python
 from xaeian import FILE, DIR, JSON, CSV, INI, PATH
-from xaeian import set_files_context, files_context
+from xaeian import Files, file_context
 
 # Text files
 FILE.save("data.txt", "Hello!")
@@ -40,11 +40,19 @@ PATH.dirname("a/b/file.txt")      # "a/b"
 PATH.stem("a/b/file.txt")         # "file"
 PATH.ext("a/b/file.txt")          # ".txt"
 PATH.with_suffix("f.txt", ".md")  # "f.md"
-# Context-based paths
-set_files_context(root_path="/app/data")
-JSON.load("config")  # reads /app/data/config.json
-with files_context(root_path="/tmp"):
-  FILE.save("temp.txt", "...")  # saves to /tmp/temp.txt
+```
+
+### Context-based paths
+
+```python
+# Object with own root — no global state, no `with`
+fs = Files(root_path="/app/data")
+fs.JSON.load("config")            # reads /app/data/config.json
+fs.FILE.save("log.txt", "ok")     # saves to /app/data/log.txt
+
+# Temporary context override
+with file_context(root_path="/tmp"):
+  FILE.save("temp.txt", "...")     # saves to /tmp/temp.txt
 ```
 
 ## `files_async`
@@ -52,10 +60,16 @@ with files_context(root_path="/tmp"):
 Async wrappers via `asyncio.to_thread()`.
 
 ```python
-from xaeian.files_async import FILE, JSON
+from xaeian.files_async import FILE, JSON, AsyncFiles
 
 content = await FILE.load("data.txt")
 await JSON.save("config", {"key": "value"})
+
+# Object with own root
+fs = AsyncFiles(root_path="/app/data")
+await fs.FILE.load("test.txt")
+await fs.JSON.save("cfg", {"a": 1})
+fs.PATH.resolve("sub/file.txt")   # sync — no IO
 ```
 
 ## `xstring`

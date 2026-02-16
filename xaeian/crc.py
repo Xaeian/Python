@@ -127,6 +127,7 @@ class CRC:
     if self.width == 32: return int((crc[0] << 24) + (crc[1] << 16) + (crc[2] << 8) + crc[3])
     if self.width == 16: return int((crc[0] << 8) + crc[1])
     if self.width == 8: return int(crc[0])
+    raise ValueError(f"Unsupported CRC width: {self.width} (supported: 32, 16, 8)")
 
   def decode(self, frame:bytes) -> bytes|None:
     """
