@@ -1,7 +1,7 @@
 # `xaeian`
 
-Python utilities for files, strings, time, serial, structs, and database.
-Zero dependencies for core modules. Optional extras for time, serial, and database backends.
+Python utilities for files, strings, time, serial, structs, media, PDF, and database.
+Zero dependencies for core modules. Optional extras for time, serial, media, PDF, and database backends.
 
 ## Install
 
@@ -9,6 +9,8 @@ Zero dependencies for core modules. Optional extras for time, serial, and databa
 pip install xaeian            # core
 pip install xaeian[time]      # + pytz, tzlocal
 pip install xaeian[serial]    # + pyserial
+pip install xaeian[mf]        # + pypdf, PyMuPDF, Pillow
+pip install xaeian[pdf]       # + reportlab, svglib, Pillow
 pip install xaeian[db]        # + pymysql, psycopg2
 pip install xaeian[db-async]  # + aiomysql, asyncpg, aiosqlite
 pip install xaeian[all]       # everything
@@ -26,6 +28,9 @@ pip install xaeian[all]       # everything
 | `log`         | Colored logging with file rotation               | [xaeian/log.py](xaeian/readme.md#log)                 |
 | `crc`         | CRC-8/16/32 with predefined variants             | [xaeian/crc.py](xaeian/readme.md#crc)                 |
 | `cstruct`     | Binary struct serialization (C-like)             | [xaeian/cstruct.py](xaeian/readme.md#cstruct)         |
+| `cmd`         | Shell command helpers                            | [xaeian/cmd.py](xaeian/readme.md#cmd)                 |
+| `mf`          | Compress, convert, strip metadata (PDF & images) | [xaeian/mf/](xaeian/mf/readme.md)                     |
+| `pdf`         | PDF generation with fluent API                   | [xaeian/pdf/](xaeian/pdf/readme.md)                   |
 | `serial_port` | Serial communication with colored output         | [xaeian/serial_port.py](xaeian/readme.md#serial_port) |
 | `cbash`       | Embedded device console protocol                 | [xaeian/cbash.py](xaeian/readme.md#cbash)             |
 | `db`          | Database abstraction (SQLite, MySQL, PostgreSQL) | [xaeian/db/](xaeian/db/readme.md)                     |
@@ -53,6 +58,30 @@ log = logger("app", file="app.log", color=True)
 log.info(f"New password: {generate_password(16)}")
 ```
 
+**Media files:**
+
+```python
+from xaeian.mf.min import compress
+from xaeian.mf.meta import scrub_metadata
+
+compress("report.pdf")              # → report-min.pdf
+compress("photo.jpg", max_px=1280)  # → photo-min.jpg
+scrub_metadata("photo.jpg")         # → photo-nometa.jpg
+```
+
+**PDF generation:**
+
+```python
+from xaeian.pdf import PDF
+
+with PDF("output.pdf") as pdf:
+  pdf.font("Helvetica", 16, "Bold")
+  pdf.text("Hello World")
+  pdf.enter()
+  pdf.font(size=12, mode="Regular")
+  pdf.text("Second line of text.")
+```
+
 **Database example:**
 
 ```python
@@ -66,7 +95,3 @@ with db.transaction():
   db.update("users", {"verified": True}, "id = ?", user["id"])
   db.insert("logs", {"action": "verify", "user_id": user["id"]})
 ```
-
-## License
-
-MIT

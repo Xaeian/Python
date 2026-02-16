@@ -54,14 +54,16 @@ def connect(
   port: int = 5432,
 ) -> Connection:
 
-# Use | not Union
-def load(path:str) -> dict|None:
+# Use | inline, Union for complex type aliases
+def load(val:str|int) -> dict|None:
 ```
 
 ### Custom type aliases for complex signatures
 
 ```py
 TimeInput = Union[str, int, float, datetime, timedelta, "Time"]
+# or
+TimeInput = str | int | float | datetime | timedelta | "Time"
 PdfSettings = Literal["/screen", "/ebook", "/printer", "/prepress", "/default"]
 ```
 
