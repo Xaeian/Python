@@ -22,38 +22,38 @@ from xaeian.xtime import Time
 from xaeian.crc import crc16_modbus
 from xaeian.db import Database
 
-# Files — auto extension, context-based paths
+# Files: auto extension, context-based paths
 JSON.save("config", {"debug": True, "port": 8080})
 CSV.save("users", [{"name": "Jan", "age": 30}, {"name": "Anna", "age": 25}])
 
-# Time — parse anything, arithmetic with strings
+# Time: parse anything, arithmetic with strings
 t = Time("2025-03-01") + "2w 3d"
-t.round("w")                       # Monday 00:00
-t.to("iso")                        # "2025-03-17T00:00:00+01:00"
+t.round("w")  # Monday 00:00
+t.to("iso")   # "2025-03-17T00:00:00+01:00"
 
-# CRC — encode/decode with Modbus, ISO, custom
+# CRC: encode/decode with Modbus, ISO, custom
 frame = crc16_modbus.encode(b"\x01\x03\x00\x00\x00\x0A")
 assert crc16_modbus.decode(frame) is not None
 
 # String tools
-split_str('a,"b,c",d', sep=",")    # ['a', '"b,c"', 'd']
-generate_password(16)               # 'aB3$xY9!mN2@pQ7&'
+split_str('a,"b,c",d', sep=",")  # ['a', '"b,c"', 'd']
+generate_password(16)            # 'aB3$xY9!mN2@pQ7&'
 
-# Database — sqlite/mysql/postgres, sync/async
+# Database: sqlite/mysql/postgres, sync/async
 db = Database("sqlite", "app.db")
 db.insert("users", {"name": "Jan", "settings": {"theme": "dark"}})
 db.find("users", order="name", limit=10)
 async with db.transaction():
   db.update("users", {"verified": True}, "id = ?", 42)
 
-# Media — compress, strip metadata
+# Media: compress, strip metadata
 from xaeian.mf.min import compress
-compress("report.pdf")              # → report-min.pdf
-compress("photos/", max_px=1280)    # → photos-min/ (recursive)
+compress("report.pdf")            # → report-min.pdf
+compress("photos/", max_px=1280)  # → photos-min/ (recursive)
 
-# Logging — colored, rotating
+# Logging: colored, rotating
 log = logger("app", file="app.log")
-log.info("started")                 # 2025-03-01 14:32:01 INF started
+log.info("started")  # 2025-03-01 14:32:01 INF started
 ```
 
 ## Modules
