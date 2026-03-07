@@ -1,10 +1,10 @@
-# xaeian/scr/tree.py
+# xaeian/cli/tree.py
 
 """
 Directory tree visualizer with filtering and color output.
 
 Example:
-  >>> from xaeian.scr.tree import tree
+  >>> from xaeian.cli.tree import tree
   >>> tree("src/", exts=[".py"], ignore=["__pycache__"])
 """
 
@@ -125,13 +125,13 @@ def tree(
 
 EXAMPLES = """
 examples:
-  py -m xaeian.scr.tree .                          Current directory
-  py -m xaeian.scr.tree src/ -e .py .c             Only .py and .c files
-  py -m xaeian.scr.tree . -d 2                     Max depth 2
-  py -m xaeian.scr.tree . --size                   Show file sizes
-  py -m xaeian.scr.tree . --dirs                   Directories only
-  py -m xaeian.scr.tree . --hidden                 Include dotfiles
-  py -m xaeian.scr.tree . -o tree.json             Save stats to JSON
+  py -m xaeian.cli.tree .                          Current directory
+  py -m xaeian.cli.tree src/ -e .py .c             Only .py and .c files
+  py -m xaeian.cli.tree . -d 2                     Max depth 2
+  py -m xaeian.cli.tree . --size                   Show file sizes
+  py -m xaeian.cli.tree . --dirs                   Directories only
+  py -m xaeian.cli.tree . --hidden                 Include dotfiles
+  py -m xaeian.cli.tree . -o tree.json             Save stats to JSON
 """
 
 if __name__ == "__main__":

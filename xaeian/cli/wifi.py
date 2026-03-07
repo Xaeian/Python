@@ -1,4 +1,4 @@
-# xaeian/scr/wifi.py
+# xaeian/cli/wifi.py
 
 """
 Extract saved Wi-Fi network names and passwords.
@@ -6,7 +6,7 @@ Extract saved Wi-Fi network names and passwords.
 Supports Windows (netsh) and Linux (nmcli).
 
 Example:
-  >>> from xaeian.scr.wifi import wifi_passwords
+  >>> from xaeian.cli.wifi import wifi_passwords
   >>> for net in wifi_passwords():
   ...   print(net["ssid"], net["password"])
 """
@@ -100,8 +100,8 @@ def wifi_passwords() -> list[dict]:
 
 EXAMPLES = """
 examples:
-  py -m xaeian.scr.wifi               List all saved networks + passwords
-  py -m xaeian.scr.wifi -o wifi.json  Save report to JSON file
+  py -m xaeian.cli.wifi               List all saved networks + passwords
+  py -m xaeian.cli.wifi -o wifi.json  Save report to JSON file
 """
 
 if __name__ == "__main__":

@@ -88,6 +88,8 @@ class CRC:
         else: remainder = (remainder << 1)
       remainder &= CRC_MASK[self.width]
       self.array.append(remainder)
+    # Pretabulate reflected bytes for reflectIn
+    self._ref_byte = [reflect_bit(i, 8) for i in range(256)] if self.reflectIn else None
 
   def checksum(self, msg:bytes) -> int:
     """
@@ -103,13 +105,14 @@ class CRC:
       >>> crc16_modbus.checksum(b"hello")
       19342
     """
-    msg = [x for x in msg]
     remainder = self.initial
-    for byte in range(len(msg)):
-      if self.reflectIn: msg[byte] = reflect_bit(msg[byte], 8)
-      data = msg[byte] ^ (remainder >> (self.width - 8))
-      tmp = data & CRC_MASK[8]
-      remainder = self.array[tmp] ^ (remainder << 8)
+    ref = self._ref_byte
+    shift = self.width - 8
+    mask = CRC_MASK[8]
+    for byte in msg:
+      if ref: byte = ref[byte]
+      data = (byte ^ (remainder >> shift)) & mask
+      remainder = self.array[data] ^ (remainder << 8)
     remainder &= CRC_MASK[self.width]
     if self.reflectOut: remainder = reflect_bit(remainder, self.width)
     remainder = remainder ^ self.xor

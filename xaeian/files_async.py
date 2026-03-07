@@ -27,14 +27,14 @@ from .files import (
   CSV as _CSV,
   JSON as _JSON,
   Config, Files,
-  get_context, file_context,
+  get_context, set_context, file_context,
   _BoundNamespace,
 )
 
 __all__ = [
   "PATH", "DIR", "FILE", "INI", "CSV", "JSON",
   "AsyncFiles",
-  "get_context", "file_context",
+  "get_context", "set_context", "file_context"
 ]
 
 #----------------------------------------------------------------------------- Async namespaces

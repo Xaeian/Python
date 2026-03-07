@@ -1,5 +1,7 @@
 # xaeian/colors.py
 
+import builtins
+
 """
 ANSI color codes for terminal output.
 
@@ -60,14 +62,42 @@ class Ico:
     >>> print(f"{Ico.ERR} Connection failed")
     ERR Connection failed   # ERR in red
   """
-  INF = f"{Color.BLUE}INF{Color.END}"
+  INF = f"{Color.SILVER}INF{Color.END}"
   ERR = f"{Color.RED}ERR{Color.END}"
   WRN = f"{Color.YELLOW}WRN{Color.END}"
-  OK  = f"{Color.GREEN}INF{Color.END}"
-  TIP = f"{Color.MAGNTA}TIP{Color.END}"
-  RUN = f"{Color.ORANGE}RUN{Color.END}"
+  OK =  f"{Color.GREEN}OK{Color.END}"
+  TIP = f"{Color.VIOLET}TIP{Color.END}"
+  RUN = f"{Color.BLUE}RUN{Color.END}"
   DOT = f"{Color.SILVER} • {Color.END}"
   GAP = "   "
+
+class Print:
+  def __init__(self, file=None):
+    self._file = file
+
+  def __call__(self, *args, **kwargs):
+    if self._file and "file" not in kwargs:
+      kwargs["file"] = self._file
+    builtins.print(*args, **kwargs)
+
+  def _pre(self, ico, *args, **kwargs):
+    self(ico, *args, **kwargs)
+
+  def inf(self, *args, **kwargs): self._pre(Ico.INF, *args, **kwargs)
+  def err(self, *args, **kwargs): self._pre(Ico.ERR, *args, **kwargs)
+  def wrn(self, *args, **kwargs): self._pre(Ico.WRN, *args, **kwargs)
+  def tip(self, *args, **kwargs): self._pre(Ico.TIP, *args, **kwargs)
+  def run(self, *args, **kwargs): self._pre(Ico.RUN, *args, **kwargs)
+  def dot(self, *args, **kwargs): self._pre(Ico.DOT, *args, **kwargs)
+  def gap(self, *args, **kwargs): self._pre(Ico.GAP, *args, **kwargs)
+  def ok(self, *args, **kwargs):
+    suffix = f" {Ico.OK}"
+    if args:
+      last = str(args[-1]) + suffix
+      args = (*args[:-1], last)
+    else:
+      args = (suffix.lstrip(),)
+    self._pre(Ico.INF, *args, **kwargs)
 
 def test_colors():
   """Display all available colors in terminal."""

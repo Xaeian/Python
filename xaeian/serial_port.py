@@ -33,6 +33,13 @@ except ImportError:
 
 from .colors import Color
 
+#----------------------------------------------------------------------------------------- Scan
+
+def serial_scan() -> list[str]:
+  """Scan available serial/COM ports."""
+  from serial.tools import list_ports
+  return [p.device for p in list_ports.comports()]
+
 #-------------------------------------------------------------------------------------- Protocols
 
 class Logger(Protocol):
@@ -429,15 +436,12 @@ class Recorder(SerialPort):
 #---------------------------------------------------------------------------------------- Tests
 
 if __name__ == "__main__":
-  try:
-    from serial.tools import list_ports
-    ports = list(list_ports.comports())
-    print("available ports:")
-    for p in ports:
-      print(f"  {p.device:15} {p.description}")
-    if not ports: print("  (none)")
-  except ImportError:
-    print("pyserial not installed")
+  ports = serial_scan()
+  print("available ports:")
+  for p in ports:
+    print(f"  {p}")
+  if not ports:
+    print("  (none)")
   print()
   print("usage:")
   print('  with SerialPort("/dev/ttyUSB0", 115200) as sp:')

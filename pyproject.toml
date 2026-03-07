@@ -16,11 +16,12 @@ dependencies = []
 [project.optional-dependencies]
 db = ["psycopg2-binary", "pymysql"]
 db-async = ["aiomysql", "aiosqlite", "asyncpg"]
+eda = ["PyMuPDF", "pypdf", "sexpdata"]
 mf = ["Pillow", "PyMuPDF", "pypdf"]
 pdf = ["Pillow", "reportlab"]
 serial = ["pyserial"]
 time = ["pytz", "tzlocal"]
-all = ["Pillow", "PyMuPDF", "aiomysql", "aiosqlite", "asyncpg", "psycopg2-binary", "pymysql", "pypdf", "pyserial", "pytz", "reportlab", "tzlocal"]
+all = ["Pillow", "PyMuPDF", "aiomysql", "aiosqlite", "asyncpg", "psycopg2-binary", "pymysql", "pypdf", "pyserial", "pytz", "reportlab", "sexpdata", "tzlocal"]
 
 [project.urls]
 Repository = "https://github.com/Xaeian/Python"

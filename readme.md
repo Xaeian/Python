@@ -1,7 +1,6 @@
 # `xaeian`
 
-Python utilities for files, strings, time, serial, structs, media, PDF, and database.
-Zero dependencies for core modules. Optional extras for time, serial, media, PDF, and database backends.
+Python utilities. Zero dependencies for core. Optional extras for time, serial, media, database.
 
 ## Install
 
@@ -10,88 +9,70 @@ pip install xaeian            # core
 pip install xaeian[time]      # + pytz, tzlocal
 pip install xaeian[serial]    # + pyserial
 pip install xaeian[mf]        # + pypdf, PyMuPDF, Pillow
-pip install xaeian[pdf]       # + reportlab, svglib, Pillow
 pip install xaeian[db]        # + pymysql, psycopg2
 pip install xaeian[db-async]  # + aiomysql, asyncpg, aiosqlite
 pip install xaeian[all]       # everything
 ```
 
-## Modules
-
-| Module        | Description                                      | Docs                                                  |
-| ------------- | ------------------------------------------------ | ----------------------------------------------------- |
-| `files`       | FILE, DIR, PATH, JSON, CSV, INI                  | [xaeian/files.py](xaeian/readme.md#files)             |
-| `files_async` | Async wrappers via `asyncio.to_thread()`         | [xaeian/files_async.py](xaeian/readme.md#files_async) |
-| `xstring`     | split, replace, strip comments, passwords        | [xaeian/xstring.py](xaeian/readme.md#xstring)         |
-| `xtime`       | Datetime parsing, arithmetic, rounding           | [xaeian/xtime.py](xaeian/readme.md#xtime)             |
-| `colors`      | ANSI 256-color terminal codes                    | [xaeian/colors.py](xaeian/readme.md#colors)           |
-| `log`         | Colored logging with file rotation               | [xaeian/log.py](xaeian/readme.md#log)                 |
-| `crc`         | CRC-8/16/32 with predefined variants             | [xaeian/crc.py](xaeian/readme.md#crc)                 |
-| `cstruct`     | Binary struct serialization (C-like)             | [xaeian/cstruct.py](xaeian/readme.md#cstruct)         |
-| `cmd`         | Shell command helpers                            | [xaeian/cmd.py](xaeian/readme.md#cmd)                 |
-| `mf`          | Compress, convert, strip metadata (PDF & images) | [xaeian/mf/](xaeian/mf/readme.md)                     |
-| `pdf`         | PDF generation with fluent API                   | [xaeian/pdf/](xaeian/pdf/readme.md)                   |
-| `serial_port` | Serial communication with colored output         | [xaeian/serial_port.py](xaeian/readme.md#serial_port) |
-| `cbash`       | Embedded device console protocol                 | [xaeian/cbash.py](xaeian/readme.md#cbash)             |
-| `db`          | Database abstraction (SQLite, MySQL, PostgreSQL) | [xaeian/db/](xaeian/db/readme.md)                     |
-
-## Quick Start
+## Examples
 
 ```python
-from xaeian import FILE, JSON, CSV, logger, generate_password
+from xaeian import FILE, JSON, CSV, logger, split_str, generate_password
 from xaeian.xtime import Time
 from xaeian.crc import crc16_modbus
-
-# File operations
-config = JSON.load("config")
-CSV.save("export", [{"name": "Jan", "score": 95}, {"name": "Anna", "score": 88}])
-# Time arithmetic
-deadline = Time("2025-03-01") + "2w" # + 2 weeks
-if Time() > deadline:
-  print("Overdue!")
-# CRC protection
-frame = crc16_modbus.encode(b"\x01\x03\x00\x00\x00\x0A")
-if crc16_modbus.decode(frame):
-  print("Valid Modbus frame")
-# Colored logging
-log = logger("app", file="app.log", color=True)
-log.info(f"New password: {generate_password(16)}")
-```
-
-**Media files:**
-
-```python
-from xaeian.mf.min import compress
-from xaeian.mf.meta import scrub_metadata
-
-compress("report.pdf")              # → report-min.pdf
-compress("photo.jpg", max_px=1280)  # → photo-min.jpg
-scrub_metadata("photo.jpg")         # → photo-nometa.jpg
-```
-
-**PDF generation:**
-
-```python
-from xaeian.pdf import PDF
-
-with PDF("output.pdf") as pdf:
-  pdf.font("Helvetica", 16, "Bold")
-  pdf.text("Hello World")
-  pdf.enter()
-  pdf.font(size=12, mode="Regular")
-  pdf.text("Second line of text.")
-```
-
-**Database example:**
-
-```python
 from xaeian.db import Database
 
+# Files — auto extension, context-based paths
+JSON.save("config", {"debug": True, "port": 8080})
+CSV.save("users", [{"name": "Jan", "age": 30}, {"name": "Anna", "age": 25}])
+
+# Time — parse anything, arithmetic with strings
+t = Time("2025-03-01") + "2w 3d"
+t.round("w")                       # Monday 00:00
+t.to("iso")                        # "2025-03-17T00:00:00+01:00"
+
+# CRC — encode/decode with Modbus, ISO, custom
+frame = crc16_modbus.encode(b"\x01\x03\x00\x00\x00\x0A")
+assert crc16_modbus.decode(frame) is not None
+
+# String tools
+split_str('a,"b,c",d', sep=",")    # ['a', '"b,c"', 'd']
+generate_password(16)               # 'aB3$xY9!mN2@pQ7&'
+
+# Database — sqlite/mysql/postgres, sync/async
 db = Database("sqlite", "app.db")
-db.insert("users", {"name": "Jan", "email": "jan@example.com"})
-user = db.find_one("users", name="Jan")
-users = db.find("users", order="name", limit=10)
-with db.transaction():
-  db.update("users", {"verified": True}, "id = ?", user["id"])
-  db.insert("logs", {"action": "verify", "user_id": user["id"]})
+db.insert("users", {"name": "Jan", "settings": {"theme": "dark"}})
+db.find("users", order="name", limit=10)
+async with db.transaction():
+  db.update("users", {"verified": True}, "id = ?", 42)
+
+# Media — compress, strip metadata
+from xaeian.mf.min import compress
+compress("report.pdf")              # → report-min.pdf
+compress("photos/", max_px=1280)    # → photos-min/ (recursive)
+
+# Logging — colored, rotating
+log = logger("app", file="app.log")
+log.info("started")                 # 2025-03-01 14:32:01 INF started
 ```
+
+## Modules
+
+| Module        | Description                                      | Docs                                             |
+| ------------- | ------------------------------------------------ | ------------------------------------------------ |
+| `files`       | FILE, DIR, PATH, JSON, CSV, INI                  | [xaeian/readme.md](xaeian/readme.md#files)       |
+| `files_async` | Async wrappers via `asyncio.to_thread()`         | [xaeian/readme.md](xaeian/readme.md#files_async) |
+| `table`       | Lightweight tabular ops on `list[dict]`          | [xaeian/readme.md](xaeian/readme.md#table)       |
+| `xstring`     | Split, replace, strip comments, passwords        | [xaeian/readme.md](xaeian/readme.md#xstring)     |
+| `xtime`       | Datetime parsing, arithmetic, rounding           | [xaeian/readme.md](xaeian/readme.md#xtime)       |
+| `colors`      | ANSI 256-color terminal codes                    | [xaeian/readme.md](xaeian/readme.md#colors)      |
+| `log`         | Colored logging with file rotation               | [xaeian/readme.md](xaeian/readme.md#log)         |
+| `crc`         | CRC-8/16/32 with predefined variants             | [xaeian/readme.md](xaeian/readme.md#crc)         |
+| `cstruct`     | Binary struct serialization (C-like)             | [xaeian/readme.md](xaeian/readme.md#cstruct)     |
+| `cmd`         | Shell command helpers                            | [xaeian/readme.md](xaeian/readme.md#cmd)         |
+| `serial_port` | Serial communication with colored output         | [xaeian/readme.md](xaeian/readme.md#serial_port) |
+| `cbash`       | Embedded device console protocol                 | [xaeian/readme.md](xaeian/readme.md#cbash)       |
+| `mf`          | Compress, convert, strip metadata (PDF & images) | [xaeian/mf/readme.md](xaeian/mf/readme.md)       |
+| `db`          | Database abstraction (SQLite, MySQL, PostgreSQL) | [xaeian/db/readme.md](xaeian/db/readme.md)       |
+| `eda`         | E-series, KiCad production export                | [xaeian/eda/readme.md](xaeian/eda/readme.md)     |
+| `cli`         | tree, dupes, wifi scripts                        | [xaeian/cli/readme.md](xaeian/cli/readme.md)     |

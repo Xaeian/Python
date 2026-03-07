@@ -1,5 +1,11 @@
 ## Changelog `xaeian`
 
+## `0.3.0` Electronics & fixes
+
+- `elc`: E-series, VConv divider finder, KiCad production export
+- `mf/ico.py`: multi-size `.ico` generator
+- Fixes: `crc` pretabulated reflectIn, `table.aggregate` type guard, `img_compress` inplace ext change
+
 ## `0.2.0` New features
 
 - `files.py`: extended `PATH`, `DIR`, `FILE` & new `CSV.load_vectors(group_by=)`

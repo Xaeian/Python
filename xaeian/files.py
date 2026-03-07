@@ -59,6 +59,14 @@ def get_context() -> Config:
   """Get current configuration for this context/thread."""
   return _context.get()
 
+def set_context(**overrides) -> Config:
+  """Set global file context configuration."""
+  cfg = get_context()
+  new_cfg = replace(cfg, **overrides)
+  if new_cfg.root_path is None: new_cfg = replace(new_cfg, root_path=_default_root_path())
+  _context.set(new_cfg)
+  return new_cfg
+
 @contextmanager
 def file_context(**overrides: Any):
   """Temporarily override configuration within a block."""
@@ -902,7 +910,7 @@ class JSON:
       file.write("\n")
 
   @staticmethod
-  def smart(obj, indent: int = 2, max_line: int = 100, array_wrap: int = 10) -> str:
+  def smart(obj, indent:int=2, max_line:int=100, array_wrap:int=10, compact_dict:bool=True) -> str:
     """Format JSON with smart inline/multiline decisions."""
     def is_primitive(v):
       return v is None or isinstance(v, (bool, int, float, str))
@@ -910,6 +918,8 @@ class JSON:
       return isinstance(v, list) and v and all(isinstance(x, (int, float)) for x in v)
     def is_2d_numeric(v):
       return isinstance(v, list) and v and all(is_numeric_array(row) for row in v)
+    def is_flat_dict(v):
+      return isinstance(v, dict) and v and all(is_primitive(val) for val in v.values())
     def compact(v):
       return json.dumps(v, separators=(',', ':'))
     def fits_line(v):
@@ -938,6 +948,21 @@ class JSON:
       pad_inner = ' ' * ((depth + 1) * indent)
       rows = [format_numeric_row(row, pad_inner) for row in arr]
       return '[\n' + pad_inner + (',\n' + pad_inner).join(rows) + '\n' + pad + ']'
+    def format_flat_dict(d, depth):
+      pad = ' ' * (depth * indent)
+      pad_inner = ' ' * ((depth + 1) * indent)
+      entries = [f'{json.dumps(k)}: {json.dumps(v)}' for k, v in d.items()]
+      lines, current, length = [], [], 0
+      for entry in entries:
+        added = len(entry) + (2 if current else 0)
+        if current and length + added > max_line:
+          lines.append(', '.join(current))
+          current, length = [entry], len(entry)
+        else:
+          current.append(entry)
+          length += added
+      if current: lines.append(', '.join(current))
+      return '{\n' + pad_inner + (',\n' + pad_inner).join(lines) + '\n' + pad + '}'
     def fmt(v, depth=0):
       pad = ' ' * (depth * indent)
       pad_inner = ' ' * ((depth + 1) * indent)
@@ -952,6 +977,7 @@ class JSON:
       if isinstance(v, dict):
         if not v: return '{}'
         if fits_line(v): return json.dumps(v)
+        if compact_dict and is_flat_dict(v): return format_flat_dict(v, depth)
         items = []
         for key, val in v.items():
           formatted_val = fmt(val, depth + 1)
@@ -961,14 +987,14 @@ class JSON:
     return fmt(obj)
 
   @staticmethod
-  def save_smart(path: str, content: Any, max_line: int = 100, array_wrap: int = 10) -> None:
+  def save_smart(path: str, content: Any, max_line: int = 100, array_wrap: int = 10, compact_dict: bool = True) -> None:
     """Save JSON with smart formatting."""
     cfg = get_context()
     path = ensure_suffix(path, ".json")
     path = PATH.resolve(path, read=False)
     DIR.ensure(path, is_file=True)
     with open(path, "w", encoding=cfg.encoding) as file:
-      file.write(JSON.smart(content, max_line=max_line, array_wrap=array_wrap))
+      file.write(JSON.smart(content, max_line=max_line, array_wrap=array_wrap, compact_dict=compact_dict))
 
 #------------------------------------------------------------------------- Files (bound context)
 

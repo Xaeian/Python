@@ -43,8 +43,8 @@ from .files import (
 )
 
 from .crc import CRC
-from .colors import Color, Ico
 from .log import logger
+from .colors import Color, Print, Ico
 
 __all__ = [
   "__version__",
@@ -56,12 +56,19 @@ __all__ = [
   "generate_password",
   "file_context", "Files",
   "PATH", "DIR", "FILE", "INI", "CSV", "JSON",
-  "CRC",
-  "Color", "Ico", "logger",
+  "CRC", "logger",
+  "Color", "Print", "Ico", 
 ]
 
 try:
   from .xtime import Time, TimeInput, time_to
   __all__ += ["Time", "TimeInput", "time_to"]
+except Exception:
+  pass
+
+try:
+  from .serial_port import SerialPort, serial_scan
+  from .cbash import CBash
+  __all__ += ["SerialPort", "CBash", "serial_scan"]
 except Exception:
   pass

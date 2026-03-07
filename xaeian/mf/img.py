@@ -329,7 +329,10 @@ def img_compress(
     # Build final output path
     stem = os.path.splitext(os.path.basename(filepath))[0]
     if is_single and out_path is not None:
-      final = out_path
+      if inplace:
+        final = os.path.join(os.path.dirname(filepath), f"{stem}{ext}")
+      else:
+        final = out_path
     elif is_single:
       final = os.path.join(os.path.dirname(filepath), f"{stem}-min{ext}")
     else:
@@ -338,6 +341,9 @@ def img_compress(
     DIR.ensure(final)
     with open(final, "wb") as f:
       f.write(data)
+    # Inplace: remove original if extension changed
+    if inplace and final != filepath and os.path.isfile(filepath):
+      os.remove(filepath)
     orig_kB = os.path.getsize(filepath) // 1024
     new_kB = len(data) // 1024
     results.append({

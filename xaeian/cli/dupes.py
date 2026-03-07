@@ -1,4 +1,4 @@
-# xaeian/scr/dupes.py
+# xaeian/cli/dupes.py
 
 """
 Duplicate file finder -- hash-based with optional ZIP scanning.
@@ -6,7 +6,7 @@ Duplicate file finder -- hash-based with optional ZIP scanning.
 Uses SHA-256 by default, groups by size first for speed.
 
 Example:
-  >>> from xaeian.scr.dupes import find_dupes
+  >>> from xaeian.cli.dupes import find_dupes
   >>> groups = find_dupes("photos/")
   >>> groups = find_dupes("archive/", zips=True, min_size=1024)
 """
@@ -122,11 +122,11 @@ def find_dupes(
 
 EXAMPLES = """
 examples:
-  py -m xaeian.scr.dupes photos/                   Find duplicates
-  py -m xaeian.scr.dupes docs/ --zips              Include ZIP contents
-  py -m xaeian.scr.dupes . --min-size 1024         Skip files < 1 kB
-  py -m xaeian.scr.dupes . --algo md5              Use MD5 (faster)
-  py -m xaeian.scr.dupes . -o report.json          Save JSON report
+  py -m xaeian.cli.dupes photos/                   Find duplicates
+  py -m xaeian.cli.dupes docs/ --zips              Include ZIP contents
+  py -m xaeian.cli.dupes . --min-size 1024         Skip files < 1 kB
+  py -m xaeian.cli.dupes . --algo md5              Use MD5 (faster)
+  py -m xaeian.cli.dupes . -o report.json          Save JSON report
 """
 
 if __name__ == "__main__":
