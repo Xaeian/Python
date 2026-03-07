@@ -58,21 +58,21 @@ log.info("started")  # 2025-03-01 14:32:01 INF started
 
 ## Modules
 
-| Module        | Description                                      | Docs                                             |
-| ------------- | ------------------------------------------------ | ------------------------------------------------ |
-| `files`       | FILE, DIR, PATH, JSON, CSV, INI                  | [xaeian/readme.md](xaeian/readme.md#files)       |
-| `files_async` | Async wrappers via `asyncio.to_thread()`         | [xaeian/readme.md](xaeian/readme.md#files_async) |
-| `table`       | Lightweight tabular ops on `list[dict]`          | [xaeian/readme.md](xaeian/readme.md#table)       |
-| `xstring`     | Split, replace, strip comments, passwords        | [xaeian/readme.md](xaeian/readme.md#xstring)     |
-| `xtime`       | Datetime parsing, arithmetic, rounding           | [xaeian/readme.md](xaeian/readme.md#xtime)       |
-| `colors`      | ANSI 256-color terminal codes                    | [xaeian/readme.md](xaeian/readme.md#colors)      |
-| `log`         | Colored logging with file rotation               | [xaeian/readme.md](xaeian/readme.md#log)         |
-| `crc`         | CRC-8/16/32 with predefined variants             | [xaeian/readme.md](xaeian/readme.md#crc)         |
-| `cstruct`     | Binary struct serialization (C-like)             | [xaeian/readme.md](xaeian/readme.md#cstruct)     |
-| `cmd`         | Shell command helpers                            | [xaeian/readme.md](xaeian/readme.md#cmd)         |
-| `serial_port` | Serial communication with colored output         | [xaeian/readme.md](xaeian/readme.md#serial_port) |
-| `cbash`       | Embedded device console protocol                 | [xaeian/readme.md](xaeian/readme.md#cbash)       |
-| `mf`          | Compress, convert, strip metadata (PDF & images) | [xaeian/mf/readme.md](xaeian/mf/readme.md)       |
-| `db`          | Database abstraction (SQLite, MySQL, PostgreSQL) | [xaeian/db/readme.md](xaeian/db/readme.md)       |
-| `eda`         | E-series, KiCad production export                | [xaeian/eda/readme.md](xaeian/eda/readme.md)     |
-| `cli`         | tree, dupes, wifi scripts                        | [xaeian/cli/readme.md](xaeian/cli/readme.md)     |
+| Module        | Description                                        | Docs                                             |
+| ------------- | -------------------------------------------------- | ------------------------------------------------ |
+| `files`       | FILE, DIR, PATH, JSON, CSV, INI                    | [xaeian/readme.md](xaeian/readme.md#files)       |
+| `files_async` | Async wrappers via `asyncio.to_thread()`           | [xaeian/readme.md](xaeian/readme.md#files_async) |
+| `table`       | Lightweight tabular ops on `list[dict]`            | [xaeian/readme.md](xaeian/readme.md#table)       |
+| `xstring`     | Split, replace, strip comments, passwords          | [xaeian/readme.md](xaeian/readme.md#xstring)     |
+| `xtime`       | Datetime parsing, arithmetic, rounding             | [xaeian/readme.md](xaeian/readme.md#xtime)       |
+| `colors`      | ANSI 256-color terminal codes                      | [xaeian/readme.md](xaeian/readme.md#colors)      |
+| `log`         | Colored logging with file rotation                 | [xaeian/readme.md](xaeian/readme.md#log)         |
+| `crc`         | CRC-8/16/32 with predefined variants               | [xaeian/readme.md](xaeian/readme.md#crc)         |
+| `cstruct`     | Binary struct serialization _(C-like)_             | [xaeian/readme.md](xaeian/readme.md#cstruct)     |
+| `cmd`         | Shell command helpers                              | [xaeian/readme.md](xaeian/readme.md#cmd)         |
+| `serial_port` | Serial communication with colored output           | [xaeian/readme.md](xaeian/readme.md#serial_port) |
+| `cbash`       | Embedded device console protocol                   | [xaeian/readme.md](xaeian/readme.md#cbash)       |
+| `mf`          | Compress, convert, strip metadata _(PDF & images)_ | [xaeian/mf/readme.md](xaeian/mf/readme.md)       |
+| `db`          | Database abstraction _(SQLite, MySQL, PostgreSQL)_ | [xaeian/db/readme.md](xaeian/db/readme.md)       |
+| `eda`         | E-series, KiCad production export                  | [xaeian/eda/readme.md](xaeian/eda/readme.md)     |
+| `cli`         | tree, dupes, wifi scripts                          | [xaeian/cli/readme.md](xaeian/cli/readme.md)     |
