@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xaeian"
-version = "0.2.0"
+version = "0.3.0"
 description = "Python utilities for files, strings, time, serial, structs, and database"
 readme = "readme.md"
 license = {text = "MIT"}

@@ -21,7 +21,7 @@ Example:
   >>> from xaeian.xtime import Time
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __repo__ = "Xaeian/Python"
 __python__ = ">=3.12"
 __description__ = "Python utilities for files, strings, time, serial, structs, and database"
