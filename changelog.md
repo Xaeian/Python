@@ -1,5 +1,9 @@
 ## Changelog `xaeian`
 
+## `0.4.1` Fix
+
+- `eda`: added `__extras__`, exposed `Simulation`/`parse_output`
+
 ## `0.4.0` Plot, DSP & Spice
 
 - `plot`: fluent matplotlib wrapper, stacked panels, twinx, auto datetime

@@ -28,7 +28,7 @@ Example:
   >>> from xaeian.plot import Plot
 """
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 __repo__ = "Xaeian/Python"
 __python__ = ">=3.12"
 __description__ = "Python utilities for files, strings, time, serial, structs, media, electronics, plotting, and database and more..."

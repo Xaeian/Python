@@ -1,4 +1,4 @@
-# `xaeian`
+# Xaeian
 
 Python utilities. Zero dependencies for core. Optional extras for time, serial, media, database and more...
 
@@ -10,9 +10,10 @@ pip install xaeian[time]      # + pytz, tzlocal
 pip install xaeian[serial]    # + pyserial
 pip install xaeian[plot]      # + matplotlib
 pip install xaeian[dsp]       # + scipy
-pip install xaeian[mf]        # + pypdf, PyMuPDF, Pillow
 pip install xaeian[db]        # + pymysql, psycopg2
 pip install xaeian[db-async]  # + aiomysql, asyncpg, aiosqlite
+pip install xaeian[mf]        # + pypdf, PyMuPDF, Pillow
+pip install xaeian[eda]       # + sexpdata, pypdf, PyMuPDF
 pip install xaeian[all]       # everything
 ```
 
@@ -27,22 +28,27 @@ from xaeian.db import Database
 # Files: auto extension, context-based paths
 JSON.save("config", {"debug": True, "port": 8080})
 CSV.save("users", [{"name": "Jan", "age": 30}, {"name": "Anna", "age": 25}])
+
 # Time: parse anything, arithmetic with strings
 t = Time("2025-03-01") + "2w 3d"
 t.round("w") # Monday 00:00
 t.to("iso") # "2025-03-17T00:00:00+01:00"
+
 # CRC: encode/decode with Modbus, ISO, custom
 frame = crc16_modbus.encode(b"\x01\x03\x00\x00\x00\x0A")
 assert crc16_modbus.decode(frame) is not None
+
 # String tools
 split_str('a,"b,c",d', sep=",") # ['a', '"b,c"', 'd']
 generate_password(16) # 'aB3$xY9!mN2@pQ7&'
+
 # Database: sqlite/mysql/postgres, sync/async
 db = Database("sqlite", "app.db")
 db.insert("users", {"name": "Jan", "settings": {"theme": "dark"}})
 db.find("users", order="name", limit=10)
 async with db.transaction():
   db.update("users", {"verified": True}, "id = ?", 42)
+
 # Plot: fluent, stacked panels, auto datetime
 from xaeian.plot import Plot
 (Plot(theme="dark")
@@ -51,15 +57,18 @@ from xaeian.plot import Plot
   .line(t, hum, "Humidity [%]")
   .title("Sensors")
   .save("dashboard.png"))
+
 # DSP: immutable signals, filters, FFT, vibration metrics
 from xaeian.dsp import Signal
 sig = Signal.from_accel(raw_x, fs=6666, bits=16, g_range=2)
 clean = sig.highpass(10).lowpass(500)
 print(f"RMS:{clean.rms:.4f}  peak_freq:{clean.fft().peak_freq:.0f}Hz")
+
 # Media: compress, strip metadata
 from xaeian.mf.min import compress
 compress("report.pdf") # → report-min.pdf
 compress("photos/", max_px=1280) # → photos-min/ (recursive)
+
 # Logging: colored, rotating
 log = logger("app", file="app.log")
 log.info("started") # 2025-03-01 14:32:01 INF started

@@ -23,6 +23,7 @@ try:
   from sexpdata import loads
 except ImportError:
   raise ImportError("Install with: pip install xaeian[eda]")
+
 from typing import Literal
 from ..files import FILE, DIR, CSV, PATH
 from ..colors import Color, Print
