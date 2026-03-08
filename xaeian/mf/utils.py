@@ -9,10 +9,14 @@ PDF_EXTS = {".pdf"}
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".tif", ".avif"}
 
 def require_file(path:str, label:str="File") -> str:
-  """@brief Resolve to absolute path and verify file exists.
-  @param[in] path   File path to validate.
-  @param[in] label  Label for error message (e.g. "PDF", "Image").
-  @return Absolute path.
+  """Resolve to absolute path and verify file exists.
+
+  Args:
+    path: File path to validate.
+    label: Label for error message (e.g. "PDF", "Image").
+
+  Returns:
+    Absolute path.
   """
   path = os.path.abspath(path)
   if not os.path.isfile(path):
@@ -20,15 +24,18 @@ def require_file(path:str, label:str="File") -> str:
   return path
 
 def resolve_dst(src:str, dst:str|None, inplace:bool, suffix:str) -> str:
-  """@brief Resolve output path — common 3-way pattern.
+  """Resolve output path — common 3-way pattern.
 
   Priority: explicit `dst` > `inplace` (overwrite) > auto-suffix.
 
-  @param[in] src      Absolute source path.
-  @param[in] dst      Explicit destination or None.
-  @param[in] inplace  Overwrite source when `dst` is None.
-  @param[in] suffix   Auto-suffix without dash (e.g. "min", "nometa").
-  @return Resolved absolute output path.
+  Args:
+    src: Absolute source path.
+    dst: Explicit destination or None.
+    inplace: Overwrite source when `dst` is None.
+    suffix: Auto-suffix without dash (e.g. "min", "nometa").
+
+  Returns:
+    Resolved absolute output path.
   """
   if dst is not None:
     out = os.path.abspath(dst)

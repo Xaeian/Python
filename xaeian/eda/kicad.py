@@ -3,7 +3,7 @@
 """
 KiCad production file generator.
 
-Automates BOM, gerber, CPL and PDF layout export via ``kicad-cli``.
+Automates BOM, gerber, CPL and PDF layout export via `kicad-cli`.
 
 Example:
   >>> from xaeian.eda.kicad import KiCad

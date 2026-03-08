@@ -1,8 +1,8 @@
 """
-Lightweight tabular operations on ``list[dict]`` — pandas-free.
+Lightweight tabular operations on `list[dict]` — pandas-free.
 
-Zero dependencies. Works with data from ``CSV.load()``, ``JSON.load()``
-or any other source that produces ``list[dict]``.
+Zero dependencies. Works with data from `CSV.load()`, `JSON.load()`
+or any other source that produces `list[dict]`.
 
 Filtering and lookup:
   `where`, `first`, `take`
@@ -57,14 +57,14 @@ def where(rows:Rows, predicate:Callable[[dict], bool]) -> Rows:
   return [r for r in rows if predicate(r)]
 
 def first(rows:Rows, predicate:Callable[[dict], bool]) -> dict | None:
-  """Return first row matching predicate, or ``None``."""
+  """Return first row matching predicate, or `None`."""
   for r in rows:
     if predicate(r): return r
   return None
 
 def take(rows:Rows, n:int, *, offset:int=0) -> Rows:
   """
-  Return up to ``n`` rows starting from ``offset``.
+  Return up to `n` rows starting from `offset`.
 
   Example:
     >>> take(rows, 10, offset=20)  # rows 20..29
@@ -94,7 +94,7 @@ def exclude(rows:Rows, *cols:str) -> Rows:
 
 def rename(rows:Rows, mapping:dict[str, str]) -> Rows:
   """
-  Rename columns. ``mapping`` is ``{old_name: new_name}``.
+  Rename columns. `mapping` is `{old_name: new_name}`.
 
   Example:
     >>> rename(rows, {"Ref": "Designator", "Pacage": "Footprint"})
@@ -140,7 +140,7 @@ def sort_by(rows:Rows, key:Key, *, reverse:bool=False) -> Rows:
   """
   Sort rows by column or callable.
 
-  For multi-key: ``sort_by(rows, lambda r: (r["dept"], -r["salary"]))``
+  For multi-key: `sort_by(rows, lambda r: (r["dept"], -r["salary"]))`
   """
   return sorted(rows, key=_getter(key), reverse=reverse)
 
@@ -150,7 +150,7 @@ def unique(rows:Rows, key:Key|None=None) -> Rows:
 
   Args:
     key: Column or callable to deduplicate on.
-      ``None`` deduplicates on full row content.
+      `None` deduplicates on full row content.
 
   Example:
     >>> unique(rows, "id")
@@ -185,7 +185,7 @@ def group_by(rows:Rows, key:Key) -> dict[Any, Rows]:
 
 def count_by(rows:Rows, key:Key) -> dict[Any, int]:
   """
-  Count occurrences per key value (like ``value_counts``).
+  Count occurrences per key value (like `value_counts`).
 
   Example:
     >>> count_by(rows, "status")
@@ -204,11 +204,11 @@ def aggregate(
 
   Args:
     keys: Column name(s) to group by.
-    agg: ``{column: aggregation}`` where aggregation is one of:
-      ``"first"``, ``"last"``, ``"sum"``, ``"count"``,
-      ``"min"``, ``"max"``, ``"mean"``,
-      ``"join"`` or ``"join:<sep>"``,
-      or ``callable(values_list) -> value``.
+    agg: `{column: aggregation}` where aggregation is one of:
+      `"first"`, `"last"`, `"sum"`, `"count"`,
+      `"min"`, `"max"`, `"mean"`,
+      `"join"` or `"join:<sep>"`,
+      or `callable(values_list) -> value`.
 
   Example:
     >>> aggregate(rows, ["Manufacturer", "Code"], {
@@ -272,8 +272,8 @@ def join(
 
   Args:
     on: Key column in left table.
-    right_on: Key column in right table (defaults to ``on``).
-    how: Join type — ``"inner"``, ``"left"``, ``"right"``, ``"outer"``.
+    right_on: Key column in right table (defaults to `on`).
+    how: Join type — `"inner"`, `"left"`, `"right"`, `"outer"`.
     lsuffix: Suffix for overlapping left columns.
     rsuffix: Suffix for overlapping right columns.
 
@@ -317,7 +317,7 @@ def join(
 
 def concat(*tables:Rows) -> Rows:
   """
-  Vertically stack tables. Missing columns filled with ``None``.
+  Vertically stack tables. Missing columns filled with `None`.
 
   Example:
     >>> concat(batch_1, batch_2, batch_3)
@@ -369,8 +369,8 @@ def describe(rows:Rows, col:str) -> dict[str, Any]:
   Summary statistics for a single column.
 
   Returns:
-    Dict with ``count``, ``nulls``, ``unique``, ``min``, ``max``,
-    and ``mean`` (for numeric columns, else ``None``).
+    Dict with `count`, `nulls`, `unique`, `min`, `max`,
+    and `mean` (for numeric columns, else `None`).
 
   Example:
     >>> describe(rows, "salary")
@@ -387,3 +387,149 @@ def describe(rows:Rows, col:str) -> dict[str, Any]:
     "max": max(non_null) if non_null else None,
     "mean": (sum(nums) / len(nums)) if nums else None,
   }
+  
+#------------------------------------------------------------------------------------- Markdown
+
+def _md_esc(v:Any) -> str:
+  """Escape value for markdown cell."""
+  if v is None: return ""
+  return str(v).replace("|", r"\|").replace("\n", "<br>")
+
+def _md_auto_aligns(data:list[list[str]], ncols:int) -> list[str]:
+  """Auto-detect column alignment: >=70% numeric → right, else left."""
+  aligns = []
+  for col in range(ncols):
+    vals = [r[col] for r in data if col < len(r) and r[col]]
+    if not vals:
+      aligns.append("<")
+      continue
+    num = 0
+    for v in vals:
+      try:
+        float(v.replace(" ", "").replace(",", "."))
+        num += 1
+      except ValueError:
+        pass
+    aligns.append(">" if num / len(vals) >= 0.7 else "<")
+  return aligns
+
+_MD_ALIGN = {
+  "<": "<", "l": "<", "left": "<",
+  "^": "^", "c": "^", "center": "^",
+  ">": ">", "r": ">", "right": ">",
+}
+
+def _md_render(hdr:list[str], data:list[list[str]], aligns:list[str]|None) -> str:
+  """Render markdown table from escaped header + data cells."""
+  if not hdr: return ""
+  ncols = len(hdr)
+  for r in data:
+    while len(r) < ncols: r.append("")
+  if aligns is None:
+    aligns = _md_auto_aligns(data, ncols)
+  else:
+    aligns = [_MD_ALIGN.get(str(a).strip().lower(), "<") for a in aligns]
+    while len(aligns) < ncols: aligns.append("<")
+    aligns = aligns[:ncols]
+  widths = [max(3, len(h)) for h in hdr]
+  for r in data:
+    for i in range(ncols):
+      widths[i] = max(widths[i], len(r[i]))
+  def fmt(i, txt):
+    a, w = aligns[i], widths[i]
+    if a == ">": return txt.rjust(w)
+    if a == "^": return txt.center(w)
+    return txt.ljust(w)
+  def sep(i):
+    a, w = aligns[i], widths[i]
+    if a == "<": return ":" + "-" * (w - 1)
+    if a == "^": return ":" + "-" * (w - 2) + ":"
+    if a == ">": return "-" * (w - 1) + ":"
+    return "-" * w
+  lines = [
+    "| " + " | ".join(fmt(i, hdr[i]) for i in range(ncols)) + " |",
+    "| " + " | ".join(sep(i) for i in range(ncols)) + " |",
+  ]
+  for r in data:
+    lines.append("| " + " | ".join(fmt(i, r[i]) for i in range(ncols)) + " |")
+  return "\n".join(lines)
+
+def markdown(
+  rows: Rows,
+  cols: list[str]|None = None,
+  header: list[str]|None = None,
+  aligns: list[str]|None = None,
+  exclude: list[str]|None = None,
+) -> str:
+  """
+  Render `list[dict]` as markdown table.
+
+  Args:
+    rows: Row dicts.
+    cols: Column keys to include (default: all from first row).
+    header: Display names for columns (default: same as `cols`).
+    aligns: Per-column alignment: `"<"`/`">"`/`"^"` or
+      `"left"`/`"right"`/`"center"`. `None` = auto-detect.
+    exclude: Column keys to drop.
+
+  Returns:
+    Markdown table string.
+
+  Example:
+    >>> rows = [{"name": "R1", "value": 10}, {"name": "R2", "value": 22}]
+    >>> print(markdown(rows))
+    | name | value |
+    | :--- | ----: |
+    | R1   |    10 |
+    | R2   |    22 |
+    >>> print(markdown(rows, cols=["value", "name"], header=["Val", "Ref"]))
+    |  Val | Ref |
+    | ---: | :-- |
+    |   10 | R1  |
+    |   22 | R2  |
+  """
+  if not rows: return ""
+  if cols is None: cols = list(rows[0].keys())
+  if exclude:
+    drop = set(exclude)
+    cols = [c for c in cols if c not in drop]
+  hdr = [_md_esc(h) for h in (header if header else cols)]
+  while len(hdr) < len(cols): hdr.append("")
+  data = [[_md_esc(r.get(c)) for c in cols] for r in rows]
+  return _md_render(hdr[:len(cols)], data, aligns)
+
+def markdown_raw(
+  rows: list[list],
+  header: bool = True,
+  aligns: list[str]|None = None,
+) -> str:
+  """
+  Render `list[list]` as markdown table.
+
+  For raw data from `CSV.load_raw()` or similar sources.
+
+  Args:
+    rows: List of rows (each row is a list of values).
+    header: When `True`, first row is used as column headers.
+    aligns: Per-column alignment (see `markdown`). `None` = auto-detect.
+
+  Returns:
+    Markdown table string.
+
+  Example:
+    >>> raw = [["Name", "Ohm"], ["R1", "10k"], ["R2", "22k"]]
+    >>> print(markdown_raw(raw))
+    | Name | Ohm |
+    | :--- | :-- |
+    | R1   | 10k |
+    | R2   | 22k |
+  """
+  if not rows: return ""
+  if header:
+    hdr = [_md_esc(c) for c in rows[0]]
+    data = [[_md_esc(c) for c in r] for r in rows[1:]]
+  else:
+    ncols = max(len(r) for r in rows)
+    hdr = [_md_esc(str(i)) for i in range(ncols)]
+    data = [[_md_esc(c) for c in r] for r in rows]
+  return _md_render(hdr, data, aligns)

@@ -1,9 +1,16 @@
 ## Changelog `xaeian`
 
+## `0.4.0` Plot, DSP & Spice
+
+- `plot`: fluent matplotlib wrapper, stacked panels, twinx, auto datetime
+- `dsp`: immutable Signal with SOS filters, FFT, vibration metrics, operators
+- `eda/spice`: ngspice runner with template substitution, caching, parallel sweep
+- `table`: `markdown()`, `markdown_raw()`
+
 ## `0.3.0` Electronics & fixes
 
 - `elc`: E-series, VConv divider finder, KiCad production export
-- `mf/ico.py`: multi-size `.ico` generator
+- `mf.ico.py`: multi-size `.ico` generator
 - Fixes: `crc` pretabulated reflectIn, `table.aggregate` type guard, `img_compress` inplace ext change
 
 ## `0.2.0` New features

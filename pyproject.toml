@@ -4,24 +4,26 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xaeian"
-version = "0.3.0"
-description = "Python utilities for files, strings, time, serial, structs, and database"
+version = "0.4.0"
+description = "Python utilities for files, strings, time, serial, structs, media, electronics, plotting, and database and more..."
 readme = "readme.md"
 license = {text = "MIT"}
 requires-python = ">=3.12"
 authors = [{name = "Xaeian"}]
-keywords = ["utilities", "files", "database", "serial", "crc", "struct"]
+keywords = ["utilities", "files", "database", "serial", "crc", "struct", "media", "kicad", "plot", "matplotlib", "ngspice", "spice", "dsp", "signal", "filter", "fft", "vibration"]
 dependencies = []
 
 [project.optional-dependencies]
 db = ["psycopg2-binary", "pymysql"]
 db-async = ["aiomysql", "aiosqlite", "asyncpg"]
+dsp = ["scipy"]
 eda = ["PyMuPDF", "pypdf", "sexpdata"]
 mf = ["Pillow", "PyMuPDF", "pypdf"]
 pdf = ["Pillow", "reportlab"]
+plot = ["matplotlib"]
 serial = ["pyserial"]
 time = ["pytz", "tzlocal"]
-all = ["Pillow", "PyMuPDF", "aiomysql", "aiosqlite", "asyncpg", "psycopg2-binary", "pymysql", "pypdf", "pyserial", "pytz", "reportlab", "sexpdata", "tzlocal"]
+all = ["Pillow", "PyMuPDF", "aiomysql", "aiosqlite", "asyncpg", "matplotlib", "psycopg2-binary", "pymysql", "pypdf", "pyserial", "pytz", "reportlab", "scipy", "sexpdata", "tzlocal"]
 
 [project.urls]
 Repository = "https://github.com/Xaeian/Python"

@@ -1,12 +1,12 @@
-# xaeian.mf - Media Files
+# `xaeian.mf`
 
-Compress, convert, and strip metadata from PDFs and images.
+Media Files: Compress, convert, and strip metadata from PDFs and images.
 
 **Dependencies:** `pypdf`, `PyMuPDF` _(fitz)_, `Pillow`. PDF compression requires [Ghostscript](https://www.ghostscript.com/).
 
 ## Quick start
 
-```python
+```py
 from xaeian.mf.min import compress
 from xaeian.mf.meta import scrub_metadata
 
@@ -24,7 +24,7 @@ Both `compress()` and `scrub_metadata()` auto-detect PDF vs image by extension.
 
 ### `mf.pdf` PDF operations
 
-```python
+```py
 from xaeian.mf.pdf import *
 
 pdf_compress(src, dst=None, level="1.7", settings="/ebook", inplace=False)
@@ -53,7 +53,7 @@ img_scrub_metadata(src, dst=None, inplace=False)
 
 ### `mf.ico` Favicon generation
 
-```python
+```py
 from xaeian.mf.ico import img_to_ico
 
 img_to_ico("logo.png", "favicon.ico", sizes=[16, 32, 48], fit="pad")

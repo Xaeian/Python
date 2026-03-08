@@ -260,10 +260,10 @@ class DIR:
 
     Args:
       path: Directory or file path.
-      is_file: If ``True``, create parent dir. If ``None``, auto-detect:
-        path ending with ``/`` is always a directory; otherwise treated
-        as a file when the last segment contains a dot (e.g. ``data.csv``).
-        Extensionless names like ``Makefile`` need explicit ``is_file=True``.
+      is_file: If `True`, create parent dir. If `None`, auto-detect:
+        path ending with `/` is always a directory; otherwise treated
+        as a file when the last segment contains a dot (e.g. `data.csv`).
+        Extensionless names like `Makefile` need explicit `is_file=True`.
 
     Example:
       >>> DIR.ensure("data/subdir/") # creates data/subdir/

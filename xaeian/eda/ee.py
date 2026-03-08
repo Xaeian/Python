@@ -55,17 +55,17 @@ class VConv:
 
   @staticmethod
   def RDIV(R1:float, R2:float, vref:float=3.3) -> float:
-    """Generic resistor divider: ``Vout = Vref * R1 / (R1 + R2)``"""
+    """Generic resistor divider: `Vout = Vref * R1 / (R1 + R2)`"""
     return vref * (R1 / (R1 + R2))
 
   @staticmethod
   def AOZ1282(R1:float, R2:float, vref:float=0.8) -> float:
-    """AOZ1282 buck: ``Vout = Vref * (1 + R1/R2)``"""
+    """AOZ1282 buck: `Vout = Vref * (1 + R1/R2)`"""
     return vref * (1 + (R1 / R2))
 
   @staticmethod
   def MC34063(R1:float, R2:float, vref:float=1.25) -> float:
-    """MC34063 converter: ``Vout = Vref * (1 + R2/R1)``"""
+    """MC34063 converter: `Vout = Vref * (1 + R2/R1)`"""
     return vref * (1 + (R2 / R1))
 
   @staticmethod
@@ -99,7 +99,7 @@ class VConv:
       limit: Max results to return.
 
     Returns:
-      List of ``(R1_kΩ, R2_kΩ, Vout)`` tuples, best match first.
+      List of `(R1_kΩ, R2_kΩ, Vout)` tuples, best match first.
 
     Example:
       >>> VConv.find(5.0, VConv.AOZ1282)

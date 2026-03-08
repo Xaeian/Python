@@ -1,13 +1,15 @@
 # `xaeian`
 
-Python utilities. Zero dependencies for core. Optional extras for time, serial, media, database.
+Python utilities. Zero dependencies for core. Optional extras for time, serial, media, database and more...
 
 ## Install
 
-```bash
+```sh
 pip install xaeian            # core
 pip install xaeian[time]      # + pytz, tzlocal
 pip install xaeian[serial]    # + pyserial
+pip install xaeian[plot]      # + matplotlib
+pip install xaeian[dsp]       # + scipy
 pip install xaeian[mf]        # + pypdf, PyMuPDF, Pillow
 pip install xaeian[db]        # + pymysql, psycopg2
 pip install xaeian[db-async]  # + aiomysql, asyncpg, aiosqlite
@@ -16,7 +18,7 @@ pip install xaeian[all]       # everything
 
 ## Examples
 
-```python
+```py
 from xaeian import FILE, JSON, CSV, logger, split_str, generate_password
 from xaeian.xtime import Time
 from xaeian.crc import crc16_modbus
@@ -25,35 +27,42 @@ from xaeian.db import Database
 # Files: auto extension, context-based paths
 JSON.save("config", {"debug": True, "port": 8080})
 CSV.save("users", [{"name": "Jan", "age": 30}, {"name": "Anna", "age": 25}])
-
 # Time: parse anything, arithmetic with strings
 t = Time("2025-03-01") + "2w 3d"
-t.round("w")  # Monday 00:00
-t.to("iso")   # "2025-03-17T00:00:00+01:00"
-
+t.round("w") # Monday 00:00
+t.to("iso") # "2025-03-17T00:00:00+01:00"
 # CRC: encode/decode with Modbus, ISO, custom
 frame = crc16_modbus.encode(b"\x01\x03\x00\x00\x00\x0A")
 assert crc16_modbus.decode(frame) is not None
-
 # String tools
-split_str('a,"b,c",d', sep=",")  # ['a', '"b,c"', 'd']
-generate_password(16)            # 'aB3$xY9!mN2@pQ7&'
-
+split_str('a,"b,c",d', sep=",") # ['a', '"b,c"', 'd']
+generate_password(16) # 'aB3$xY9!mN2@pQ7&'
 # Database: sqlite/mysql/postgres, sync/async
 db = Database("sqlite", "app.db")
 db.insert("users", {"name": "Jan", "settings": {"theme": "dark"}})
 db.find("users", order="name", limit=10)
 async with db.transaction():
   db.update("users", {"verified": True}, "id = ?", 42)
-
+# Plot: fluent, stacked panels, auto datetime
+from xaeian.plot import Plot
+(Plot(theme="dark")
+  .line(t, temp, "Temperature [°C]")
+  .panel()
+  .line(t, hum, "Humidity [%]")
+  .title("Sensors")
+  .save("dashboard.png"))
+# DSP: immutable signals, filters, FFT, vibration metrics
+from xaeian.dsp import Signal
+sig = Signal.from_accel(raw_x, fs=6666, bits=16, g_range=2)
+clean = sig.highpass(10).lowpass(500)
+print(f"RMS:{clean.rms:.4f}  peak_freq:{clean.fft().peak_freq:.0f}Hz")
 # Media: compress, strip metadata
 from xaeian.mf.min import compress
-compress("report.pdf")            # → report-min.pdf
-compress("photos/", max_px=1280)  # → photos-min/ (recursive)
-
+compress("report.pdf") # → report-min.pdf
+compress("photos/", max_px=1280) # → photos-min/ (recursive)
 # Logging: colored, rotating
 log = logger("app", file="app.log")
-log.info("started")  # 2025-03-01 14:32:01 INF started
+log.info("started") # 2025-03-01 14:32:01 INF started
 ```
 
 ## Modules
@@ -72,7 +81,9 @@ log.info("started")  # 2025-03-01 14:32:01 INF started
 | `cmd`         | Shell command helpers                              | [xaeian/readme.md](xaeian/readme.md#cmd)         |
 | `serial_port` | Serial communication with colored output           | [xaeian/readme.md](xaeian/readme.md#serial_port) |
 | `cbash`       | Embedded device console protocol                   | [xaeian/readme.md](xaeian/readme.md#cbash)       |
+| `plot`        | Fluent matplotlib wrapper with stacked panels      | [xaeian/readme.md](xaeian/readme.md#plot)        |
+| `dsp`         | Signal processing, SOS filters, FFT, vibration     | [xaeian/readme.md](xaeian/readme.md#dsp)         |
 | `mf`          | Compress, convert, strip metadata _(PDF & images)_ | [xaeian/mf/readme.md](xaeian/mf/readme.md)       |
 | `db`          | Database abstraction _(SQLite, MySQL, PostgreSQL)_ | [xaeian/db/readme.md](xaeian/db/readme.md)       |
-| `eda`         | E-series, KiCad production export                  | [xaeian/eda/readme.md](xaeian/eda/readme.md)     |
+| `eda`         | E-series, KiCad export, NgSpice runner             | [xaeian/eda/readme.md](xaeian/eda/readme.md)     |
 | `cli`         | tree, dupes, wifi scripts                          | [xaeian/cli/readme.md](xaeian/cli/readme.md)     |

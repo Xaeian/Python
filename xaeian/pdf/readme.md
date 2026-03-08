@@ -10,7 +10,7 @@ pip install reportlab svglib pillow
 
 ## Quick Start
 
-```python
+```py
 from xaeian.pdf import PDF, Align
 
 with PDF("output.pdf") as pdf:
@@ -38,7 +38,7 @@ with PDF("output.pdf") as pdf:
 
 ## Custom Fonts
 
-```python
+```py
 pdf = PDF("doc.pdf", font_dir="./font")
 pdf.add_font("Barlow").add_font("Barlow", "Bold")
 pdf.add_font("Barlow", "Italic")
@@ -54,7 +54,7 @@ Built-in fonts _(no registration needed)_: Helvetica, Times, Courier with standa
 
 Cursor origin is top-left, `y` grows downward. Alignment affects how `x` offset is interpreted relative to margins.
 
-```python
+```py
 pdf.cursor(0, 0, "L")  # top-left, left-aligned
 pdf.cursor(0, 0, "R")  # top-right, right-aligned
 pdf.cursor(0, 0, "C")  # top-center
@@ -67,7 +67,7 @@ pdf.move(5, 3)         # relative shift dx=5, dy=3
 
 ## Text
 
-```python
+```py
 # Auto-width (measured)
 pdf.text("Simple text")
 # Fixed width with word wrap
@@ -82,7 +82,7 @@ When both `width` and `height` are specified, font auto-scales down by `0.1pt` s
 
 ## Tables
 
-```python
+```py
 body = [
   ["1", "Widget", "10", "szt", "25,00 zł"],
   ["2", "Gadget", "5", "szt", "50,00 zł"],
@@ -99,7 +99,7 @@ pdf.table(
 
 ### TableBuilder
 
-```python
+```py
 from xaeian.pdf import TableBuilder, TableStyle
 
 style = TableStyle(
@@ -118,7 +118,7 @@ data = builder.build(180, "Barlow", "Regular", 11)
 
 ## Shapes & Lines
 
-```python
+```py
 pdf.color(1, 0, 0)               # RGB fill
 pdf.rect(40, 20)                 # rectangle at cursor
 pdf.color_black()
@@ -132,14 +132,14 @@ pdf.rect(60, 30, thickness=1)    # stroked rectangle
 
 ## Images & SVG
 
-```python
+```py
 pdf.image("photo.png", 60, 40)  # width=60mm, height=40mm
 pdf.svg("icon.svg", 15, 15)
 ```
 
 ## Colors
 
-```python
+```py
 pdf.color(0.2, 0.4, 0.8)    # RGB (0–1)
 pdf.color_hex("#FF6600")  # hex
 pdf.color_grey(0.5, 0.8)    # grey with alpha
@@ -149,7 +149,7 @@ pdf.stroke_color(0, 0, 0)   # stroke/line color
 
 ## Pages
 
-```python
+```py
 pdf = PDF("doc.pdf", width=210, height=297, margin=15)
 pdf.margin(20, 25, 15)  # lr, top, bot
 pdf.new_page()          # page break
@@ -163,7 +163,7 @@ pdf.on_page(header)
 
 ## Metadata & Bookmarks
 
-```python
+```py
 pdf.metadata(title="Report", author="Xaeian")
 pdf.bookmark("Chapter 1", level=0)
 pdf.bookmark("Section 1.1", level=1)
@@ -174,7 +174,7 @@ pdf.link("https://github.com/Xaeian", width=40, height=5)
 
 Default unit is `mm`. Change with `unit` parameter:
 
-```python
+```py
 pdf = PDF("doc.pdf", unit="pt")  # points
 pdf = PDF("doc.pdf", unit="cm")  # centimeters
 ```
@@ -183,7 +183,7 @@ Available: `mm`, `cm`, `in`, `pt`, `px`
 
 ## Page Sizes
 
-```python
+```py
 from xaeian.pdf import A4, A3, A5, LETTER, LEGAL
 
 pdf = PDF("doc.pdf", width=LETTER.width, height=LETTER.height)
@@ -192,7 +192,7 @@ landscape = A4.landscape()
 
 ## Compression
 
-```python
+```py
 from xaeian.mf.pdf import pdf_compress
 
 pdf.save()
@@ -201,7 +201,7 @@ pdf_compress("output.pdf")
 
 ## Style Presets
 
-```python
+```py
 from xaeian.pdf import Styles, TableStyle
 
 # Text presets
