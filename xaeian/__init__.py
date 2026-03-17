@@ -28,7 +28,7 @@ Example:
   >>> from xaeian.db import Database
 """
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 __repo__ = "Xaeian/Python"
 __python__ = ">=3.12"
 __description__ = "Python utilities for files, strings, time, serial, structs, media, electronics, plotting, and database and more..."
@@ -36,7 +36,7 @@ __author__ = "Xaeian"
 __keywords__ = [
   "utilities", "files", "database", "serial", "crc", "struct",
   "media", "kicad", "plot", "matplotlib", "ngspice", "spice",
-  "dsp", "signal", "filter", "fft", "vibration",
+  "dsp", "signal", "filter", "fft", "vibration", "ftp", "sftp"
 ]
 __scripts__ = {
   "xn": "xaeian.__main__:main",
@@ -73,12 +73,6 @@ __all__ = [
   "CRC",
   "logger", "Logger", "Print", "Color", "Ico",
 ]
-
-try:
-  from .sftp import SFTP
-  __all__ += ["SFTP"]
-except Exception:
-  pass
 
 try:
   from .xtime import Time, TimeInput, time_to

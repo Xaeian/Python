@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xaeian"
-version = "0.5.0"
+version = "0.5.1"
 description = "Python utilities for files, strings, time, serial, structs, media, electronics, plotting, and database and more..."
 readme = "readme.md"
 license = {text = "MIT"}
 requires-python = ">=3.12"
 authors = [{name = "Xaeian"}]
-keywords = ["utilities", "files", "database", "serial", "crc", "struct", "media", "kicad", "plot", "matplotlib", "ngspice", "spice", "dsp", "signal", "filter", "fft", "vibration"]
+keywords = ["utilities", "files", "database", "serial", "crc", "struct", "media", "kicad", "plot", "matplotlib", "ngspice", "spice", "dsp", "signal", "filter", "fft", "vibration", "ftp", "sftp"]
 dependencies = []
 
 [project.optional-dependencies]
@@ -22,9 +22,8 @@ mf = ["Pillow", "PyMuPDF", "pypdf"]
 pdf = ["Pillow", "reportlab"]
 plot = ["matplotlib"]
 serial = ["pyserial"]
-sftp = ["paramiko"]
 time = ["pytz", "tzlocal"]
-all = ["Pillow", "PyMuPDF", "aiomysql", "aiosqlite", "asyncpg", "matplotlib", "paramiko", "psycopg2-binary", "pymysql", "pypdf", "pyserial", "pytz", "reportlab", "scipy", "sexpdata", "tzlocal"]
+all = ["Pillow", "PyMuPDF", "aiomysql", "aiosqlite", "asyncpg", "matplotlib", "psycopg2-binary", "pymysql", "pypdf", "pyserial", "pytz", "reportlab", "scipy", "sexpdata", "tzlocal"]
 
 [project.scripts]
 xn = "xaeian.__main__:main"

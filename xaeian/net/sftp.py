@@ -1,4 +1,4 @@
-# xaeian/sftp.py
+# xaeian/net/sftp.py
 
 """
 SFTP/SSH client for deployment and data collection.
@@ -15,8 +15,8 @@ Example:
 import os, stat
 from pathlib import Path
 from typing import Callable
-from .log import Logger, Print
-from .colors import Color as c
+from ..log import Logger, Print
+from ..colors import Color as c
 
 try:
   import paramiko
@@ -27,7 +27,7 @@ __extras__ = ("sftp", ["paramiko"])
 
 #------------------------------------------------------------------------------------------- Types
 
-# (rel_path) -> include?
+# (rel_path) → include?
 Filter   = Callable[[str], bool]
 # (path, done, total): rel for sync/dir, remote for single
 Progress = Callable[[str, int, int], None]
@@ -148,7 +148,7 @@ class SFTP:
     if preserve_mtime:
       mtime = Path(local).stat().st_mtime
       self._sftp.utime(remote, (mtime, mtime))
-    if self.log: self.log.item(f"{c.GREY}{local}{c.END} -> {c.GREY}{remote}{c.END}")
+    if self.log: self.log.item(f"{c.GREY}{local}{c.END} → {c.GREY}{remote}{c.END}")
 
   def get(
     self,
@@ -176,7 +176,7 @@ class SFTP:
     if preserve_mtime:
       rstat = self._sftp.stat(remote)
       os.utime(local, (rstat.st_atime or rstat.st_mtime, rstat.st_mtime))
-    if self.log: self.log.item(f"{c.GREY}{remote}{c.END} -> {c.GREY}{local}{c.END}")
+    if self.log: self.log.item(f"{c.GREY}{remote}{c.END} → {c.GREY}{local}{c.END}")
 
   def remove(self, remote: str):
     """Delete remote file. Silent if not found."""
@@ -234,16 +234,16 @@ class SFTP:
     Args:
       local: Local source directory.
       remote: Remote destination directory.
-      filter: `(rel_path) -> bool`: return `False` to skip.
+      filter: `(rel_path) → bool`: return `False` to skip.
       atomic: Atomic upload per file.
       callback: Per-file progress hook.
     """
     self._require_connected()
     root = Path(local)
     files = [f for f in root.rglob("*") if f.is_file()]
-    if self.log: self.log.inf(f"put_dir {c.CYAN}{len(files)}{c.END} files -> {c.SKY}{remote}{c.END}")
+    if self.log: self.log.inf(f"put_dir {c.CYAN}{len(files)}{c.END} files → {c.SKY}{remote}{c.END}")
     for f in files:
-      rel = str(f.relative_to(root))
+      rel = f.relative_to(root).as_posix()
       if filter and not filter(rel): continue
       self.put(str(f), f"{remote}/{rel}", atomic=atomic, callback=callback, _label=rel)
 
@@ -261,7 +261,7 @@ class SFTP:
     Args:
       remote: Remote source directory.
       local: Local destination directory.
-      filter: `(rel_path) -> bool`: return `False` to skip.
+      filter: `(rel_path) → bool`: return `False` to skip.
       callback: Per-file progress hook.
     """
     self._require_connected()
@@ -280,14 +280,14 @@ class SFTP:
     callback: Progress|None = None,
   ) -> list[Action]:
     """
-    Push local -> remote, skipping unchanged files (mtime + size).
+    Push local → remote, skipping unchanged files (mtime + size).
 
     Args:
       local: Local source directory.
       remote: Remote destination directory.
       delete: Remove remote files absent locally (respects filter).
       dry_run: Plan actions without executing.
-      filter: `(rel_path) -> bool`: return `False` to skip.
+      filter: `(rel_path) → bool`: return `False` to skip.
       callback: Per-file progress hook.
 
     Returns:
@@ -296,7 +296,7 @@ class SFTP:
     self._require_connected()
     root = Path(local)
     local_files = {
-      str(f.relative_to(root)): f
+      f.relative_to(root).as_posix(): f
       for f in root.rglob("*") if f.is_file()
     }
     remote_idx = self._index_remote(remote)
@@ -330,14 +330,14 @@ class SFTP:
     callback: Progress|None = None,
   ) -> list[Action]:
     """
-    Pull remote -> local, skipping unchanged files (mtime + size).
+    Pull remote → local, skipping unchanged files (mtime + size).
 
     Args:
       remote: Remote source directory.
       local: Local destination directory.
       delete: Remove local files absent remotely (respects filter).
       dry_run: Plan actions without executing.
-      filter: `(rel_path) -> bool`: return `False` to skip.
+      filter: `(rel_path) → bool`: return `False` to skip.
       callback: Per-file progress hook.
 
     Returns:
@@ -346,7 +346,7 @@ class SFTP:
     self._require_connected()
     root = Path(local)
     local_idx = (
-      {str(f.relative_to(root)): f for f in root.rglob("*") if f.is_file()}
+      {f.relative_to(root).as_posix(): f for f in root.rglob("*") if f.is_file()}
       if root.exists() else {}
     )
     remote_idx = self._index_remote(remote)
@@ -422,7 +422,7 @@ class SFTP:
   ):
     for attr in self._sftp.listdir_attr(remote):
       rpath = f"{remote}/{attr.filename}"
-      rel = os.path.relpath(rpath, remote_root)
+      rel = rpath[len(remote_root):].lstrip("/")
       lpath = local / rel
       if _is_dir(attr):
         self._get_dir_rec(remote_root, rpath, local, filter, callback)

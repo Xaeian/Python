@@ -1,5 +1,10 @@
 ## Changelog `xaeian`
 
+## `0.5.1` FTP
+
+- `net`: FTP client + `Remote()` factory unifying SFTP and FTP
+- `net/sftp`: fixed remote paths on Windows
+
 ## `0.5.0` SFTP, CLI & scripts
 
 - `sftp`: SFTP/SSH client, push/pull sync, remote exec

@@ -75,7 +75,8 @@ pkt.add(
   Bitfield("flags", [("enabled", 1), ("error", 1), ("mode", 6)]),
   Field(Type.float, "temperature", "°C"),
 )
-raw = pkt.encode({"timestamp": 1234567890, "flags": {"enabled": 1, "error": 0, "mode": 5}, "temperature": 23.5})
+flags = "flags": {"enabled": 1, "error": 0, "mode": 5}
+raw = pkt.encode({"timestamp": 1234567890, "flags": flags, "temperature": 23.5})
 pkt.decode(raw) # {"timestamp": 1234567890, "flags": {...}, "temperature": 23.5}
 
 # Media: compress, strip metadata
@@ -117,11 +118,11 @@ xn ico logo.png -o favicon.ico
 | `cmd`         | Shell command helpers                              | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#cmd)         |
 | `serial_port` | Serial communication with colored output           | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#serial_port) |
 | `cbash`       | Embedded device console protocol                   | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#cbash)       |
-| `sftp`        | SFTP/SSH client, sync push/pull, remote exec       | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#sftp)        |
 | `plot`        | Fluent matplotlib wrapper with stacked panels      | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#plot)        |
 | `dsp`         | Signal processing, SOS filters, FFT, vibration     | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#dsp)         |
 | `db`          | Database abstraction _(SQLite, MySQL, PostgreSQL)_ | [xaeian/db/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/db/readme.md)       |
 | `mf`          | Compress, convert, strip metadata _(PDF & images)_ | [xaeian/mf/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/mf/readme.md)       |
 | `pdf`         | PDF document generation _(reportlab)_              | [xaeian/pdf/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/pdf/readme.md)     |
 | `eda`         | E-series, KiCad export, NgSpice runner             | [xaeian/eda/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/eda/readme.md)     |
+| `net`         | Network clients _(SFTP, FTP)_                      | [xaeian/net/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/net/readme.md)     |
 | `cli`         | tree, dupes, wifi scripts                          | [xaeian/cli/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/cli/readme.md)     |
