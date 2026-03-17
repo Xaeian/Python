@@ -18,9 +18,11 @@ CLI:
 """
 
 import ast, sys
-from xaeian import FILE, DIR, PATH, Color, Ico
+from xaeian import FILE, DIR, PATH, Print, Color as c
 
-#----------------------------------------------------------------------------------- Internals
+p = Print()
+
+#------------------------------------------------------------------------------------ Internals
 
 def _parse_extras(node) -> dict[str, list[str]]:
   """Extract extras from AST node value (tuple or dict)."""
@@ -37,7 +39,6 @@ def _parse_extras(node) -> dict[str, list[str]]:
         result[str(k.value)] = pkgs
     return result
   return {}
-
 
 def _scan_extras_from_file(path:str) -> dict[str, list[str]]:
   """Parse `__extras__` from a Python file."""
@@ -67,7 +68,6 @@ def scan_package(pkg_dir:str) -> tuple[set[str], set[str]]:
       subpackages.add(name)
   return modules, subpackages
 
-
 def build_extras(pkg_dir:str, modules:set[str], subpackages:set[str]) -> dict[str, list[str]]:
   """Build extras dict by scanning `__extras__` in modules and subpackages."""
   extras: dict[str, set[str]] = {}
@@ -86,7 +86,6 @@ def build_extras(pkg_dir:str, modules:set[str], subpackages:set[str]) -> dict[st
     extras["all"] = all_deps
   return {k: sorted(v) for k, v in extras.items()}
 
-
 def get_meta(pkg_dir:str) -> dict:
   """Extract metadata from `__init__.py`."""
   meta = {
@@ -96,6 +95,7 @@ def get_meta(pkg_dir:str) -> dict:
     "description": "",
     "author": "",
     "keywords": [],
+    "scripts": {},
   }
   init = PATH.join(pkg_dir, "__init__.py")
   if not PATH.is_file(init): return meta
@@ -117,6 +117,12 @@ def get_meta(pkg_dir:str) -> dict:
               e.value for e in node.value.elts
               if isinstance(e, ast.Constant)
             ]
+          elif isinstance(node.value, ast.Dict) and t.id == "__scripts__":
+            meta["scripts"] = {
+              k.value: v.value
+              for k, v in zip(node.value.keys, node.value.values)
+              if isinstance(k, ast.Constant) and isinstance(v, ast.Constant)
+            }
   except Exception: pass
   return meta
 
@@ -150,6 +156,11 @@ def generate_toml(pkg_name:str, meta:dict, extras:dict[str, list[str]]) -> str:
       deps_str = ", ".join(f'"{d}"' for d in extras[name])
       lines.append(f'{name} = [{deps_str}]')
     lines.append('')
+  if meta.get("scripts"):
+    lines.append('[project.scripts]')
+    for cmd, entry in meta["scripts"].items():
+      lines.append(f'{cmd} = "{entry}"')
+    lines.append('')
   lines.append('[project.urls]')
   if meta["repo"]:
     lines.append(f'Repository = "https://github.com/{meta["repo"]}"')
@@ -161,7 +172,7 @@ def generate_toml(pkg_name:str, meta:dict, extras:dict[str, list[str]]) -> str:
   lines.append('')
   return "\n".join(lines)
 
-#-------------------------------------------------------------------------------------- Public
+#--------------------------------------------------------------------------------------- Public
 
 def generate(package:str, output:str|None=None):
   """Generate pyproject.toml for given package directory.
@@ -172,27 +183,30 @@ def generate(package:str, output:str|None=None):
   """
   pkg_dir = PATH.resolve(package)
   if not PATH.is_dir(pkg_dir):
-    print(f"{Ico.ERR} {Color.ORANGE}{pkg_dir}{Color.END} is not a directory")
+    p.err(f"{c.ORANGE}{pkg_dir}{c.END} is not a directory")
     sys.exit(1)
   pkg_name = PATH.basename(pkg_dir)
   meta = get_meta(pkg_dir)
   modules, subpackages = scan_package(pkg_dir)
   extras = build_extras(pkg_dir, modules, subpackages)
-  print(f"{Ico.INF} Package: {Color.TURQUS}{pkg_name}{Color.END} {meta['version']}")
+  p.inf(f"Package: {c.TURQUS}{pkg_name}{c.END} {meta['version']}")
   if meta["repo"]:
-    print(f"{Ico.GAP} https://github.com/{Color.SKY}{meta['repo']}{Color.END}")
-  print(f"{Ico.INF} Modules: {Color.GREY}{', '.join(sorted(modules))}{Color.END}")
+    p.gap(f"https://github.com/{c.SKY}{meta['repo']}{c.END}")
+  p.inf(f"Modules: {c.GREY}{', '.join(sorted(modules))}{c.END}")
   if subpackages:
-    print(f"{Ico.INF} Subpackages: {Color.GREY}{', '.join(sorted(subpackages))}{Color.END}")
+    p.inf(f"Subpackages: {c.GREY}{', '.join(sorted(subpackages))}{c.END}")
   if extras:
     for name, deps in sorted(extras.items(), key=lambda x: (x[0] == "all", x[0])):
-      print(f"{Ico.DOT} [{Color.CREAM}{name}{Color.END}]: {Color.GREY}{', '.join(deps)}{Color.END}")
+      p.item(f"[{c.SKY}{name}{c.END}]: {c.GREY}{', '.join(deps)}{c.END}")
+  if meta.get("scripts"):
+    for cmd, entry in meta["scripts"].items():
+      p.item(f"Script: {c.TURQUS}{cmd}{c.END} → {c.GREY}{entry}{c.END}")
   toml = generate_toml(pkg_name, meta, extras)
   out = output or PATH.join(PATH.dirname(pkg_dir), "pyproject.toml")
   FILE.save(out, toml)
-  print(f"{Ico.OK} Generated {Color.ORANGE}{out}{Color.END}")
+  p.ok(f"Generated {c.GREY}{PATH.dirname(out)}/{c.END}{c.ORANGE}{PATH.basename(out)}{c.END}")
 
-#----------------------------------------------------------------------------------------- CLI
+#------------------------------------------------------------------------------------------ CLI
 
 EXAMPLES = """
 examples:
@@ -202,27 +216,20 @@ examples:
 
 if __name__ == "__main__":
   import argparse
-
   def fmt(prog):
     return argparse.RawDescriptionHelpFormatter(prog, max_help_position=34, width=90)
-
   class TomlParser(argparse.ArgumentParser):
-    def format_help(self):
-      return "\n" + super().format_help().rstrip() + "\n\n"
-
-  p = TomlParser(
-    description=f"Generate {Color.ORANGE}pyproject.toml{Color.END} from package source",
+    def format_help(self): return "\n" + super().format_help().rstrip() + "\n\n"
+  parser = TomlParser(
+    description=f"Generate {c.ORANGE}pyproject.toml{c.END} from package source",
     formatter_class=fmt,
     add_help=False,
     usage=argparse.SUPPRESS,
     epilog=EXAMPLES,
   )
-  p.add_argument("package", metavar="PACKAGE",
-    help="Package directory to scan")
-  p.add_argument("-o", "--output", default=None, metavar="PATH",
+  parser.add_argument("package", metavar="PACKAGE", help="Package directory to scan")
+  parser.add_argument("-o", "--output", default=None, metavar="PATH",
     help="Output file (default: parent/pyproject.toml)")
-  p.add_argument("-h", "--help", action="help",
-    help="Show this help message and exit")
-
-  a = p.parse_args()
-  generate(a.package, a.output)
+  parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
+  args = parser.parse_args()
+  generate(args.package, args.output)

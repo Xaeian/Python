@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-__extras__ = ("time", ["pytz", "tzlocal"])
-
 """
 Extended datetime with human-friendly interface.
 
@@ -24,6 +22,8 @@ Example:
   >>> t.to("iso")             # ISO 8601 string
   >>> t.round("h")            # round to hour
 """
+
+__extras__ = ("time", ["pytz", "tzlocal"])
 
 from datetime import datetime, timedelta
 from typing import Union, overload

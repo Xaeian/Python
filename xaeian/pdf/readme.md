@@ -4,7 +4,7 @@ PDF generation with fluent API. Built on reportlab.
 
 ## Install
 
-```bash
+```sh
 pip install reportlab svglib pillow
 ```
 

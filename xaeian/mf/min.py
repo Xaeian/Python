@@ -29,7 +29,7 @@ def compress(
   avif_speed: int = 6,
   recursive: bool = True,
 ):
-  """Compress file — auto-detects PDF vs image.
+  """Compress file: auto-detects PDF vs image.
 
   Args:
     src: Input file or directory.
@@ -60,73 +60,65 @@ def compress(
 
 EXAMPLES = """
 examples:
-  py -m xaeian.mf.min report.pdf                   Compress PDF (ebook preset)
-  py -m xaeian.mf.min report.pdf -s /screen         Compress PDF for screen
-  py -m xaeian.mf.min photo.jpg                     Compress image → photo-min.jpg
-  py -m xaeian.mf.min photo.jpg -i                  Compress image in-place
-  py -m xaeian.mf.min photos/                        Compress directory recursively
-  py -m xaeian.mf.min photos/ --max-px 1280 -q 70   Resize + quality limit
-  py -m xaeian.mf.min hero.png -f webp              Convert to WebP
-  py -m xaeian.mf.min photos/ --target-kb 200       Fit under 200 kB
+  xn min report.pdf                   Compress PDF (ebook preset)
+  xn min report.pdf -s /screen        Compress PDF for screen
+  xn min photo.jpg                    Compress image → photo-min.jpg
+  xn min photo.jpg -i                 Compress image in-place
+  xn min photos/                      Compress directory recursively
+  xn min photos/ --max-px 1280 -q 70  Resize + quality limit
+  xn min hero.png -f webp             Convert to WebP
+  xn min photos/ --target-kb 200      Fit under 200 kB
 """
 
-if __name__ == "__main__":
+def main():
   import argparse
-
   def fmt(prog):
     return argparse.RawDescriptionHelpFormatter(prog, max_help_position=34, width=90)
-
   class MinParser(argparse.ArgumentParser):
-    def format_help(self):
-      return "\n" + super().format_help().rstrip() + "\n\n"
-
-  p = MinParser(
-    description="Compress PDFs and images — auto-detects by extension",
+    def format_help(self): return "\n" + super().format_help().rstrip() + "\n\n"
+  parser = MinParser(
+    description="Compress PDFs and images: auto-detects by extension",
     formatter_class=fmt,
     add_help=False,
     usage=argparse.SUPPRESS,
     epilog=EXAMPLES,
   )
-  # Input / output
-  p.add_argument("src",
-    help="Input file or directory")
-  p.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
+  parser.add_argument("src", help="Input file or directory")
+  parser.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
     help="Output path (default: <n>-min.<ext>)")
-  p.add_argument("-i", "--inplace", action="store_true",
-    help="Overwrite source file")
-  # PDF options
-  p.add_argument("-s", "--pdf-settings", default="/ebook", metavar="PRESET",
+  parser.add_argument("-i", "--inplace", action="store_true", help="Overwrite source file")
+  parser.add_argument("-s", "--pdf-settings", default="/ebook", metavar="PRESET",
     choices=["/screen", "/ebook", "/printer", "/prepress", "/default"],
     help="Ghostscript preset: /screen /ebook /printer /prepress")
-  p.add_argument("--pdf-level", default="1.7", metavar="VER",
+  parser.add_argument("--pdf-level", default="1.7", metavar="VER",
     help="PDF compatibility level (default: 1.7)")
-  # Image options
-  p.add_argument("--max-px", type=int, default=1920, metavar="PX",
+  parser.add_argument("--max-px", type=int, default=1920, metavar="PX",
     help="Max width/height in pixels (default: 1920)")
-  p.add_argument("-f", "--format", dest="img_format", default="keep", metavar="FMT",
+  parser.add_argument("-f", "--format", dest="img_format", default="keep", metavar="FMT",
     choices=["keep", "auto", "avif", "webp", "jpg", "png"],
     help="Format: keep auto avif webp jpg png (default: keep)")
-  p.add_argument("-q", "--quality", type=int, default=80, metavar="Q",
-    help="Image quality 1–100 (default: 80)")
-  p.add_argument("--target-kb", type=int, default=None, metavar="KB",
+  parser.add_argument("-q", "--quality", type=int, default=80, metavar="Q",
+    help="Image quality 1-100 (default: 80)")
+  parser.add_argument("--target-kb", type=int, default=None, metavar="KB",
     help="Target file size in kB (steps quality down)")
-  p.add_argument("--avif-speed", type=int, default=6, metavar="N",
-    help="AVIF encoder speed 0–10 (default: 6)")
-  p.add_argument("--no-recursive", action="store_true",
+  parser.add_argument("--avif-speed", type=int, default=6, metavar="N",
+    help="AVIF encoder speed 0-10 (default: 6)")
+  parser.add_argument("--no-recursive", action="store_true",
     help="Don't walk subdirectories")
-  p.add_argument("-h", "--help", action="help",
-    help="Show this help message and exit")
-
-  a = p.parse_args()
+  parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
+  args = parser.parse_args()
   result = compress(
-    a.src, a.dst, a.inplace,
-    a.pdf_level, a.pdf_settings,
-    max_px=a.max_px, img_format=a.img_format, quality=a.quality,
-    target_kB=a.target_kb, avif_speed=a.avif_speed, recursive=not a.no_recursive,
+    args.src, args.dst, args.inplace,
+    args.pdf_level, args.pdf_settings,
+    max_px=args.max_px, img_format=args.img_format, quality=args.quality,
+    target_kB=args.target_kb, avif_speed=args.avif_speed, recursive=not args.no_recursive,
   )
   if isinstance(result, str):
     print(result)
   elif isinstance(result, list):
     for r in result:
       ratio = f"{r['new_kB']:.0f}/{r['orig_kB']:.0f} kB"
-      print(f"  {r['src']} → {r['dst']}  ({ratio})")
+      print(f"  {r['src']} -> {r['dst']}  ({ratio})")
+
+if __name__ == "__main__":
+  main()

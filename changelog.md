@@ -1,5 +1,12 @@
 ## Changelog `xaeian`
 
+## `0.5.0` SFTP, CLI & scripts
+
+- `sftp`: SFTP/SSH client, push/pull sync, remote exec
+- `cli`: `xn` entry point with dispatcher _(`wifi`, `meta`, ...)_
+- `toml.py`: `[project.scripts]` from `__scripts__`
+- `log`: `Print` and `Logger` compatible as `log=` argument
+
 ## `0.4.1` Fix
 
 - `eda`: added `__extras__`, exposed `Simulation`/`parse_output`

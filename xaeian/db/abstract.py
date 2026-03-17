@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from logging import Logger
+from ..log import Logger, Print
 from typing import NoReturn, Iterator, Any
 
 from .errors import DatabaseError
@@ -29,7 +29,7 @@ class AbstractDatabase(ABC):
 
   def __init__(self):
     self.db_name: str|None = None
-    self.log: Logger|None = None
+    self.log: Logger|Print|None = None
     self.debug: bool = False
     self.ph = "?"
     self._conn = None

@@ -3,7 +3,7 @@
 """PostgreSQL sync implementation."""
 from __future__ import annotations
 
-from logging import Logger
+from ..log import Logger, Print
 
 from .abstract import AbstractDatabase
 from .utils import serialize_dict, ident, ph
@@ -33,7 +33,7 @@ class PostgresDatabase(AbstractDatabase):
     user: str = "postgres",
     password: str = "",
     port: int = 5432,
-    log: Logger|None = None,
+    log: Logger|Print|None = None,
   ):
     super().__init__()
     self.host = host

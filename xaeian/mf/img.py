@@ -1,7 +1,7 @@
 # xaeian/mf/img.py
 
 """
-Image manipulation — resize, convert, compress, metadata.
+Image manipulation: resize, convert, compress, metadata.
 
 Uses Pillow for all operations.
 
@@ -92,7 +92,7 @@ def _pick_formats(req:ImgFormat, img:Image.Image, src_ext:str) -> list[tuple[str
     return [("JPEG", ".jpg")]
   if req == "png":
     return [("PNG", ".png")]
-  # auto — size-first
+  # auto: size-first
   if _has_alpha(img):
     return [("WEBP", ".webp"), ("AVIF", ".avif"), ("PNG", ".png"), ("JPEG", ".jpg")]
   return [("AVIF", ".avif"), ("WEBP", ".webp"), ("JPEG", ".jpg"), ("PNG", ".png")]
@@ -175,16 +175,17 @@ def img_resize(
   width: int|None = None,
   height: int|None = None,
   scale: float|None = None,
-  inplace: bool = True
+  inplace: bool = False,
 ) -> str:
-  """Resize image. Overwrites source when `dst` is None.
+  """Resize image.
 
   Args:
     src: Input image path.
-    dst: Output path. None = overwrite source.
+    dst: Output path. None = auto (see `inplace`).
     width: Target width (keeps aspect if height=None).
     height: Target height (keeps aspect if width=None).
     scale: Scale factor (e.g. 0.5 = half size). Ignored if width/height set.
+    inplace: If True and dst is None, overwrite source. Otherwise add -resized suffix.
 
   Returns:
     Output file path.
@@ -252,7 +253,7 @@ def img_compress(
   recursive: bool = True,
   inplace: bool = False,
 ) -> list[dict]:
-  """Compress image(s) — resize, optimize encoding, pick best format.
+  """Compress image(s): resize, optimize encoding, pick best format.
 
   Handles single file or entire directory. Auto-corrects EXIF rotation.
 
@@ -274,7 +275,6 @@ def img_compress(
   src = os.path.abspath(src)
   if not os.path.exists(src):
     raise FileNotFoundError(f"Source not found: {src}")
-  # Collect files
   if os.path.isfile(src):
     files = [src]
     is_single = True
@@ -297,14 +297,13 @@ def img_compress(
     dst = os.path.abspath(dst)
   results = []
   for filepath in files:
-    # Determine output path
     if is_single:
       if dst is not None:
         out_path = dst
       elif inplace:
-        out_path = filepath  # will adjust ext after encoding
+        out_path = filepath
       else:
-        out_path = None  # determined after encoding (ext may change)
+        out_path = None
     else:
       rel = os.path.relpath(filepath, src)
       if dst is not None:
@@ -314,25 +313,22 @@ def img_compress(
       else:
         base_dir = f"{src.rstrip(os.sep)}-min"
         out_dir = os.path.join(base_dir, os.path.dirname(rel))
-      out_path = None  # stem + new ext
-    # Open and process
+      out_path = None
     try:
       img = Image.open(filepath)
       img = ImageOps.exif_transpose(img)
     except Exception:
       continue
+    orig_kB = os.path.getsize(filepath) // 1024  # before potential overwrite
     img, orig_size, new_size = _resize_max(img, max_px)
     src_ext = os.path.splitext(filepath)[1].lower()
     fmt_order = _pick_formats(format, img, src_ext)
-    data, fmt, ext, q_used = _encode_best(img, fmt_order, quality, target_kB, avif_speed, pick_smallest=(format == "auto"))
+    data, fmt, ext, q_used = _encode_best(img, fmt_order, quality, target_kB, avif_speed,
+      pick_smallest=(format == "auto"))
     if data is None: continue
-    # Build final output path
     stem = os.path.splitext(os.path.basename(filepath))[0]
     if is_single and out_path is not None:
-      if inplace:
-        final = os.path.join(os.path.dirname(filepath), f"{stem}{ext}")
-      else:
-        final = out_path
+      final = os.path.join(os.path.dirname(filepath), f"{stem}{ext}") if inplace else out_path
     elif is_single:
       final = os.path.join(os.path.dirname(filepath), f"{stem}-min{ext}")
     else:
@@ -341,18 +337,15 @@ def img_compress(
     DIR.ensure(final)
     with open(final, "wb") as f:
       f.write(data)
-    # Inplace: remove original if extension changed
     if inplace and final != filepath and os.path.isfile(filepath):
       os.remove(filepath)
-    orig_kB = os.path.getsize(filepath) // 1024
-    new_kB = len(data) // 1024
     results.append({
       "src": filepath,
       "dst": final,
       "orig_size": orig_size,
       "new_size": new_size,
       "orig_kB": orig_kB,
-      "new_kB": new_kB,
+      "new_kB": len(data) // 1024,
       "format": fmt,
     })
   return results

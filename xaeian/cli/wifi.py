@@ -12,9 +12,12 @@ Example:
 """
 
 import os, re, subprocess, platform
-from xaeian import JSON, Color, Ico
+from ..files import JSON
+from ..log import Print
+from ..colors import Color as c
 
-#----------------------------------------------------------------------------------- Internals
+
+#------------------------------------------------------------------------------------ Internals
 
 def _run(cmd:list[str]) -> str|None:
   try:
@@ -80,7 +83,7 @@ def _linux() -> list[dict]:
       })
   return results
 
-#----------------------------------------------------------------------------------------- API
+#------------------------------------------------------------------------------------------ API
 
 def wifi_passwords() -> list[dict]:
   """Get saved Wi-Fi networks with passwords.
@@ -96,52 +99,49 @@ def wifi_passwords() -> list[dict]:
   networks.sort(key=lambda n: n["ssid"].lower())
   return networks
 
-#----------------------------------------------------------------------------------------- CLI
+#------------------------------------------------------------------------------------------ CLI
 
 EXAMPLES = """
 examples:
-  py -m xaeian.cli.wifi               List all saved networks + passwords
-  py -m xaeian.cli.wifi -o wifi.json  Save report to JSON file
+  xn wifi               List all saved networks + passwords
+  xn wifi -o wifi.json  Save report to JSON file
 """
 
-if __name__ == "__main__":
+def main():
   import argparse
-
   def fmt(prog):
     return argparse.RawDescriptionHelpFormatter(prog, max_help_position=34, width=90)
-
   class WifiParser(argparse.ArgumentParser):
-    def format_help(self):
-      return "\n" + super().format_help().rstrip() + "\n\n"
-
-  p = WifiParser(
+    def format_help(self): return "\n" + super().format_help().rstrip() + "\n\n"
+  parser = WifiParser(
     description="Extract saved Wi-Fi passwords",
     formatter_class=fmt,
     add_help=False,
     usage=argparse.SUPPRESS,
     epilog=EXAMPLES,
   )
-  p.add_argument("-o", "--output", default=None, metavar="PATH",
+  parser.add_argument("-o", "--output", default=None, metavar="PATH",
     help="Save JSON report to file")
-  p.add_argument("-h", "--help", action="help",
-    help="Show this help message and exit")
-
-  a = p.parse_args()
-  print(f"{Ico.INF} Scanning saved Wi-Fi profiles...")
+  parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
+  args = parser.parse_args()
+  p = Print()
+  p.inf("Scanning saved Wi-Fi profiles...")
   networks = wifi_passwords()
   if not networks:
-    print(f"{Ico.WRN} No saved Wi-Fi networks found")
+    p.wrn("No saved Wi-Fi networks found")
   else:
     has_pw = sum(1 for n in networks if n["password"])
-    print(f"{Ico.INF} Found {Color.TEAL}{len(networks)}{Color.END} networks "
-          f"({Color.CYAN}{has_pw}{Color.END} with password)")
+    p.inf(f"Found {c.TEAL}{len(networks)}{c.END} networks ({c.CYAN}{has_pw}{c.END} with password)")
     max_ssid = max(len(n["ssid"]) for n in networks)
     for n in networks:
       ssid = n["ssid"].ljust(max_ssid)
       if n["password"]:
-        print(f"{Ico.DOT} {Color.CREAM}{ssid}{Color.END}  {n['password']}")
+        p.dot(f"{c.CREAM}{ssid}{c.END}  {n['password']}")
       else:
-        print(f"{Ico.DOT} {Color.GREY}{ssid}  (open){Color.END}")
-  if a.output:
-    JSON.save_pretty(a.output, networks)
-    print(f"\n{Ico.OK} Saved {Color.TEAL}{a.output}{Color.END}")
+        p.dot(f"{c.GREY}{ssid}  (open){c.END}")
+  if args.output:
+    JSON.save_pretty(args.output, networks)
+    p.ok(f"Saved {c.TEAL}{args.output}{c.END}")
+
+if __name__ == "__main__":
+  main()

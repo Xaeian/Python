@@ -16,7 +16,9 @@ CLI:
 """
 
 import ast, sys
-from xaeian import FILE, DIR, PATH, Color, Ico
+from xaeian import FILE, DIR, PATH, Print, Color as c
+
+p = Print()
 
 #------------------------------------------------------------------------------------- Analysis
 
@@ -65,7 +67,7 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
 '''
 
-#-------------------------------------------------------------------------------------- Public
+#--------------------------------------------------------------------------------------- Public
 
 def generate(package:str, output:str|None=None):
   """Generate GitHub Actions workflow for given package.
@@ -76,20 +78,20 @@ def generate(package:str, output:str|None=None):
   """
   pkg_dir = PATH.resolve(package)
   if not PATH.is_dir(pkg_dir):
-    print(f"{Ico.ERR} {Color.ORANGE}{pkg_dir}{Color.END} is not a directory")
+    p.err(f"{c.ORANGE}{pkg_dir}{c.END} is not a directory")
     sys.exit(1)
   meta = get_meta(pkg_dir)
   python_ver = meta["python"].replace(">=", "").replace(">", "")
-  print(f"{Ico.INF} Python: {Color.SKY}{python_ver}{Color.END}")
+  p.inf(f"Python: {c.SKY}{python_ver}{c.END}")
   if meta["repo"]:
-    print(f"{Ico.GAP} https://github.com/{Color.GREY}{meta['repo']}{Color.END}")
+    p.gap(f"https://github.com/{c.SKY}{meta['repo']}{c.END}")
   workflow = generate_workflow(meta)
   out = output or PATH.join(PATH.dirname(pkg_dir), ".github", "workflows", "publish.yml")
   DIR.ensure(out)
   FILE.save(out, workflow)
-  print(f"{Ico.OK} Generated {Color.ORANGE}{out}{Color.END}")
+  p.ok(f"Generated {c.GREY}{PATH.dirname(out)}/{c.END}{c.ORANGE}{PATH.basename(out)}{c.END}")
 
-#----------------------------------------------------------------------------------------- CLI
+#------------------------------------------------------------------------------------------ CLI
 
 EXAMPLES = """
 examples:
@@ -99,27 +101,20 @@ examples:
 
 if __name__ == "__main__":
   import argparse
-
   def fmt(prog):
     return argparse.RawDescriptionHelpFormatter(prog, max_help_position=34, width=90)
-
   class WorkflowParser(argparse.ArgumentParser):
-    def format_help(self):
-      return "\n" + super().format_help().rstrip() + "\n\n"
-
-  p = WorkflowParser(
+    def format_help(self): return "\n" + super().format_help().rstrip() + "\n\n"
+  parser = WorkflowParser(
     description="Generate GitHub Actions workflow for PyPI publishing",
     formatter_class=fmt,
     add_help=False,
     usage=argparse.SUPPRESS,
     epilog=EXAMPLES,
   )
-  p.add_argument("package", metavar="PACKAGE",
-    help="Package directory to scan")
-  p.add_argument("-o", "--output", default=None, metavar="PATH",
+  parser.add_argument("package", metavar="PACKAGE", help="Package directory to scan")
+  parser.add_argument("-o", "--output", default=None, metavar="PATH",
     help="Output file (default: .github/workflows/publish.yml)")
-  p.add_argument("-h", "--help", action="help",
-    help="Show this help message and exit")
-
-  a = p.parse_args()
-  generate(a.package, a.output)
+  parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
+  args = parser.parse_args()
+  generate(args.package, args.output)

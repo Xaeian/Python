@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from typing import Any
-from logging import Logger
+from ..log import Logger, Print
 
 from .abstract_async import AbstractAsyncDatabase
 from .utils import ident, serialize_params, serialize_dict, split_sql, parse_json, parse_row
@@ -35,7 +35,7 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
     user: str = "postgres",
     password: str = "",
     port: int = 5432,
-    log: Logger|None = None,
+    log: Logger|Print|None = None,
   ):
     super().__init__()
     self.host = host

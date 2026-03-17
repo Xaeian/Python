@@ -30,8 +30,8 @@ from xaeian.mf.pdf import *
 pdf_compress(src, dst=None, level="1.7", settings="/ebook", inplace=False)
 pdf_scrub_metadata(src, dst=None, inplace=False)
 pdf_merge(["a.pdf", "b.pdf"], "out.pdf")
-pdf_split("doc.pdf", "pages/", prefix="page")   # → pages/page_001.pdf, ...
-pdf_extract("doc.pdf", "out.pdf", "1,3,5-7")    # extract specific pages
+pdf_split("doc.pdf", "pages/", prefix="page")  # → pages/page_001.pdf, ...
+pdf_extract("doc.pdf", "out.pdf", "1,3,5-7")   # extract specific pages
 pdf_add_text(src, dst=None, text="DRAFT", x=50, y=50, size=12, pages=None)
 ```
 
@@ -75,12 +75,28 @@ Suffix depends on operation: `-min` for compression, `-nometa` for metadata remo
 
 ## CLI
 
-```bash
-py -m xaeian.mf.min report.pdf                     # compress PDF
-py -m xaeian.mf.min photo.jpg --max-px 1280 -q 70  # compress + resize image
-py -m xaeian.mf.min photos/ -f webp                # batch convert to WebP
-py -m xaeian.mf.min hero.png --target-kb 200       # fit under 200 kB
+```sh
+xn min report.pdf                     # compress PDF (ebook preset)
+xn min report.pdf -s /screen          # aggressive compression for screen
+xn min report.pdf -s /printer -i      # printer quality, in-place
+xn min photo.jpg --max-px 1280 -q 70  # compress + resize
+xn min photo.jpg -f avif              # convert to AVIF
+xn min photo.jpg -f webp -i           # convert to WebP in-place
+xn min photo.png --target-kb 200      # fit under 200 kB
+xn min photos/                        # batch compress directory
+xn min photos/ --max-px 800 -q 60     # batch resize + aggressive quality
+xn min photos/ -f auto                # batch, pick smallest format per file
+xn min photos/ -f webp -o web/        # batch convert to WebP → web/
+xn min photos/ --no-recursive         # flat directory only
 
-py -m xaeian.mf.meta report.pdf                    # strip PDF metadata
-py -m xaeian.mf.meta photo.jpg -i                  # strip EXIF in-place
+xn meta report.pdf                    # strip PDF metadata
+xn meta report.pdf -i                 # strip in-place
+xn meta photo.jpg -o clean.jpg        # strip EXIF, custom output
+xn meta photo.jpg -i                  # strip EXIF in-place
+
+xn ico logo.png                       # auto sizes → logo.ico
+xn ico logo.png -o favicon.ico        # custom output
+xn ico logo.svg --sizes 16,32,48      # specific sizes only
+xn ico photo.jpg --fit crop           # center-crop to square
+xn ico logo.png --upscale             # include sizes > source
 ```

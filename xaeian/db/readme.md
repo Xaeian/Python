@@ -4,14 +4,14 @@ Lightweight database abstraction. SQLite, MySQL, PostgreSQL — sync and async.
 
 ## Install
 
-```bash
+```sh
 pip install xaeian[db] # sync: pymysql, psycopg2
 pip install xaeian[db-async] # async: aiomysql, asyncpg, aiosqlite
 ```
 
 ## Quick Start
 
-```python
+```py
 from xaeian.db import Database, AsyncDatabase
 
 db = Database("sqlite", "app.db")
@@ -23,7 +23,7 @@ db = AsyncDatabase("postgres", "mydb", user="postgres", password="secret")
 
 ## CRUD
 
-```python
+```py
 # Insert
 db.insert("users", {"name": "Jan", "email": "jan@x.com"})  # returns row count
 user_id = db.insert("users", {"name": "Jan"}, returning="id")  # returns new id
@@ -50,7 +50,7 @@ db.upsert("stats", {"user_id": 1, "views": 100}, on=["user_id"], update=["views"
 
 ## Query Helpers
 
-```python
+```py
 # Find with kwargs
 users = db.find("users", active=True, role="admin")
 users = db.find("users", order="created DESC", limit=10)
@@ -67,7 +67,7 @@ result = db.paginate("SELECT * FROM users", page=2, per_page=20)
 
 ## Transactions
 
-```python
+```py
 with db.transaction():
   db.insert("orders", {"user_id": 1, "total": 99.50})
   db.update("users", {"balance": 0}, "id = ?", 1)
@@ -83,7 +83,7 @@ db.exec_batch([
 
 ## Async
 
-```python
+```py
 db = AsyncDatabase("postgres", "mydb", user="postgres", password="secret")
 users = await db.get_dicts("SELECT * FROM users")
 await db.insert("users", {"name": "Jan"})
@@ -95,7 +95,7 @@ async with db.transaction():
 
 ## Auto-Conversion
 
-```python
+```py
 # dict/list → JSON (on insert)
 db.insert("events", {"data": {"key": "value"}})
 # ISO string → datetime (on insert)
@@ -120,7 +120,7 @@ db.get_dict("SELECT * FROM users WHERE id = ?", user_id)
 
 ## Utilities
 
-```python
+```py
 db.ping() # health check
 db.debug = True # print all queries
 db.has_table("users") # True/False
@@ -132,9 +132,24 @@ db.create_database("newdb")
 db.drop_database("olddb")
 ```
 
+## Logging
+
+```py
+from xaeian import logger, Print
+
+# daemon / API
+db = Database("sqlite", "app.db", log=logger("app"))
+
+# script / CLI
+db = Database("mysql", "mydb", user="root", password="secret", log=Print())
+```
+
+Errors are always raised as `DatabaseError` regardless of `log`.
+`log` only adds an additional error line to the logger/terminal.
+
 ## Error Handling
 
-```python
+```py
 from xaeian.db import DatabaseError
 
 try:
@@ -145,7 +160,7 @@ except DatabaseError as e:
 
 ## Direct Class Import
 
-```python
+```py
 from xaeian.db import SqliteDatabase, MysqlDatabase, PostgresDatabase
 from xaeian.db import SqliteAsyncDatabase, MysqlAsyncDatabase, PostgresAsyncDatabase
 
@@ -161,7 +176,7 @@ All backends accept `?` placeholders. Converted automatically:
 - MySQL: `?` → `%s`
 - PostgreSQL: `?` → `$1`, `$2`, ...
 
-```python
+```py
 # Works on all backends
 db.get_dicts("SELECT * FROM users WHERE id = ? AND active = ?", (42, True))
 ```

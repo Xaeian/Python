@@ -26,7 +26,8 @@ except ImportError:
 
 from typing import Literal
 from ..files import FILE, DIR, CSV, PATH
-from ..colors import Color, Print
+from ..colors import Color as c
+from ..log import Print
 from ..cmd import run as cmd_run
 from ..table import (
   where, select, exclude, rename, add_column,
@@ -327,5 +328,5 @@ class KiCad:
 
   def ok(self):
     """Print success message."""
-    folder = f"{Color.ORANGE}{self.produce_path.removesuffix('/')}{Color.END}"
+    folder = f"{c.ORANGE}{self.produce_path.removesuffix('/')}{c.END}"
     p.ok(f"Production files generated in {folder}")

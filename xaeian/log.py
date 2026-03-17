@@ -3,148 +3,240 @@
 """
 Colored logging with file rotation.
 
-Provides `logger()` factory function for creating loggers with
-colored console output and rotating file handlers.
+Provides `logger()` factory for service/daemon logging and `Print` for
+CLI/script output. Both share a common interface so libraries can accept
+either without branching.
 
-Log levels use 3-char abbreviations: `DBG`, `INF`, `WRN`, `ERR`, `CRT`, `PNC`.
+Shared interface (short/long):
+  `dbg/debug` `inf/info` `wrn/warning` `err/error` `crt/critical` `pnc/panic`
+  `space/gap` (indent, inherits last level) `item/dot` (list entry with `-`)
 
 Example:
-  >>> from xaeian import logger
   >>> log = logger("app", file="app.log")
-  >>> log.info("Server started on port 8080")
-  2025-01-15 14:32:01 INF Server started on port 8080
+  >>> log.error("Connection failed")
+  >>> log.item("host unreachable") # logged at ERROR level
+  >>> p = Print()
+  >>> p.err("Connection failed")
+  ERR Connection failed
+  >>> p.dot("host unreachable") # printed at ERR level
+    • host unreachable
 """
 
-import sys, logging
+import sys, re, logging, builtins
+from typing import Literal
 from logging.handlers import RotatingFileHandler
-from .colors import Color
-from .files import DIR
+from .colors import Color, Ico
 
 PANIC = 60
 logging.addLevelName(PANIC, "PNC")
 
+LevelName = Literal["DBG", "INF", "WRN", "ERR", "CRT", "PNC"]
+Level = LevelName | int
+
+_LEVELS = {
+  "DBG": logging.DEBUG,
+  "INF": logging.INFO,
+  "WRN": logging.WARNING,
+  "ERR": logging.ERROR,
+  "CRT": logging.CRITICAL,
+  "PNC": PANIC,
+}
+
+_ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+
+def _strip_ansi(text:str) -> str:
+  return _ANSI_RE.sub("", text)
+
+def _level(v:Level) -> int:
+  if isinstance(v, int): return v
+  return _LEVELS[v]
+
 def _datefmt(date:bool, time:bool) -> str:
-  """Build datetime format string from flags."""
   parts = []
   if date: parts.append("%Y-%m-%d")
   if time: parts.append("%H:%M:%S")
   return " ".join(parts)
 
 def _fmt(date:bool, time:bool) -> str:
-  """Build log format string from flags."""
   if date or time: return "%(asctime)s %(levelname)-3s %(message)s"
   return "%(levelname)-3s %(message)s"
 
-#------------------------------------------------------------------------------------ Formatters
+#----------------------------------------------------------------------------------- Formatters
 
 class LogFormatter(logging.Formatter):
-  """Log formatter with 3-character level abbreviations."""
-
+  """Plain formatter with 3-char level abbreviations for file output."""
   LEVELS = {
-    "DEBUG": "DBG",
-    "INFO": "INF",
-    "WARNING": "WRN",
-    "ERROR": "ERR",
-    "CRITICAL": "CRT",
+    "DEBUG": "DBG", "INFO": "INF", "WARNING": "WRN",
+    "ERROR": "ERR", "CRITICAL": "CRT", "PNC": "PNC",
   }
-
   def format(self, record:logging.LogRecord) -> str:
-    """Format log record with abbreviated level name."""
     record.levelname = self.LEVELS.get(record.levelname, record.levelname)
+    record.msg = _strip_ansi(str(record.msg))
     return super().format(record)
 
 class ColorFormatter(LogFormatter):
-  """
-  Colored log formatter for terminal output.
-
-  Applies ANSI colors to level names and timestamps.
-  Colors: `DBG`=green, `INF`=blue, `WRN`=yellow, `ERR`=red,
-  `CRT`=magenta, `PNC`=gold.
-  """
+  """Colored formatter for terminal — `DBG` green, `INF` blue, `WRN` yellow,
+  `ERR` red, `CRT` magenta, `PNC` gold."""
   COLORS = {
-    "DBG": Color.GREEN,
-    "INF": Color.BLUE,
-    "WRN": Color.YELLOW,
-    "ERR": Color.RED,
-    "CRT": Color.MAGNTA,
-    "PNC": Color.GOLD,
+    "DBG": Color.GREEN, "INF": Color.BLUE,   "WRN": Color.YELLOW,
+    "ERR": Color.RED,   "CRT": Color.MAGNTA,  "PNC": Color.GOLD,
   }
   def __init__(self, date:bool=True, time:bool=True):
-    self.show_date = date
-    self.show_time = time
-    super().__init__(datefmt=_datefmt(date, time))
+    super().__init__(fmt=_fmt(date, time), datefmt=_datefmt(date, time))
 
   def format(self, record:logging.LogRecord) -> str:
-    """Format log record with colors."""
     record.levelname = self.LEVELS.get(record.levelname, record.levelname)
     lvl = record.levelname
     color = self.COLORS.get(lvl, Color.WHITE)
     text = record.getMessage()
     msg = f"{color}{lvl}{Color.END} {Color.WHITE}{text}{Color.END}"
-    if self.show_date or self.show_time:
+    if self.datefmt:
       ts = self.formatTime(record, self.datefmt)
       msg = f"{Color.GREY}{ts}{Color.END} {msg}"
     if record.exc_info: msg += f"\n{self.formatException(record.exc_info)}"
     return msg
 
-#----------------------------------------------------------------------------------------- Logger
+#---------------------------------------------------------------------------------------- Print
+
+class Print:
+  """
+  Terminal logger with level filtering, compatible with `Logger` interface.
+
+  `gap`/`dot`/`space`/`item` inherit the level of the last named call —
+  suppressed if that level was below the configured minimum.
+
+  Example:
+    >>> p = Print(level="WRN")
+    >>> p.info("ignored")
+    >>> p.error("DB down")
+    ERR DB down
+    >>> p.dot("retry 1/3")              # inherits ERR, printed
+      • retry 1/3
+  """
+  def __init__(self, file=None, level:Literal["DBG","INF","WRN","ERR","CRT","PNC"]|int="DBG"):
+    self._file = file
+    self._level = _level(level)
+    self._last_level = logging.DEBUG
+
+  def __call__(self, *args, **kwargs):
+    if self._file and "file" not in kwargs:
+      kwargs["file"] = self._file
+    builtins.print(*args, **kwargs)
+
+  def _emit(self, level:int, ico:str, *args, **kwargs):
+    self._last_level = level
+    if level >= self._level: self(ico, *args, **kwargs)
+
+  def _emit_sub(self, ico:str, *args, **kwargs):
+    if self._last_level >= self._level: self(ico, *args, **kwargs)
+
+  def dbg(self, *a, **kw): self._emit(logging.DEBUG,    Ico.DBG, *a, **kw)
+  def inf(self, *a, **kw): self._emit(logging.INFO,     Ico.INF, *a, **kw)
+  def wrn(self, *a, **kw): self._emit(logging.WARNING,  Ico.WRN, *a, **kw)
+  def err(self, *a, **kw): self._emit(logging.ERROR,    Ico.ERR, *a, **kw)
+  def crt(self, *a, **kw): self._emit(logging.CRITICAL, Ico.ERR, *a, **kw)
+  def pnc(self, *a, **kw): self._emit(PANIC,            Ico.ERR, *a, **kw)
+  def tip(self, *a, **kw): self._emit(logging.INFO,     Ico.TIP, *a, **kw)
+  def run(self, *a, **kw): self._emit(logging.INFO,     Ico.RUN, *a, **kw)
+
+  def gap(self, *a, **kw):   self._emit_sub(Ico.GAP, *a, **kw)
+  def dot(self, *a, **kw):   self._emit_sub(Ico.DOT, *a, **kw)
+  def space(self, *a, **kw): self.gap(*a, **kw)   # Logger compat
+  def item(self, *a, **kw):  self.dot(*a, **kw)   # Logger compat
+
+  def ok(self, *args, **kwargs):
+    """Append ` OK` badge to last arg, print at INF level."""
+    suffix = f" {Ico.OK}"
+    args = (*args[:-1], str(args[-1]) + suffix) if args else (suffix.lstrip(),)
+    self._emit(logging.INFO, Ico.INF, *args, **kwargs)
+
+  # long aliases — Logger compat
+  def debug(self, *a, **kw):    self.dbg(*a, **kw)
+  def info(self, *a, **kw):     self.inf(*a, **kw)
+  def warning(self, *a, **kw):  self.wrn(*a, **kw)
+  def error(self, *a, **kw):    self.err(*a, **kw)
+  def critical(self, *a, **kw): self.crt(*a, **kw)
+  def panic(self, *a, **kw):    self.pnc(*a, **kw)
+
+#---------------------------------------------------------------------------------------- Logger
 
 class Logger(logging.Logger):
   """
-  Extended logger with colored output and file rotation.
+  Extended stdlib logger with short aliases and `space`/`item` sub-entries.
 
-  Adds `panic()` method for highest severity level.
+  `space`/`item`/`gap`/`dot` emit at the level of the last named call —
+  useful for indented details without repeating the level explicitly.
 
   Example:
-    >>> log = Logger("myapp")
-    >>> log.set_stream(color=True)
-    >>> log.set_file("myapp.log", max_bytes=1000000)
-    >>> log.info("Started")
+    >>> log = Logger("app")
+    >>> log.error("Upload failed")
+    >>> log.item("timeout after 30s")   # logged at ERROR
+    >>> log.item("retries exhausted")   # logged at ERROR
   """
   def __init__(self, name:str, level:int=logging.NOTSET):
     super().__init__(name, level)
     self._init_handlers()
 
   def _init_handlers(self):
-    """Initialize handler tracking attributes."""
-    if not hasattr(self, "_file_handler"): self._file_handler: RotatingFileHandler|None = None
+    if not hasattr(self, "_file_handler"):   self._file_handler: RotatingFileHandler|None = None
     if not hasattr(self, "_stream_handler"): self._stream_handler: logging.Handler|None = None
-    if not hasattr(self, "_file_path"): self._file_path: str = ""
+    if not hasattr(self, "_file_path"):      self._file_path: str = ""
+    if not hasattr(self, "_last_level"):     self._last_level: int = logging.DEBUG
 
-  def panic(self, msg, *args, **kwargs):
-    """Log message with PANIC level (above CRITICAL)."""
-    self.log(PANIC, msg, *args, **kwargs)
+  # stdlib overrides — track _last_level
+  def debug(self, *a, **kw):    self._last_level = logging.DEBUG;    super().debug(*a, **kw)
+  def info(self, *a, **kw):     self._last_level = logging.INFO;     super().info(*a, **kw)
+  def warning(self, *a, **kw):  self._last_level = logging.WARNING;  super().warning(*a, **kw)
+  def error(self, *a, **kw):    self._last_level = logging.ERROR;    super().error(*a, **kw)
+  def critical(self, *a, **kw): self._last_level = logging.CRITICAL; super().critical(*a, **kw)
+  def panic(self, *a, **kw):    self._last_level = PANIC;            self.log(PANIC, *a, **kw)
+
+  # short aliases — Print compat
+  def dbg(self, *a, **kw): self.debug(*a, **kw)
+  def inf(self, *a, **kw): self.info(*a, **kw)
+  def wrn(self, *a, **kw): self.warning(*a, **kw)
+  def err(self, *a, **kw): self.error(*a, **kw)
+  def crt(self, *a, **kw): self.critical(*a, **kw)
+  def pnc(self, *a, **kw): self.panic(*a, **kw)
+
+  # sub-entries — inherit _last_level
+  def space(self, msg="", *a, **kw): self.log(self._last_level, f"    {msg}", *a, **kw)
+  def item(self, msg="", *a, **kw):  self.log(self._last_level, f" -  {msg}", *a, **kw)
+  def gap(self, *a, **kw): self.space(*a, **kw)
+  def dot(self, *a, **kw): self.item(*a, **kw)
+
+  def ok(self, msg="", *a, **kw):
+    self.info(f"{msg} {Ico.OK}" if msg else Ico.OK, *a, **kw)
 
   @property
   def file(self) -> str:
-    """Current log file path, or empty string if disabled."""
+    """Current log file path, empty string if disabled."""
     return self._file_path
 
   @file.setter
-  def file(self, path:str):
-    """Set log file path."""
-    self.set_file(file=path)
+  def file(self, path:str): self.set_file(file=path)
 
   def set_file(
     self,
     file: str|bool|None = None,
-    level: int = logging.INFO,
+    level: Literal["DBG","INF","WRN","ERR","CRT","PNC"]|int = logging.INFO,
     date: bool = True,
     time: bool = True,
     max_bytes: int = 5_000_000,
     backup_count: int = 3,
   ) -> None:
     """
-    Configure file logging with rotation.
+    Configure rotating file handler.
 
     Args:
-      file: Log file path. `True` for `"{name}.log"`. Falsy to disable.
-      level: Minimum log level for file output.
+      file: Path, `True` for `"{name}.log"`, falsy to disable.
+      level: Minimum level written to file.
       date: Include date in timestamps.
       time: Include time in timestamps.
-      max_bytes: Max file size before rotation (default 5MB).
-      backup_count: Number of backup files to keep.
+      max_bytes: Rotation threshold (default 5MB).
+      backup_count: Number of rotated files to keep.
     """
+    from .files import DIR
     if file is True: file = f"{self.name}.log"
     elif not file: file = ""
     if self._file_handler:
@@ -156,7 +248,7 @@ class Logger(logging.Logger):
     if not file: return
     DIR.ensure(file, is_file=True)
     fh = RotatingFileHandler(file, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8")
-    fh.setLevel(level)
+    fh.setLevel(_level(level))
     fh.setFormatter(LogFormatter(_fmt(date, time), _datefmt(date, time)))
     self.addHandler(fh)
     self._file_handler = fh
@@ -164,29 +256,27 @@ class Logger(logging.Logger):
 
   @property
   def stream(self) -> bool:
-    """Whether console output is enabled."""
+    """Whether console handler is active."""
     return self._stream_handler is not None
 
   @stream.setter
-  def stream(self, enable:bool):
-    """Enable/disable console output."""
-    self.set_stream(enable=enable)
+  def stream(self, enable:bool): self.set_stream(enable=enable)
 
   def set_stream(
     self,
     enable: bool = True,
-    level: int = logging.INFO,
+    level: Literal["DBG","INF","WRN","ERR","CRT","PNC"]|int = logging.INFO,
     color: bool = True,
     date: bool = True,
     time: bool = True,
   ) -> None:
     """
-    Configure console logging.
+    Configure console handler.
 
     Args:
       enable: Enable or disable console output.
-      level: Minimum log level for console.
-      color: Use colored output with ANSI codes.
+      level: Minimum level printed to console.
+      color: Use ANSI colors.
       date: Include date in timestamps.
       time: Include time in timestamps.
     """
@@ -197,23 +287,22 @@ class Logger(logging.Logger):
       self._stream_handler = None
     if not enable: return
     sh = logging.StreamHandler(sys.stdout)
-    sh.setLevel(level)
-    if color: sh.setFormatter(ColorFormatter(date, time))
-    else: sh.setFormatter(LogFormatter(_fmt(date, time), _datefmt(date, time)))
+    sh.setLevel(_level(level))
+    fmt = ColorFormatter(date, time) if color else LogFormatter(_fmt(date, time), _datefmt(date, time))
+    sh.setFormatter(fmt)
     self.addHandler(sh)
     self._stream_handler = sh
 
-
 logging.setLoggerClass(Logger)
 
-#----------------------------------------------------------------------------------------- Factory
+#--------------------------------------------------------------------------------------- Factory
 
 def logger(
   name: str = "app",
   file: str|bool|None = True,
   stream: bool = True,
-  stream_lvl: int = logging.INFO,
-  file_lvl: int = logging.INFO,
+  stream_lvl: Literal["DBG","INF","WRN","ERR","CRT","PNC"]|int = logging.INFO,
+  file_lvl: Literal["DBG","INF","WRN","ERR","CRT","PNC"]|int = logging.INFO,
   color: bool = True,
   date_stream: bool = True,
   time_stream: bool = True,
@@ -223,53 +312,52 @@ def logger(
   backup_count: int = 3,
 ) -> Logger:
   """
-  Create or reconfigure logger with console and file output.
+  Create or reconfigure a named logger.
 
   Args:
-    name: Logger name. Use `"app.module"` for child loggers.
-    file: Log file path. `True` for `"{name}.log"`. Falsy to disable.
+    name: Logger name, use `"app.module"` for child loggers.
+    file: Log file path. `True` → `"{name}.log"`, falsy → disabled.
     stream: Enable console output.
     stream_lvl: Minimum level for console.
     file_lvl: Minimum level for file.
-    color: Use colored console output.
+    color: Colored console output.
     date_stream: Show date in console timestamps.
     time_stream: Show time in console timestamps.
     date_file: Show date in file timestamps.
     time_file: Show time in file timestamps.
-    max_bytes: Max file size before rotation (default 5MB).
-    backup_count: Number of backup files to keep.
+    max_bytes: File rotation threshold (default 5MB).
+    backup_count: Number of rotated files to keep.
 
   Returns:
-    Configured `Logger` instance with `panic()` method.
-
-  Example:
-    >>> log = logger("app", file="app.log")
-    >>> log.info("Server started")
+    Configured `Logger` instance.
   """
   log: Logger = logging.getLogger(name)
+  if not isinstance(log, Logger):
+    raise TypeError(f'Logger "{name}" already exists and not from xaeian')
   log._init_handlers()
   log.setLevel(logging.DEBUG)
   log.propagate = False
-  log.set_stream(enable=stream, level=stream_lvl, color=color, date=date_stream, time=time_stream)
-  log.set_file(file=file, level=file_lvl, date=date_file, time=time_file,
-    max_bytes=max_bytes, backup_count=backup_count)
+  log.set_stream(enable=stream, level=_level(stream_lvl), color=color, date=date_stream, time=time_stream)
+  log.set_file(
+    file=file, level=_level(file_lvl), date=date_file, time=time_file,
+    max_bytes=max_bytes, backup_count=backup_count,
+  )
   return log
 
-#---------------------------------------------------------------------------------------- Tests
+#----------------------------------------------------------------------------------------- Tests
 
 if __name__ == "__main__":
-  log = logger("demo", file=False, color=True)
-  log.debug("debug (hidden at INFO level)")
-  log.info("info message")
-  log.warning("warning message")
-  log.error("error message")
-  log.critical("critical message")
-  log.panic("panic message")
-  print()
-  log2 = logger("demo2", file=False, date_stream=False)
-  log2.info("time only")
-  log3 = logger("demo3", file=False, date_stream=False, time_stream=False)
-  log3.info("no timestamp")
-  print()
-  log4 = logger("demo4", file=False, stream_lvl=logging.DEBUG)
-  log4.debug("debug visible now")
+  log = logger("demo", file=False)
+  log.debug("debug"); log.info("info"); log.error("error")
+  log.item("detail one"); log.item("detail two")
+  log.info("back to info"); log.space("indented")
+  log.warning("warning"); log.critical("critical"); log.panic("panic")
+
+  p = Print()
+  p.inf("info"); p.err("error")
+  p.dot("detail one"); p.dot("detail two")
+  p.inf("back to info"); p.gap("indented")
+  p.wrn("warning"); p.ok("done")
+
+  p2 = Print(level="WRN")
+  p2.info("hidden"); p2.error("visible"); p2.dot("visible — inherits ERR")

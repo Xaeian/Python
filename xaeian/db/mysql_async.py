@@ -5,10 +5,13 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from typing import Any
-from logging import Logger
+from ..log import Logger, Print
 
 from .abstract_async import AbstractAsyncDatabase
-from .utils import listify, to_dicts, ident, ph, serialize_params, serialize_dict, split_sql, parse_row
+from .utils import (
+  listify, to_dicts, ident, ph, serialize_params,
+  serialize_dict, split_sql, parse_row,
+)
 
 class MysqlAsyncDatabase(AbstractAsyncDatabase):
   """
@@ -35,7 +38,7 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
     user: str = "root",
     password: str = "",
     port: int = 3306,
-    log: Logger|None = None,
+    log: Logger|Print|None = None,
   ):
     super().__init__()
     self.host = host

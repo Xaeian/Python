@@ -36,7 +36,7 @@ Async:
 import importlib
 from enum import Enum
 from typing import TYPE_CHECKING
-from logging import Logger
+from ..log import Logger, Print
 
 class DatabaseType(str, Enum):
   """Supported database types."""
@@ -75,7 +75,7 @@ def Database(
   user: str = "root",
   password: str = "",
   port: int|None = None,
-  log: Logger|None = None,
+  log: Logger|Print|None = None,
 ):
   """
   Create sync database instance.
@@ -110,7 +110,7 @@ def AsyncDatabase(
   user: str = "root",
   password: str = "",
   port: int|None = None,
-  log: Logger|None = None,
+  log: Logger|Print|None = None,
 ):
   """
   Create async database instance.

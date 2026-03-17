@@ -1,31 +1,31 @@
 # `xaeian.cli`
 
-Command-line utility scripts. Run with `py -m xaeian.cli.<name>`.
+Command-line utility scripts. Run with `xn <name>`.
 
-## `tree` — Directory tree
+## `tree`: Directory tree
 
 ```sh
-py -m xaeian.cli.tree .
-py -m xaeian.cli.tree src/ -e .py .c
-py -m xaeian.cli.tree . -d 2 --size
-py -m xaeian.cli.tree . --dirs
-py -m xaeian.cli.tree . -o tree.json
+xn tree .
+xn tree src/ -e .py .c
+xn tree . -d 2 --size
+xn tree . --dirs
+xn tree . -o tree.json
 ```
 
-## `dupes` — Duplicate file finder
+## `dupes`: Duplicate file finder
 
 ```sh
-py -m xaeian.cli.dupes photos/
-py -m xaeian.cli.dupes docs/ --zips
-py -m xaeian.cli.dupes . --min-size 1024
-py -m xaeian.cli.dupes . --algo md5 -o report.json
+xn dupes photos/
+xn dupes docs/ --zips
+xn dupes . --min-size 1024
+xn dupes . --algo md5 -o report.json
 ```
 
-## `wifi` — Saved Wi-Fi passwords
+## `wifi`: Saved Wi-Fi passwords
 
 ```sh
-py -m xaeian.cli.wifi
-py -m xaeian.cli.wifi -o wifi.json
+xn wifi
+xn wifi -o wifi.json
 ```
 
 Windows (`netsh`) and Linux (`nmcli` / NetworkManager files).

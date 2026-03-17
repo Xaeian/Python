@@ -13,7 +13,9 @@ pip install xaeian[dsp]       # + scipy
 pip install xaeian[db]        # + pymysql, psycopg2
 pip install xaeian[db-async]  # + aiomysql, asyncpg, aiosqlite
 pip install xaeian[mf]        # + pypdf, PyMuPDF, Pillow
+pip install xaeian[pdf]       # + reportlab, Pillow
 pip install xaeian[eda]       # + sexpdata, pypdf, PyMuPDF
+pip install xaeian[sftp]      # + paramiko
 pip install xaeian[all]       # everything
 ```
 
@@ -64,6 +66,18 @@ sig = Signal.from_accel(raw_x, fs=6666, bits=16, g_range=2)
 clean = sig.highpass(10).lowpass(500)
 print(f"RMS:{clean.rms:.4f}  peak_freq:{clean.fft().peak_freq:.0f}Hz")
 
+# Binary structs: C-like encoding with CRC, bitfields, scale/offset
+from xaeian.cstruct import Struct, Field, Bitfield, Type, Endian
+from xaeian.crc import crc32_iso
+pkt = Struct(endian=Endian.little, crc=crc32_iso)
+pkt.add(
+  Field(Type.uint32, "timestamp", "s"),
+  Bitfield("flags", [("enabled", 1), ("error", 1), ("mode", 6)]),
+  Field(Type.float, "temperature", "°C"),
+)
+raw = pkt.encode({"timestamp": 1234567890, "flags": {"enabled": 1, "error": 0, "mode": 5}, "temperature": 23.5})
+pkt.decode(raw) # {"timestamp": 1234567890, "flags": {...}, "temperature": 23.5}
+
 # Media: compress, strip metadata
 from xaeian.mf.min import compress
 compress("report.pdf") # → report-min.pdf
@@ -74,25 +88,40 @@ log = logger("app", file="app.log")
 log.info("started") # 2025-03-01 14:32:01 INF started
 ```
 
+## CLI
+
+```sh
+xn tree .                     # directory tree
+xn dupes photos/              # find duplicates
+xn wifi                       # saved Wi-Fi passwords
+xn min report.pdf             # compress PDF
+xn min photo.jpg -f avif      # convert to AVIF
+xn min photos/ --max-px 1280  # batch resize
+xn meta photo.jpg -i          # strip EXIF in-place
+xn ico logo.png -o favicon.ico
+```
+
 ## Modules
 
-| Module        | Description                                        | Docs                                             |
-| ------------- | -------------------------------------------------- | ------------------------------------------------ |
-| `files`       | FILE, DIR, PATH, JSON, CSV, INI                    | [xaeian/readme.md](xaeian/readme.md#files)       |
-| `files_async` | Async wrappers via `asyncio.to_thread()`           | [xaeian/readme.md](xaeian/readme.md#files_async) |
-| `table`       | Lightweight tabular ops on `list[dict]`            | [xaeian/readme.md](xaeian/readme.md#table)       |
-| `xstring`     | Split, replace, strip comments, passwords          | [xaeian/readme.md](xaeian/readme.md#xstring)     |
-| `xtime`       | Datetime parsing, arithmetic, rounding             | [xaeian/readme.md](xaeian/readme.md#xtime)       |
-| `colors`      | ANSI 256-color terminal codes                      | [xaeian/readme.md](xaeian/readme.md#colors)      |
-| `log`         | Colored logging with file rotation                 | [xaeian/readme.md](xaeian/readme.md#log)         |
-| `crc`         | CRC-8/16/32 with predefined variants               | [xaeian/readme.md](xaeian/readme.md#crc)         |
-| `cstruct`     | Binary struct serialization _(C-like)_             | [xaeian/readme.md](xaeian/readme.md#cstruct)     |
-| `cmd`         | Shell command helpers                              | [xaeian/readme.md](xaeian/readme.md#cmd)         |
-| `serial_port` | Serial communication with colored output           | [xaeian/readme.md](xaeian/readme.md#serial_port) |
-| `cbash`       | Embedded device console protocol                   | [xaeian/readme.md](xaeian/readme.md#cbash)       |
-| `plot`        | Fluent matplotlib wrapper with stacked panels      | [xaeian/readme.md](xaeian/readme.md#plot)        |
-| `dsp`         | Signal processing, SOS filters, FFT, vibration     | [xaeian/readme.md](xaeian/readme.md#dsp)         |
-| `mf`          | Compress, convert, strip metadata _(PDF & images)_ | [xaeian/mf/readme.md](xaeian/mf/readme.md)       |
-| `db`          | Database abstraction _(SQLite, MySQL, PostgreSQL)_ | [xaeian/db/readme.md](xaeian/db/readme.md)       |
-| `eda`         | E-series, KiCad export, NgSpice runner             | [xaeian/eda/readme.md](xaeian/eda/readme.md)     |
-| `cli`         | tree, dupes, wifi scripts                          | [xaeian/cli/readme.md](xaeian/cli/readme.md)     |
+| Module        | Description                                        | Docs                                                                                        |
+| ------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `files`       | FILE, DIR, PATH, JSON, CSV, INI                    | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#files)       |
+| `files_async` | Async wrappers via `asyncio.to_thread()`           | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#files_async) |
+| `table`       | Lightweight tabular ops on `list[dict]`            | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#table)       |
+| `xstring`     | Split, replace, strip comments, passwords          | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#xstring)     |
+| `xtime`       | Datetime parsing, arithmetic, rounding             | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#xtime)       |
+| `colors`      | ANSI 256-color terminal codes                      | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#colors)      |
+| `log`         | Colored logging with file rotation                 | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#log)         |
+| `crc`         | CRC-8/16/32 with predefined variants               | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#crc)         |
+| `cstruct`     | Binary struct serialization _(C-like)_             | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#cstruct)     |
+| `cmd`         | Shell command helpers                              | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#cmd)         |
+| `serial_port` | Serial communication with colored output           | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#serial_port) |
+| `cbash`       | Embedded device console protocol                   | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#cbash)       |
+| `sftp`        | SFTP/SSH client, sync push/pull, remote exec       | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#sftp)        |
+| `plot`        | Fluent matplotlib wrapper with stacked panels      | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#plot)        |
+| `dsp`         | Signal processing, SOS filters, FFT, vibration     | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#dsp)         |
+| `db`          | Database abstraction _(SQLite, MySQL, PostgreSQL)_ | [xaeian/db/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/db/readme.md)       |
+| `mf`          | Compress, convert, strip metadata _(PDF & images)_ | [xaeian/mf/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/mf/readme.md)       |
+| `pdf`         | PDF document generation _(reportlab)_              | [xaeian/pdf/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/pdf/readme.md)     |
+| `eda`         | E-series, KiCad export, NgSpice runner             | [xaeian/eda/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/eda/readme.md)     |
+| `cli`         | tree, dupes, wifi scripts                          | [xaeian/cli/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/cli/readme.md)     |

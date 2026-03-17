@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from logging import Logger
+from ..log import Logger, Print
 
 from .abstract import AbstractDatabase
 from .utils import serialize_dict, ident, ph

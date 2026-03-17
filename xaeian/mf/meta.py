@@ -13,7 +13,7 @@ import os
 from .utils import PDF_EXTS, IMG_EXTS
 
 def scrub_metadata(src:str, dst:str|None=None, inplace:bool=False) -> str:
-  """Remove metadata from file — auto-detects PDF vs image.
+  """Remove metadata from file: auto-detects PDF vs image.
 
   Args:
     src: Input file path.
@@ -34,37 +34,32 @@ def scrub_metadata(src:str, dst:str|None=None, inplace:bool=False) -> str:
 
 EXAMPLES = """
 examples:
-  py -m xaeian.mf.meta report.pdf             Strip PDF metadata → report-nometa.pdf
-  py -m xaeian.mf.meta photo.jpg              Strip EXIF → photo-nometa.jpg
-  py -m xaeian.mf.meta photo.jpg -i           Strip EXIF in-place
-  py -m xaeian.mf.meta scan.png -o clean.png  Custom output path
+  xn meta report.pdf             Strip PDF metadata → report-nometa.pdf
+  xn meta photo.jpg              Strip EXIF → photo-nometa.jpg
+  xn meta photo.jpg -i           Strip EXIF in-place
+  xn meta scan.png -o clean.png  Custom output path
 """
 
-if __name__ == "__main__":
+def main():
   import argparse
-
   def fmt(prog):
     return argparse.RawDescriptionHelpFormatter(prog, max_help_position=34, width=90)
-
   class MetaParser(argparse.ArgumentParser):
-    def format_help(self):
-      return "\n" + super().format_help().rstrip() + "\n\n"
-
-  p = MetaParser(
+    def format_help(self): return "\n" + super().format_help().rstrip() + "\n\n"
+  parser = MetaParser(
     description="Remove metadata from PDFs and images (auto-detects by extension)",
     formatter_class=fmt,
     add_help=False,
     usage=argparse.SUPPRESS,
     epilog=EXAMPLES,
   )
-  p.add_argument("src",
-    help="Input file path")
-  p.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
+  parser.add_argument("src", help="Input file path")
+  parser.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
     help="Output path (default: <n>-nometa.<ext>)")
-  p.add_argument("-i", "--inplace", action="store_true",
-    help="Overwrite source file")
-  p.add_argument("-h", "--help", action="help",
-    help="Show this help message and exit")
+  parser.add_argument("-i", "--inplace", action="store_true", help="Overwrite source file")
+  parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
+  args = parser.parse_args()
+  print(scrub_metadata(args.src, args.dst, args.inplace))
 
-  a = p.parse_args()
-  print(scrub_metadata(a.src, a.dst, a.inplace))
+if __name__ == "__main__":
+  main()

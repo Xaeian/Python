@@ -98,44 +98,39 @@ def img_to_ico(
 
 EXAMPLES = """
 examples:
-  py -m xaeian.mf.ico logo.png                   Auto sizes → logo.ico
-  py -m xaeian.mf.ico logo.png -o favicon.ico    Custom output
-  py -m xaeian.mf.ico photo.jpg --fit crop       Center-crop to square
-  py -m xaeian.mf.ico logo.png --sizes 16,32,48  Specific sizes
-  py -m xaeian.mf.ico logo.png --upscale         Include sizes > source
+  xn ico logo.png                   Auto sizes -> logo.ico
+  xn ico logo.png -o favicon.ico    Custom output
+  xn ico photo.jpg --fit crop       Center-crop to square
+  xn ico logo.png --sizes 16,32,48  Specific sizes
+  xn ico logo.png --upscale         Include sizes > source
 """
 
-if __name__ == "__main__":
+def main():
   import argparse
-
   def fmt(prog):
     return argparse.RawDescriptionHelpFormatter(prog, max_help_position=34, width=90)
-
   class IcoParser(argparse.ArgumentParser):
-    def format_help(self):
-      return "\n" + super().format_help().rstrip() + "\n\n"
-
-  p = IcoParser(
+    def format_help(self): return "\n" + super().format_help().rstrip() + "\n\n"
+  parser = IcoParser(
     description="Convert image to multi-size .ico (auto-picks sizes from source)",
     formatter_class=fmt,
     add_help=False,
     usage=argparse.SUPPRESS,
     epilog=EXAMPLES,
   )
-  p.add_argument("src",
-    help="Input image path")
-  p.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
+  parser.add_argument("src", help="Input image path")
+  parser.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
     help="Output .ico path (default: <n>.ico)")
-  p.add_argument("--fit", choices=["pad", "crop"], default="pad",
+  parser.add_argument("--fit", choices=["pad", "crop"], default="pad",
     help="Non-square handling (default: pad)")
-  p.add_argument("--sizes", default=None, metavar="LIST",
+  parser.add_argument("--sizes", default=None, metavar="LIST",
     help="Comma-separated sizes (default: auto)")
-  p.add_argument("--upscale", action="store_true",
+  parser.add_argument("--upscale", action="store_true",
     help="Allow upscaling beyond source size")
-  p.add_argument("-h", "--help", action="help",
-    help="Show this help message and exit")
+  parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
+  args = parser.parse_args()
+  sizes = [int(s) for s in args.sizes.split(",")] if args.sizes else None
+  print(img_to_ico(args.src, args.dst, sizes, args.fit, args.upscale))
 
-  a = p.parse_args()
-  sizes = [int(s) for s in a.sizes.split(",")] if a.sizes else None
-  result = img_to_ico(a.src, a.dst, sizes, a.fit, a.upscale)
-  print(result)
+if __name__ == "__main__":
+  main()

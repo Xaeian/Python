@@ -6,10 +6,13 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 from typing import Any
-from logging import Logger
+from ..log import Logger, Print
 
 from .abstract_async import AbstractAsyncDatabase
-from .utils import listify, to_dicts, ident, ph, serialize_params, serialize_dict, split_sql, parse_row
+from .utils import (
+  listify, to_dicts, ident, ph, serialize_params,
+  serialize_dict, split_sql, parse_row,
+)
 
 class SqliteAsyncDatabase(AbstractAsyncDatabase):
   """

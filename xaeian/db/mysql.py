@@ -4,12 +4,10 @@
 from __future__ import annotations
 
 from typing import Any
-from logging import Logger
+from ..log import Logger, Print
 
 from .abstract import AbstractDatabase
 from .utils import ident, ph, serialize_dict
-
-
 class MysqlDatabase(AbstractDatabase):
   """
   MySQL database (pymysql).
@@ -35,7 +33,7 @@ class MysqlDatabase(AbstractDatabase):
     user: str = "root",
     password: str = "",
     port: int = 3306,
-    log: Logger|None = None,
+    log: Logger|Print|None = None,
   ):
     super().__init__()
     self.host = host

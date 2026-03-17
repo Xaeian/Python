@@ -31,7 +31,7 @@ try:
 except ImportError:
   raise ImportError("Install with: pip install xaeian[serial]")
 
-from .colors import Color
+from .colors import Color as c
 
 #----------------------------------------------------------------------------------------- Scan
 
@@ -166,28 +166,28 @@ class SerialPort:
 
   def print(self, text:str, prefix:str=""):
     if len(text) > self.print_limit:
-      text = text[:self.print_limit] + f"...{Color.END}"
+      text = text[:self.print_limit] + f"...{c.END}"
     if self.time_disp:
-      text = f"{Color.CYAN}{self._timestamp()}{Color.END} {text}"
+      text = f"{c.CYAN}{self._timestamp()}{c.END} {text}"
     if prefix: text = f"{prefix} {text}"
     if self.address is not None:
-      text = f"{Color.TURQUS}0x{self.address:02X}{Color.END} {text}"
+      text = f"{c.TURQUS}0x{self.address:02X}{c.END} {text}"
     self._log(text, "info")
 
   def print_error(self, text:str):
-    self.print(f"{Color.RED}{text}{Color.END}")
+    self.print(f"{c.RED}{text}{c.END}")
 
   def print_ok(self, text:str):
-    self.print(f"{Color.GREEN}{text}{Color.END}")
+    self.print(f"{c.GREEN}{text}{c.END}")
 
-  def print_conv2str(self, resp:bytes, str_color=Color.WHITE, bytes_color=Color.SALMON) -> str|None:
+  def print_conv2str(self, resp:bytes, str_color=c.WHITE, bytes_color=c.SALMON) -> str|None:
     """Try to print as string, fallback to bytes. Returns decoded string or None."""
     try:
       text = resp.decode("utf-8")
-      if text.rstrip(): self.print(f"{str_color}{text.rstrip()}{Color.END}")
+      if text.rstrip(): self.print(f"{str_color}{text.rstrip()}{c.END}")
       return text
     except UnicodeDecodeError:
-      self.print(f"{bytes_color}{resp}{Color.END}")
+      self.print(f"{bytes_color}{resp}{c.END}")
       return None
 
   def bytes_to_string(self, data:bytes, encoding:str="utf-8", strict:bool=True) -> str|None:
@@ -207,7 +207,7 @@ class SerialPort:
     if self.connected: return True
     try:
       self.serial = self._serial_class(self.port, self.baudrate, timeout=self.timeout)
-      self.print(f"{Color.VIOLET}Connect {self.port}{Color.END}")
+      self.print(f"{c.VIOLET}Connect {self.port}{c.END}")
       self.connected = True
       return True
     except serial.SerialException as e:
@@ -220,7 +220,7 @@ class SerialPort:
 
   def disconnect(self):
     if not self.connected: return
-    self.print(f"{Color.VIOLET}Disconnect {self.port}{Color.END}")
+    self.print(f"{c.VIOLET}Disconnect {self.port}{c.END}")
     try: self.serial.close()
     except Exception:
       if self.debug: raise
@@ -258,7 +258,7 @@ class SerialPort:
 
   #-------------------------------------------------------------------------------------------- Read
 
-  def read(self, str_color=Color.WHITE, bytes_color=Color.SALMON,
+  def read(self, str_color=c.WHITE, bytes_color=c.SALMON,
            print_conv2str:bool=False, remove_ansi:bool=False) -> bytes|None:
     try:
       resp = self.serial.read(self.buffer_size)
@@ -271,11 +271,11 @@ class SerialPort:
     resp = self._crc_decode(resp)
     if resp is None: return None
     if print_conv2str: self.print_conv2str(resp, str_color, bytes_color)
-    else: self.print(f"{bytes_color}{resp}{Color.END}")
+    else: self.print(f"{bytes_color}{resp}{c.END}")
     if remove_ansi: resp = self.remove_ansi(resp)
     return resp
 
-  def read_line(self, color=Color.WHITE, conv2str:bool=True, remove_ansi:bool=True) -> bytes|str|None:
+  def read_line(self, color=c.WHITE, conv2str:bool=True, remove_ansi:bool=True) -> bytes|str|None:
     try:
       resp = self.serial.readline(self.buffer_size)
     except Exception as e:
@@ -285,11 +285,11 @@ class SerialPort:
     if self.address is not None: resp = self._check_address(resp)
     if not resp: return None
     if conv2str: resp = self.print_conv2str(resp, color, color)
-    else: self.print(f"{color}{resp}{Color.END}")
+    else: self.print(f"{color}{resp}{c.END}")
     if remove_ansi and resp: resp = self.remove_ansi(resp)
     return resp
 
-  def read_lines(self, color=Color.WHITE, conv2str:bool=True) -> list[str]|None:
+  def read_lines(self, color=c.WHITE, conv2str:bool=True) -> list[str]|None:
     try:
       resp = self.serial.read(self.buffer_size)
     except Exception as e:
@@ -303,11 +303,11 @@ class SerialPort:
     for line in lines:
       if conv2str: result.append(self.print_conv2str(line, color, color))
       else:
-        self.print(f"{color}{line}{Color.END}")
+        self.print(f"{color}{line}{c.END}")
         result.append(line)
     return result
 
-  def clear(self, color=Color.GREY):
+  def clear(self, color=c.GREY):
     while True:
       resp = self.read_lines(color)
       if not resp: break
@@ -320,13 +320,13 @@ class SerialPort:
 
   #-------------------------------------------------------------------------------------------- Send
 
-  def send(self, message:str|bytes, str_color=Color.GREY, bytes_color=Color.SALMON):
+  def send(self, message:str|bytes, str_color=c.GREY, bytes_color=c.SALMON):
     if isinstance(message, str):
-      self.print(f"{str_color}{message.strip()}{Color.END}")
+      self.print(f"{str_color}{message.strip()}{c.END}")
       data = message.encode("utf-8")
     else:
       data = message
-      self.print(f"{bytes_color}{data}{Color.END}")
+      self.print(f"{bytes_color}{data}{c.END}")
     if self.address is not None: data = bytes([self.address]) + data
     data = self._crc_encode(data)
     try: self.serial.write(data)
@@ -354,7 +354,7 @@ class Recorder(SerialPort):
     time_utc: bool = False,
     time_format: str = "%Y-%m-%d %H:%M:%S.%f",
     name: str = "",
-    color: str = Color.WHITE,
+    color: str = c.WHITE,
     err_delay: float = 5,
   ):
     """
@@ -373,7 +373,7 @@ class Recorder(SerialPort):
       print_console, print_file, time_disp, time_utc, time_format)
 
   def print(self, text:str, prefix:str=""):
-    prefix = f"{Color.TURQUS}{self.name}{Color.END}"
+    prefix = f"{c.TURQUS}{self.name}{c.END}"
     super().print(text, prefix)
 
   def _check_timeout(self) -> bool:

@@ -1,7 +1,7 @@
 # xaeian/mf/pdf.py
 
 """
-PDF manipulation — compress, merge, split, extract, metadata, text overlay.
+PDF manipulation: compress, merge, split, extract, metadata, text overlay.
 
 Uses Ghostscript for compression, pypdf for structure, PyMuPDF (fitz) for text.
 
@@ -52,7 +52,7 @@ def pdf_compress(
   if gs_cmd is None:
     raise RuntimeError("Ghostscript not found")
   out_path = resolve_dst(src, dst, inplace, "min")
-  # Inplace needs tmp file — GS can't read and write same file
+  # Inplace needs tmp file: GS can't read and write same file
   if inplace and dst is None:
     base, ext = os.path.splitext(src)
     tmp_path = f"{base}-tmp{ext}"
@@ -154,7 +154,7 @@ def parse_pages(spec:str|int|Sequence[str|int], total:int) -> list[int]:
   """Parse page specification into 0-based indices.
 
   Args:
-    spec: Page spec (1-based) — int, str "1,3,5-7,!2", or list [1, "5-7", "!2"].
+    spec: Page spec (1-based): int, str "1,3,5-7,!2", or list [1, "5-7", "!2"].
     total: Total number of pages in document.
 
   Returns:
@@ -250,7 +250,7 @@ def pdf_add_text(
   for i, page in enumerate(doc):
     if pages is None or i in pages:
       page.insert_text(pos, text, fontname=fontname, fontsize=fontsize, color=color)
-  # Fitz can't save to same file — use tmp + replace
+  # Fitz can't save to same file: use tmp + replace
   if out_path == src:
     base, ext = os.path.splitext(src)
     tmp_path = f"{base}-tmp{ext}"

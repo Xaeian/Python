@@ -15,20 +15,20 @@ Modules:
   - `xaeian.cstruct`: Binary struct serialization
   - `xaeian.serial_port`: Serial communication
   - `xaeian.cbash`: Embedded device console
+  - `xaeian.sftp`: SFTP/SSH client for deployment and data collection
   - `xaeian.plot`: Fluent matplotlib wrapper
+  - `xaeian.dsp`: Signal processing (filter, FFT, vibration metrics)
   - `xaeian.db`: Database abstraction (SQLite, MySQL, PostgreSQL)
   - `xaeian.mf`: PDF and image compression, conversion, metadata
   - `xaeian.eda`: E-series, KiCad export, NgSpice runner
   - `xaeian.cli`: Utility scripts (tree, dupes, wifi)
 
 Example:
-  >>> from xaeian import logger, JSON, split_sql, Files
+  >>> from xaeian import logger, JSON, split_sql, Files, Plot
   >>> from xaeian.db import Database
-  >>> from xaeian.xtime import Time
-  >>> from xaeian.plot import Plot
 """
 
-__version__ = "0.4.1"
+__version__ = "0.5.0"
 __repo__ = "Xaeian/Python"
 __python__ = ">=3.12"
 __description__ = "Python utilities for files, strings, time, serial, structs, media, electronics, plotting, and database and more..."
@@ -38,6 +38,9 @@ __keywords__ = [
   "media", "kicad", "plot", "matplotlib", "ngspice", "spice",
   "dsp", "signal", "filter", "fft", "vibration",
 ]
+__scripts__ = {
+  "xn": "xaeian.__main__:main",
+}
 
 from .xstring import (
   replace_start, replace_end, replace_map,
@@ -54,8 +57,8 @@ from .files import (
 )
 
 from .crc import CRC
-from .log import logger
-from .colors import Color, Print, Ico
+from .colors import Color, Ico
+from .log import logger, Logger, Print
 
 __all__ = [
   "__version__",
@@ -67,9 +70,15 @@ __all__ = [
   "generate_password",
   "file_context", "Files",
   "PATH", "DIR", "FILE", "INI", "CSV", "JSON",
-  "CRC", "logger",
-  "Color", "Print", "Ico",
+  "CRC",
+  "logger", "Logger", "Print", "Color", "Ico",
 ]
+
+try:
+  from .sftp import SFTP
+  __all__ += ["SFTP"]
+except Exception:
+  pass
 
 try:
   from .xtime import Time, TimeInput, time_to

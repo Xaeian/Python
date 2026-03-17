@@ -26,9 +26,9 @@ DIR.ensure("data/subdir/")
 DIR.file_list("data", exts=[".txt", ".json"])
 DIR.zip("folder", "archive.zip")
 
-PATH.stem("a/b/file.txt")          # "file"
-PATH.ext("a/b/file.txt")           # ".txt"
-PATH.with_suffix("f.txt", ".md")   # "f.md"
+PATH.stem("a/b/file.txt")         # "file"
+PATH.ext("a/b/file.txt")          # ".txt"
+PATH.with_suffix("f.txt", ".md")  # "f.md"
 ```
 
 ### Context-based paths
@@ -37,11 +37,11 @@ PATH.with_suffix("f.txt", ".md")   # "f.md"
 from xaeian import Files, file_context
 
 fs = Files(root_path="/app/data")
-fs.JSON.load("config")             # /app/data/config.json
-fs.FILE.save("log.txt", "ok")      # /app/data/log.txt
+fs.JSON.load("config") # /app/data/config.json
+fs.FILE.save("log.txt", "ok") # /app/data/log.txt
 
 with file_context(root_path="/tmp"):
-  FILE.save("temp.txt", "...")     # /tmp/temp.txt
+  FILE.save("temp.txt", "...") # /tmp/temp.txt
 ```
 
 ### Async
@@ -111,17 +111,17 @@ t = Time(1700000000)                   # unix timestamp
 t = Time("2d")                         # now + 2 days
 t = Time("-6h 30m")                    # now - 6.5 hours
 
-t + "1w"              # add 1 week
-t - "3d"              # subtract 3 days
-t2 - t                # timedelta
+t + "1w"          # add 1 week
+t - "3d"          # subtract 3 days
+t2 - t            # timedelta
 
-t.round("h")          # round to hour
-t.round("w")          # round to week (Monday)
+t.round("h")      # round to hour
+t.round("w")      # round to week (Monday)
 
-t.to("ts")            # unix timestamp (float)
-t.to("iso")           # "2025-03-01T12:00:00+01:00"
-t.to("utc")           # Time in UTC
-t.to("%Y-%m-%d")      # "2025-03-01"
+t.to("ts")        # unix timestamp (float)
+t.to("iso")       # "2025-03-01T12:00:00+01:00"
+t.to("utc")       # Time in UTC
+t.to("%Y-%m-%d")  # "2025-03-01"
 ```
 
 ## `log`
@@ -130,19 +130,19 @@ t.to("%Y-%m-%d")      # "2025-03-01"
 from xaeian import logger
 
 log = logger("app", file="app.log")
-log.info("started")       # 2025-03-01 14:32:01 INF started
-log.warning("low disk")   # 2025-03-01 14:32:01 WRN low disk
-log.error("failed")       # 2025-03-01 14:32:01 ERR failed
-log.panic("fatal")        # custom level above CRITICAL
+log.info("started")      # 2025-03-01 14:32:01 INF started
+log.warning("low disk")  # 2025-03-01 14:32:01 WRN low disk
+log.error("failed")      # 2025-03-01 14:32:01 ERR failed
+log.panic("fatal")       # custom level above CRITICAL
 
-log.stream = False        # toggle console
-log.file = False          # toggle file
+log.stream = False       # toggle console
+log.file = False         # toggle file
 ```
 
 ## `colors`
 
 ```py
-from xaeian.colors import Color, Print
+from xaeian import Print, Color
 
 print(f"{Color.RED}Error!{Color.END}")
 print(f"{Color.GREEN}OK{Color.END}")
@@ -160,12 +160,12 @@ p.run("starting...")     # RUN starting...
 ```py
 from xaeian.crc import crc32_iso, crc16_modbus, crc8_maxim, CRC
 
-crc16_modbus.checksum(b"123456789")     # 0x4B37
-crc32_iso.checksum(b"123456789")        # 0xCBF43926
+crc16_modbus.checksum(b"123456789") # 0x4B37
+crc32_iso.checksum(b"123456789") # 0xCBF43926
 
 encoded = crc16_modbus.encode(b"Hello!")
-crc16_modbus.decode(encoded)            # b'Hello!'
-crc16_modbus.decode(b"bad\x00\x00")     # None (CRC mismatch)
+crc16_modbus.decode(encoded) # b'Hello!'
+crc16_modbus.decode(b"bad\x00\x00") # None (CRC mismatch)
 
 my_crc = CRC(16, 0x8005, 0xFFFF, True, True, 0x0000, False)
 ```
@@ -235,6 +235,31 @@ with CBash("COM3") as cb:
   cb.reboot()
 ```
 
+## `sftp`
+
+Requires `pip install xaeian[sftp]`.
+
+```py
+from xaeian.sftp import SFTP
+
+with SFTP("10.0.0.1", "pi", key="~/.ssh/id_rsa", log=Print()) as s:
+  s.put("dist/app.py", "/srv/app/app.py")
+  s.get("/srv/app/log.txt", "local/log.txt")
+  s.put_dir("./dist", "/srv/app")
+  s.get_dir("/srv/app/data", "./backup")
+  s.exec("systemctl restart app")
+
+# Sync (skip unchanged by mtime + size)
+with SFTP("host", "user", password="pass") as s:
+  s.sync_push("./dist", "/srv/app", delete=True)
+  s.sync_pull("/srv/data", "./local", dry_run=True)  # plan only
+
+# Auth: key > password > agent
+SFTP("host", "user", key="~/.ssh/id_rsa", passphrase="secret")
+SFTP("host", "user", password="pass")
+SFTP("host", "user", agent=True)
+```
+
 ## `plot`
 
 Fluent matplotlib wrapper. Requires `pip install xaeian[plot]`.
@@ -278,7 +303,7 @@ p.axes  # list[Axes]
 
 Themes: `"clean"` _(default, light)_, `"dark"`. Auto datetime formatting, auto ylabel coloring for single series. Labels accept `"Name [unit]"` or `("Name", "unit")` tuples.
 
-```bash
+```sh
 py -m xaeian.plot         # sensor dashboard demo
 py -m xaeian.plot family  # parametric sweep demo
 ```
@@ -333,6 +358,6 @@ Signal.sine(100, duration=1.0, fs=10000)
 Signal.noise(duration=1.0, fs=10000)
 ```
 
-```bash
+```sh
 py -m xaeian.dsp   # demo: filter, FFT, metrics, operators
 ```
