@@ -64,6 +64,7 @@ jobs:
           python-version: "{python_ver}"
       - run: pip install build
       - run: python -m build
+      - run: pip install -e .
       - uses: pypa/gh-action-pypi-publish@release/v1
 '''
 

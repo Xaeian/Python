@@ -1,5 +1,9 @@
 ## Changelog `xaeian`
 
+## `0.5.2` Refactor
+
+- `files.py`: many bugs, full refactor
+
 ## `0.5.1` FTP
 
 - `net`: FTP client + `Remote()` factory unifying SFTP and FTP

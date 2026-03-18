@@ -95,6 +95,7 @@ def get_meta(pkg_dir:str) -> dict:
     "description": "",
     "author": "",
     "keywords": [],
+    "dependencies": [],
     "scripts": {},
   }
   init = PATH.join(pkg_dir, "__init__.py")
@@ -112,11 +113,10 @@ def get_meta(pkg_dir:str) -> dict:
             elif t.id == "__python__": meta["python"] = val
             elif t.id == "__description__": meta["description"] = val
             elif t.id == "__author__": meta["author"] = val
-          elif isinstance(node.value, ast.List) and t.id == "__keywords__":
-            meta["keywords"] = [
-              e.value for e in node.value.elts
-              if isinstance(e, ast.Constant)
-            ]
+          elif isinstance(node.value, ast.List):
+            vals = [e.value for e in node.value.elts if isinstance(e, ast.Constant)]
+            if t.id == "__keywords__": meta["keywords"] = vals
+            elif t.id == "__dependencies__": meta["dependencies"] = vals
           elif isinstance(node.value, ast.Dict) and t.id == "__scripts__":
             meta["scripts"] = {
               k.value: v.value
@@ -148,13 +148,14 @@ def generate_toml(pkg_name:str, meta:dict, extras:dict[str, list[str]]) -> str:
   if meta["keywords"]:
     kw_str = ", ".join(f'"{k}"' for k in meta["keywords"])
     lines.append(f'keywords = [{kw_str}]')
-  lines.append('dependencies = []')
+  deps_str = ", ".join(f'"{d}"' for d in meta["dependencies"])
+  lines.append(f'dependencies = [{deps_str}]')
   lines.append('')
   if extras:
     lines.append('[project.optional-dependencies]')
     for name in sorted(extras.keys(), key=lambda x: (x == "all", x)):
-      deps_str = ", ".join(f'"{d}"' for d in extras[name])
-      lines.append(f'{name} = [{deps_str}]')
+      dep_str = ", ".join(f'"{d}"' for d in extras[name])
+      lines.append(f'{name} = [{dep_str}]')
     lines.append('')
   if meta.get("scripts"):
     lines.append('[project.scripts]')
@@ -195,12 +196,14 @@ def generate(package:str, output:str|None=None):
   p.inf(f"Modules: {c.GREY}{', '.join(sorted(modules))}{c.END}")
   if subpackages:
     p.inf(f"Subpackages: {c.GREY}{', '.join(sorted(subpackages))}{c.END}")
+  if meta["dependencies"]:
+    p.inf(f"Dependencies: {c.GREY}{', '.join(meta['dependencies'])}{c.END}")
   if extras:
     for name, deps in sorted(extras.items(), key=lambda x: (x[0] == "all", x[0])):
       p.item(f"[{c.SKY}{name}{c.END}]: {c.GREY}{', '.join(deps)}{c.END}")
   if meta.get("scripts"):
     for cmd, entry in meta["scripts"].items():
-      p.item(f"Script: {c.TURQUS}{cmd}{c.END} → {c.GREY}{entry}{c.END}")
+      p.item(f"Script: {c.TURQUS}{cmd}{c.END} -> {c.GREY}{entry}{c.END}")
   toml = generate_toml(pkg_name, meta, extras)
   out = output or PATH.join(PATH.dirname(pkg_dir), "pyproject.toml")
   FILE.save(out, toml)

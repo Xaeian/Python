@@ -4,12 +4,12 @@
 File operations with context-based path resolution.
 
 Provides namespace classes for common file operations:
-- `PATH` — path manipulation and resolution
-- `DIR` — directory operations (create, remove, list, zip)
-- `FILE` — file read/write/append
-- `INI` — INI config files
-- `CSV` — CSV data files
-- `JSON` — JSON data files
+- `PATH`: path manipulation and resolution
+- `DIR`: directory operations (create, remove, list, zip)
+- `FILE`: file read/write/append
+- `INI`: INI config files
+- `CSV`: CSV data files
+- `JSON`: JSON data files
 
 Global configuration via context manager `file_context()`.
 Object-oriented access via `Files(root_path=...)`.
@@ -51,7 +51,10 @@ class Config:
   encoding: str = "utf-8"
 
   def __post_init__(self):
-    if self.root_path is None: self.root_path = _default_root_path()
+    if self.root_path is None:
+      self.root_path = _default_root_path()
+    elif not os.path.isabs(self.root_path):
+      self.root_path = os.path.abspath(self.root_path)
 
 _context: ContextVar[Config] = ContextVar("xaeian_files_config", default=Config())
 
@@ -68,7 +71,7 @@ def set_context(**overrides) -> Config:
   return new_cfg
 
 @contextmanager
-def file_context(**overrides: Any):
+def file_context(**overrides:Any):
   """Temporarily override configuration within a block."""
   cfg = get_context()
   if overrides:
@@ -82,7 +85,7 @@ def file_context(**overrides: Any):
   finally:
     _context.reset(token)
 
-#-------------------------------------------------------------------------------- PATH namespace
+#------------------------------------------------------------------------------- PATH namespace
 
 class PATH:
   """
@@ -96,7 +99,7 @@ class PATH:
   """
 
   @staticmethod
-  def normalize(path: str) -> str:
+  def normalize(path:str) -> str:
     """Normalize path separators and redundant segments."""
     cfg = get_context()
     if cfg.posix_slash: path = path.replace("\\", "/")
@@ -106,7 +109,7 @@ class PATH:
     return path
 
   @staticmethod
-  def expand(path: str) -> str:
+  def expand(path:str) -> str:
     """
     Expand `~`, `~user` and environment variables `$VAR`, `${VAR}`.
 
@@ -119,7 +122,7 @@ class PATH:
     return PATH.normalize(path)
 
   @staticmethod
-  def resolve(path: str, read: bool = True) -> str:
+  def resolve(path:str, read:bool = True) -> str:
     """
     Resolve path to absolute using current config.
 
@@ -129,7 +132,12 @@ class PATH:
     path = PATH.expand(path)
     if os.path.isabs(path): return PATH.normalize(os.path.normpath(path))
     if read and cfg.bundle and hasattr(sys, "_MEIPASS"):
-      base = getattr(sys, "_MEIPASS")
+      meipass = PATH.normalize(getattr(sys, "_MEIPASS"))
+      root = PATH.normalize(cfg.root_path) if cfg.root_path else ""
+      if root and root.startswith(meipass):
+        base = root
+      else:
+        base = meipass
     else:
       if not cfg.auto_resolve: return PATH.normalize(path)
       base = cfg.root_path
@@ -138,69 +146,75 @@ class PATH:
     return PATH.normalize(full)
 
   @staticmethod
-  def local(path: str, base: str|None = None, prefix: str = "") -> str:
+  def local(path:str, base:str|None = None, prefix:str = "") -> str:
     """Convert absolute path to path relative to given base (or root_path)."""
     cfg = get_context()
-    abs_path = os.path.abspath(PATH.expand(path))
+    abs_path = PATH.resolve(path)
     if base is None: base = cfg.root_path
-    abs_base = os.path.abspath(PATH.expand(base))
+    abs_base = PATH.resolve(base)
     try:
       rel = os.path.relpath(abs_path, abs_base)
       rel = PATH.normalize(rel)
       if not rel.startswith(".."):
-        if prefix and not rel.startswith(prefix + "/") and not rel.startswith(prefix):
-          rel = prefix + rel
+        if rel == ".": rel = ""
+        if prefix:
+          sep = "" if prefix.endswith("/") else "/"
+          full_prefix = prefix + sep
+          if rel and rel != prefix.rstrip("/") and not rel.startswith(full_prefix):
+            rel = full_prefix + rel
+          elif not rel:
+            rel = prefix.rstrip("/")
         return rel
     except ValueError:
       pass
     return PATH.normalize(abs_path)
 
   @staticmethod
-  def exists(path: str) -> bool:
+  def exists(path:str) -> bool:
     """Check if path exists (file or directory)."""
-    return os.path.exists(PATH.expand(path))
+    return os.path.exists(PATH.resolve(path))
 
   @staticmethod
-  def is_file(path: str) -> bool:
+  def is_file(path:str) -> bool:
     """Check if path is an existing file."""
-    return os.path.isfile(PATH.expand(path))
+    return os.path.isfile(PATH.resolve(path))
 
   @staticmethod
-  def is_dir(path: str) -> bool:
+  def is_dir(path:str) -> bool:
     """Check if path is an existing directory."""
-    return os.path.isdir(PATH.expand(path))
+    return os.path.isdir(PATH.resolve(path))
 
   @staticmethod
-  def basename(path: str) -> str:
+  def basename(path:str) -> str:
     """Return final component of path."""
     return os.path.basename(PATH.normalize(path))
 
   @staticmethod
-  def dirname(path: str) -> str:
+  def dirname(path:str) -> str:
     """Return directory part of path."""
     return PATH.normalize(os.path.dirname(PATH.normalize(path)))
 
   @staticmethod
-  def stem(path: str) -> str:
+  def stem(path:str) -> str:
     """Return filename without extension."""
     name = PATH.basename(path)
     stem, _ = os.path.splitext(name)
     return stem
 
   @staticmethod
-  def ext(path: str) -> str:
+  def ext(path:str) -> str:
     """Return file extension including leading dot, or empty string."""
     _, ext = os.path.splitext(PATH.basename(path))
     return ext
 
   @staticmethod
-  def with_suffix(path: str, suffix: str) -> str:
+  def with_suffix(path:str, suffix:str) -> str:
     """Replace file extension with given suffix (include dot)."""
     root, _ = os.path.splitext(PATH.normalize(path))
     return root + suffix
 
   @staticmethod
-  def ensure_suffix(path: str, suffix: str) -> str:
+  def ensure_suffix(path:str, suffix:str) -> str:
     """Ensure path has given suffix as extension."""
     if not suffix: return PATH.normalize(path)
     path = PATH.normalize(path)
@@ -209,12 +223,12 @@ class PATH:
     return path + suffix
 
   @staticmethod
-  def is_under(path: str, base: str|None = None) -> bool:
+  def is_under(path:str, base:str|None = None) -> bool:
     """Check if path is inside given base directory."""
     cfg = get_context()
-    abs_path = os.path.abspath(PATH.expand(path))
+    abs_path = PATH.resolve(path)
     if base is None: base = cfg.root_path
-    abs_base = os.path.abspath(PATH.expand(base))
+    abs_base = PATH.resolve(base)
     try:
       rel = os.path.relpath(abs_path, abs_base)
     except ValueError:
@@ -222,13 +236,13 @@ class PATH:
     return not PATH.normalize(rel).startswith("..")
 
   @staticmethod
-  def join(*parts: str, read: bool = True) -> str:
+  def join(*parts:str, read:bool = True) -> str:
     """Join path parts and resolve."""
     if not parts: raise ValueError("PATH.join requires at least one part")
     return PATH.resolve(os.path.join(*parts), read=read)
 
   @staticmethod
-  def match(path: str, pattern: str) -> bool:
+  def match(path:str, pattern:str) -> bool:
     """
     Simple pattern matching for filenames.
 
@@ -254,7 +268,7 @@ class DIR:
   """
 
   @staticmethod
-  def ensure(path: str, is_file: bool|None = None) -> str:
+  def ensure(path:str, is_file:bool|None = None) -> str:
     """
     Create directory if it doesn't exist.
 
@@ -270,9 +284,10 @@ class DIR:
       >>> DIR.ensure("data/config.json") # creates data/
       >>> DIR.ensure("data/Makefile", is_file=True) # creates data/
     """
-    path = PATH.expand(path)
+    trailing = path.endswith("/") or path.endswith("\\")
+    path = PATH.resolve(path, read=False)
     if is_file is None:
-      if path.endswith("/") or path.endswith("\\"):
+      if trailing:
         is_file = False
       else:
         is_file = bool(PATH.ext(path))
@@ -283,10 +298,10 @@ class DIR:
     return PATH.normalize(path)
 
   @staticmethod
-  def remove(path: str, force: bool = False):
+  def remove(path:str, force:bool = False):
     """Recursively remove directory tree."""
     path = PATH.resolve(path, read=False)
-    if not os.path.isdir(path): raise FileNotFoundError(f"Directory not found: {path}")
+    if not os.path.isdir(path): raise NotADirectoryError(f"Not a directory: {path}")
     def on_error(func, fpath, exc):
       if force:
         os.chmod(fpath, stat.S_IWRITE)
@@ -296,15 +311,15 @@ class DIR:
     shutil.rmtree(path, onexc=on_error)
 
   @staticmethod
-  def move(src: str, dst: str):
+  def move(src:str, dst:str):
     """Move file or directory. Works across filesystems."""
     src, dst = PATH.resolve(src, read=False), PATH.resolve(dst, read=False)
     if not os.path.exists(src): raise FileNotFoundError(f"Source not found: {src}")
-    DIR.ensure(dst, is_file=not os.path.isdir(src))
+    DIR.ensure(os.path.dirname(dst), is_file=False)
     shutil.move(src, dst)
 
   @staticmethod
-  def copy(src: str, dst: str):
+  def copy(src:str, dst:str):
     """Copy file or directory tree."""
     src, dst = PATH.resolve(src, read=False), PATH.resolve(dst, read=False)
     if not os.path.exists(src): raise FileNotFoundError(f"Source not found: {src}")
@@ -333,15 +348,21 @@ class DIR:
     path = PATH.resolve(path, read=True)
     if not os.path.isdir(path): return []
     bl = set(blacklist or [])
+    bl_names = {b for b in bl if "/" not in b.rstrip("/")}
+    bl_rels  = {b.rstrip("/") for b in bl if "/" in b.rstrip("/")}
     folders: list[str] = []
     if deep:
       for root, dirs, _ in os.walk(path):
-        dirs[:] = [d for d in dirs if d not in bl]
+        root_rel = PATH.normalize(os.path.relpath(root, path))
+        def _keep(d, root_rel=root_rel):
+          if d in bl_names: return False
+          rel = d if root_rel == "." else root_rel + "/" + d
+          return rel not in bl_rels
+        dirs[:] = [d for d in dirs if _keep(d)]
         for d in dirs:
           full = PATH.normalize(os.path.join(root, d))
-          rel = PATH.local(full, path)
-          if rel not in bl:
-            folders.append(d if basename else full)
+          rel = PATH.normalize(os.path.relpath(full, path))
+          folders.append(d if basename else full)
     else:
       for name in os.listdir(path):
         if name in bl: continue
@@ -373,18 +394,21 @@ class DIR:
     if not os.path.isdir(path): return
     bl_dirs: set[str] = set()
     bl_files: set[str] = set()
+    bl_names: set[str] = set()
     for b in (blacklist or []):
       full = path + "/" + b.rstrip("/")
       if os.path.isdir(full) or b.endswith("/"):
         bl_dirs.add(full)
       else:
         bl_files.add(b)
+      if "/" not in b.rstrip("/"):
+        bl_names.add(b.rstrip("/"))
     ext_tuple = tuple(ext.lower() for ext in (exts or []))
     for root, dirs, files in os.walk(path):
       root_norm = PATH.normalize(root)
-      dirs[:] = [d for d in dirs if root_norm + "/" + d not in bl_dirs and d not in bl_dirs]
+      dirs[:] = [d for d in dirs if root_norm + "/" + d not in bl_dirs and d not in bl_names]
       for name in files:
-        rel = PATH.local(root_norm + "/" + name, path)
+        rel = PATH.normalize(os.path.relpath(root_norm + "/" + name, path))
         if rel in bl_files or name in bl_files: continue
         if ext_tuple and not name.lower().endswith(ext_tuple): continue
         if match and not PATH.match(name, match): continue
@@ -420,13 +444,13 @@ class DIR:
       if basename:
         result.append(PATH.basename(f))
       elif local:
-        result.append(PATH.local(f, path))
+        result.append(PATH.normalize(os.path.relpath(f, path)))
       else:
         result.append(f)
     return result
 
   @staticmethod
-  def zip(path: str, zip_output: str|None = None, blacklist: list[str]|None = None) -> str:
+  def zip(path:str, zip_output:str|None = None, blacklist:list[str]|None = None) -> str:
     """
     Create ZIP archive from a directory.
 
@@ -454,7 +478,7 @@ class DIR:
         zipf.write(f, rel)
     return PATH.normalize(zip_output)
 
-#-------------------------------------------------------------------------------- FILE namespace
+#------------------------------------------------------------------------------- FILE namespace
 
 class FILE:
   """
@@ -466,7 +490,7 @@ class FILE:
   """
 
   @staticmethod
-  def exists(path: str|Sequence[str]) -> bool:
+  def exists(path:str|Sequence[str]) -> bool:
     """Check if file(s) exist."""
     if isinstance(path, str): path = [path]
     for p in path:
@@ -475,7 +499,7 @@ class FILE:
     return True
 
   @staticmethod
-  def remove(path: str|Sequence[str], missing_ok: bool = True) -> bool:
+  def remove(path:str|Sequence[str], missing_ok:bool = True) -> bool:
     """Remove file(s)."""
     if isinstance(path, str): path = [path]
     success = True
@@ -489,7 +513,7 @@ class FILE:
     return success
 
   @staticmethod
-  def load(path: str, binary: bool = False) -> str|bytes:
+  def load(path:str, binary:bool = False) -> str|bytes:
     """Load entire file content."""
     cfg = get_context()
     path = PATH.resolve(path, read=True)
@@ -499,7 +523,7 @@ class FILE:
       return file.read()
 
   @staticmethod
-  def load_lines(path: str) -> list[str]:
+  def load_lines(path:str) -> list[str]:
     """Load text file as list of lines."""
     cfg = get_context()
     path = PATH.resolve(path, read=True)
@@ -507,7 +531,7 @@ class FILE:
       return file.readlines()
 
   @staticmethod
-  def save(path: str, content: str|bytes):
+  def save(path:str, content:str|bytes):
     """Save whole content to file (overwrite)."""
     cfg = get_context()
     path = PATH.resolve(path, read=False)
@@ -518,12 +542,12 @@ class FILE:
       file.write(content)
 
   @staticmethod
-  def save_lines(path: str, lines: list[str]):
+  def save_lines(path:str, lines:list[str]):
     """Save list of lines to text file."""
     FILE.save(path, "".join(lines))
 
   @staticmethod
-  def append(path: str, content: str|bytes):
+  def append(path:str, content:str|bytes):
     """Append content to file, creating it if needed."""
     cfg = get_context()
     path = PATH.resolve(path, read=False)
@@ -534,12 +558,12 @@ class FILE:
       file.write(content)
 
   @staticmethod
-  def append_line(path: str, line: str, newline: str = "\n"):
+  def append_line(path:str, line:str, newline:str = "\n"):
     """Append single text line to file."""
     FILE.append(path, line + newline)
 
   @staticmethod
-  def hash(path: str, algo: str = "sha256", chunk_size: int = 8192) -> str:
+  def hash(path:str, algo:str = "sha256", chunk_size:int = 8192) -> str:
     """
     Calculate file hash.
 
@@ -560,14 +584,14 @@ class FILE:
     return h.hexdigest()
 
   @staticmethod
-  def size(path: str) -> int:
+  def size(path:str) -> int:
     """Return file size in bytes."""
-    return os.path.getsize(PATH.expand(path))
+    return os.path.getsize(PATH.resolve(path))
 
   @staticmethod
-  def mtime(path: str) -> float:
+  def mtime(path:str) -> float:
     """Return file modification time as Unix timestamp."""
-    return os.path.getmtime(PATH.expand(path))
+    return os.path.getmtime(PATH.resolve(path))
 
 #-------------------------------------------------------------------------------- INI namespace
 
@@ -575,7 +599,7 @@ class INI:
   """INI configuration file operations."""
 
   @staticmethod
-  def format(value: Any) -> str:
+  def format(value:Any) -> str:
     """Convert Python value to INI-safe string."""
     if value is None: return ""
     if isinstance(value, bool): return "true" if value else "false"
@@ -587,28 +611,35 @@ class INI:
     raise ValueError(f"Unsupported value type: {type(value).__name__}")
 
   @staticmethod
-  def parse(text: str) -> Any:
+  def parse(text:str) -> Any:
     """Parse INI value string to Python type."""
     if not text: return None
     text = text.strip()
     if not text: return None
     if text[0] in "\"'":
       quote = text[0]
-      end = text.find(quote, 1)
-      inner = text[1:end] if end > 0 else text[1:]
-      return inner.replace(r'\"', '"').replace(r"\\", "\\")
+      i, chars = 1, []
+      while i < len(text):
+        ch = text[i]
+        if ch == "\\" and i + 1 < len(text):
+          nxt = text[i + 1]
+          if nxt == quote: chars.append(quote); i += 2; continue
+          if nxt == "\\": chars.append("\\"); i += 2; continue
+        if ch == quote: break
+        chars.append(ch)
+        i += 1
+      return "".join(chars)
     low = text.lower()
     if low == "true": return True
     if low == "false": return False
-    if not text.startswith("+"):
-      try: return int(text, base=0)
-      except ValueError: pass
+    try: return int(text, base=0)
+    except ValueError: pass
     try: return float(text)
     except ValueError: pass
     return text
 
   @staticmethod
-  def _strip_inline_comment(text: str) -> str:
+  def _strip_inline_comment(text:str) -> str:
     """Strip inline comment from unquoted INI value."""
     for i, ch in enumerate(text):
       if ch in ";#":
@@ -616,7 +647,7 @@ class INI:
     return text
 
   @staticmethod
-  def load(path: str) -> dict:
+  def load(path:str) -> dict:
     """Load an INI file into a nested dict."""
     cfg = get_context()
     path = ensure_suffix(path, ".ini")
@@ -660,7 +691,7 @@ class INI:
     DIR.ensure(path, is_file=True)
     comment_section = comment_section or {}
     comment_field = comment_field or {}
-    def write_comment_lines(f, text: str):
+    def write_comment_lines(f, text:str):
       if not text: return
       for line in str(text).splitlines():
         line = line.strip()
@@ -704,7 +735,7 @@ class CSV:
   """CSV file operations."""
 
   @staticmethod
-  def _cast(value: str, ctype: type) -> Any:
+  def _cast(value:str, ctype:type) -> Any:
     """Cast CSV string value to target type."""
     if value in (None, ""): return None
     try:
@@ -801,7 +832,7 @@ class CSV:
     return grouped
 
   @staticmethod
-  def add_row(path: str, datarow: dict[str, Any]|list[Any], delimiter: str = ","):
+  def add_row(path:str, datarow:dict[str, Any]|list[Any], delimiter:str = ","):
     """Append single row to CSV file."""
     if datarow is None: raise ValueError("datarow must not be None")
     cfg = get_context()
@@ -871,13 +902,13 @@ class CSV:
       if header: writer.writerow(header)
       for values in zip(*columns): writer.writerow(values)
 
-#-------------------------------------------------------------------------------- JSON namespace
+#------------------------------------------------------------------------------- JSON namespace
 
 class JSON:
   """JSON file operations."""
 
   @staticmethod
-  def load(path: str, otherwise: Any = None) -> Any:
+  def load(path:str, otherwise:Any = None) -> Any:
     """Load JSON file."""
     cfg = get_context()
     path = ensure_suffix(path, ".json")
@@ -889,7 +920,7 @@ class JSON:
     return json.loads(content)
 
   @staticmethod
-  def save(path: str, content: Any) -> None:
+  def save(path:str, content:Any) -> None:
     """Save JSON to file in compact form."""
     cfg = get_context()
     path = ensure_suffix(path, ".json")
@@ -899,7 +930,7 @@ class JSON:
       json.dump(content, file, separators=(",", ":"))
 
   @staticmethod
-  def save_pretty(path: str, content: Any, indent: int = 2, sort_keys: bool = False) -> None:
+  def save_pretty(path:str, content:Any, indent:int = 2, sort_keys:bool = False) -> None:
     """Save JSON in pretty-printed form."""
     cfg = get_context()
     path = ensure_suffix(path, ".json")
@@ -987,7 +1018,7 @@ class JSON:
     return fmt(obj)
 
   @staticmethod
-  def save_smart(path: str, content: Any, max_line: int = 100, array_wrap: int = 10, compact_dict: bool = True) -> None:
+  def save_smart(path:str, content:Any, max_line:int = 100, array_wrap:int = 10, compact_dict:bool = True) -> None:
     """Save JSON with smart formatting."""
     cfg = get_context()
     path = ensure_suffix(path, ".json")
@@ -995,20 +1026,21 @@ class JSON:
     DIR.ensure(path, is_file=True)
     with open(path, "w", encoding=cfg.encoding) as file:
       file.write(JSON.smart(content, max_line=max_line, array_wrap=array_wrap, compact_dict=compact_dict))
+      file.write("\n")
 
-#------------------------------------------------------------------------- Files (bound context)
+#------------------------------------------------------------------------ Files (bound context)
 
 _NAMESPACE_CLASSES = (PATH, DIR, FILE, INI, CSV, JSON)
 
 class _BoundNamespace:
   """Proxy that runs namespace methods under a specific `Config`."""
 
-  def __init__(self, cls, cfg: Config):
+  def __init__(self, cls, cfg:Config):
     self._cls = cls
     self._cfg = cfg
     self._cache: dict[str, Callable] = {}
 
-  def __getattr__(self, name: str):
+  def __getattr__(self, name:str):
     cached = self._cache.get(name)
     if cached is not None: return cached
     method = getattr(self._cls, name)
@@ -1033,7 +1065,7 @@ class Files:
     >>> fs.JSON.save("cfg", {"a": 1})  # same context
   """
 
-  def __init__(self, root_path: str|None = None, **kwargs):
+  def __init__(self, root_path:str|None = None, **kwargs):
     cfg = Config(root_path=root_path, **kwargs)
     self.PATH = _BoundNamespace(PATH, cfg)
     self.DIR = _BoundNamespace(DIR, cfg)
