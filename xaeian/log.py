@@ -75,7 +75,7 @@ class LogFormatter(logging.Formatter):
     return super().format(record)
 
 class ColorFormatter(LogFormatter):
-  """Colored formatter for terminal — `DBG` green, `INF` blue, `WRN` yellow,
+  """Colored formatter for terminal: `DBG` green, `INF` blue, `WRN` yellow,
   `ERR` red, `CRT` magenta, `PNC` gold."""
   COLORS = {
     "DBG": Color.GREEN, "INF": Color.BLUE,   "WRN": Color.YELLOW,
@@ -102,7 +102,7 @@ class Print:
   """
   Terminal logger with level filtering, compatible with `Logger` interface.
 
-  `gap`/`dot`/`space`/`item` inherit the level of the last named call —
+  `gap`/`dot`/`space`/`item` inherit the level of the last named call:
   suppressed if that level was below the configured minimum.
 
   Example:
@@ -110,7 +110,7 @@ class Print:
     >>> p.info("ignored")
     >>> p.error("DB down")
     ERR DB down
-    >>> p.dot("retry 1/3")              # inherits ERR, printed
+    >>> p.dot("retry 1/3") # inherits ERR, printed
       • retry 1/3
   """
   def __init__(self, file=None, level:Literal["DBG","INF","WRN","ERR","CRT","PNC"]|int="DBG"):
@@ -150,21 +150,29 @@ class Print:
     args = (*args[:-1], str(args[-1]) + suffix) if args else (suffix.lstrip(),)
     self._emit(logging.INFO, Ico.INF, *args, **kwargs)
 
-  # long aliases — Logger compat
+  # long aliases: Logger compat
   def debug(self, *a, **kw):    self.dbg(*a, **kw)
   def info(self, *a, **kw):     self.inf(*a, **kw)
   def warning(self, *a, **kw):  self.wrn(*a, **kw)
   def error(self, *a, **kw):    self.err(*a, **kw)
   def critical(self, *a, **kw): self.crt(*a, **kw)
   def panic(self, *a, **kw):    self.pnc(*a, **kw)
+  
+  @property
+  def level(self) -> int:
+    return self._level
 
-#---------------------------------------------------------------------------------------- Logger
+  @level.setter
+  def level(self, v:Level):
+    self._level = _level(v)
+
+#--------------------------------------------------------------------------------------- Logger
 
 class Logger(logging.Logger):
   """
   Extended stdlib logger with short aliases and `space`/`item` sub-entries.
 
-  `space`/`item`/`gap`/`dot` emit at the level of the last named call —
+  `space`/`item`/`gap`/`dot` emit at the level of the last named call:
   useful for indented details without repeating the level explicitly.
 
   Example:
@@ -178,12 +186,12 @@ class Logger(logging.Logger):
     self._init_handlers()
 
   def _init_handlers(self):
-    if not hasattr(self, "_file_handler"):   self._file_handler: RotatingFileHandler|None = None
+    if not hasattr(self, "_file_handler"): self._file_handler: RotatingFileHandler|None = None
     if not hasattr(self, "_stream_handler"): self._stream_handler: logging.Handler|None = None
-    if not hasattr(self, "_file_path"):      self._file_path: str = ""
-    if not hasattr(self, "_last_level"):     self._last_level: int = logging.DEBUG
+    if not hasattr(self, "_file_path"): self._file_path: str = ""
+    if not hasattr(self, "_last_level"): self._last_level: int = logging.DEBUG
 
-  # stdlib overrides — track _last_level
+  # stdlib overrides: track _last_level
   def debug(self, *a, **kw):    self._last_level = logging.DEBUG;    super().debug(*a, **kw)
   def info(self, *a, **kw):     self._last_level = logging.INFO;     super().info(*a, **kw)
   def warning(self, *a, **kw):  self._last_level = logging.WARNING;  super().warning(*a, **kw)
@@ -191,7 +199,7 @@ class Logger(logging.Logger):
   def critical(self, *a, **kw): self._last_level = logging.CRITICAL; super().critical(*a, **kw)
   def panic(self, *a, **kw):    self._last_level = PANIC;            self.log(PANIC, *a, **kw)
 
-  # short aliases — Print compat
+  # short aliases: Print compat
   def dbg(self, *a, **kw): self.debug(*a, **kw)
   def inf(self, *a, **kw): self.info(*a, **kw)
   def wrn(self, *a, **kw): self.warning(*a, **kw)
@@ -199,7 +207,7 @@ class Logger(logging.Logger):
   def crt(self, *a, **kw): self.critical(*a, **kw)
   def pnc(self, *a, **kw): self.panic(*a, **kw)
 
-  # sub-entries — inherit _last_level
+  # sub-entries: inherit _last_level
   def space(self, msg="", *a, **kw): self.log(self._last_level, f"    {msg}", *a, **kw)
   def item(self, msg="", *a, **kw):  self.log(self._last_level, f" -  {msg}", *a, **kw)
   def gap(self, *a, **kw): self.space(*a, **kw)
@@ -247,7 +255,10 @@ class Logger(logging.Logger):
       self._file_path = ""
     if not file: return
     DIR.ensure(file, is_file=True)
-    fh = RotatingFileHandler(file, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8")
+    fh = RotatingFileHandler(
+      file, maxBytes=max_bytes,
+      backupCount=backup_count, encoding="utf-8",
+    )
     fh.setLevel(_level(level))
     fh.setFormatter(LogFormatter(_fmt(date, time), _datefmt(date, time)))
     self.addHandler(fh)
@@ -288,14 +299,15 @@ class Logger(logging.Logger):
     if not enable: return
     sh = logging.StreamHandler(sys.stdout)
     sh.setLevel(_level(level))
-    fmt = ColorFormatter(date, time) if color else LogFormatter(_fmt(date, time), _datefmt(date, time))
+    fmt = ColorFormatter(date, time) if color else LogFormatter(
+      _fmt(date, time), _datefmt(date, time))
     sh.setFormatter(fmt)
     self.addHandler(sh)
     self._stream_handler = sh
 
 logging.setLoggerClass(Logger)
 
-#--------------------------------------------------------------------------------------- Factory
+#-------------------------------------------------------------------------------------- Factory
 
 def logger(
   name: str = "app",
@@ -337,14 +349,16 @@ def logger(
   log._init_handlers()
   log.setLevel(logging.DEBUG)
   log.propagate = False
-  log.set_stream(enable=stream, level=_level(stream_lvl), color=color, date=date_stream, time=time_stream)
+  log.set_stream(
+    enable=stream, level=_level(stream_lvl), color=color, date=date_stream, time=time_stream
+  )
   log.set_file(
     file=file, level=_level(file_lvl), date=date_file, time=time_file,
     max_bytes=max_bytes, backup_count=backup_count,
   )
   return log
 
-#----------------------------------------------------------------------------------------- Tests
+#---------------------------------------------------------------------------------------- Tests
 
 if __name__ == "__main__":
   log = logger("demo", file=False)
@@ -360,4 +374,4 @@ if __name__ == "__main__":
   p.wrn("warning"); p.ok("done")
 
   p2 = Print(level="WRN")
-  p2.info("hidden"); p2.error("visible"); p2.dot("visible — inherits ERR")
+  p2.info("hidden"); p2.error("visible"); p2.dot("visible: inherits ERR")

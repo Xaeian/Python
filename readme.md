@@ -12,7 +12,7 @@ pip install xaeian[plot]      # + matplotlib
 pip install xaeian[dsp]       # + scipy
 pip install xaeian[db]        # + pymysql, psycopg2
 pip install xaeian[db-async]  # + aiomysql, asyncpg, aiosqlite
-pip install xaeian[mf]        # + pypdf, PyMuPDF, Pillow
+pip install xaeian[media]     # + pypdf, PyMuPDF, Pillow
 pip install xaeian[pdf]       # + reportlab, Pillow
 pip install xaeian[eda]       # + sexpdata, pypdf, PyMuPDF
 pip install xaeian[sftp]      # + paramiko
@@ -75,12 +75,12 @@ pkt.add(
   Bitfield("flags", [("enabled", 1), ("error", 1), ("mode", 6)]),
   Field(Type.float, "temperature", "°C"),
 )
-flags = "flags": {"enabled": 1, "error": 0, "mode": 5}
+flags = {"enabled": 1, "error": 0, "mode": 5}
 raw = pkt.encode({"timestamp": 1234567890, "flags": flags, "temperature": 23.5})
 pkt.decode(raw) # {"timestamp": 1234567890, "flags": {...}, "temperature": 23.5}
 
 # Media: compress, strip metadata
-from xaeian.mf.min import compress
+from xaeian.media.min import compress
 compress("report.pdf") # → report-min.pdf
 compress("photos/", max_px=1280) # → photos-min/ (recursive)
 
@@ -121,7 +121,7 @@ xn ico logo.png -o favicon.ico
 | `plot`        | Fluent matplotlib wrapper with stacked panels      | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#plot)        |
 | `dsp`         | Signal processing, SOS filters, FFT, vibration     | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#dsp)         |
 | `db`          | Database abstraction _(SQLite, MySQL, PostgreSQL)_ | [xaeian/db/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/db/readme.md)       |
-| `mf`          | Compress, convert, strip metadata _(PDF & images)_ | [xaeian/mf/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/mf/readme.md)       |
+| `media`       | Compress, convert, strip metadata _(PDF & images)_ | [xaeian/media/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/media/readme.md) |
 | `pdf`         | PDF document generation _(reportlab)_              | [xaeian/pdf/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/pdf/readme.md)     |
 | `eda`         | E-series, KiCad export, NgSpice runner             | [xaeian/eda/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/eda/readme.md)     |
 | `net`         | Network clients _(SFTP, FTP)_                      | [xaeian/net/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/net/readme.md)     |

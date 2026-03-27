@@ -26,7 +26,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from ..cmd import run as cmd_run, which
 from ..files import FILE, DIR, CSV
 from ..xstring import replace_map
-from ..colors import Print
+from ..log import Print
 
 #-------------------------------------------------------------------------------- Output parser
 

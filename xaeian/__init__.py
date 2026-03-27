@@ -19,7 +19,7 @@ Modules:
   - `xaeian.plot`: Fluent matplotlib wrapper
   - `xaeian.dsp`: Signal processing (filter, FFT, vibration metrics)
   - `xaeian.db`: Database abstraction (SQLite, MySQL, PostgreSQL)
-  - `xaeian.mf`: PDF and image compression, conversion, metadata
+  - `xaeian.media`: PDF and image compression, conversion, metadata
   - `xaeian.eda`: E-series, KiCad export, NgSpice runner
   - `xaeian.cli`: Utility scripts (tree, dupes, wifi)
 
@@ -28,7 +28,7 @@ Example:
   >>> from xaeian.db import Database
 """
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
 __repo__ = "Xaeian/Python"
 __python__ = ">=3.12"
 __description__ = "Python utilities for files, strings, time, serial, structs, media, electronics, plotting, and database and more..."
@@ -36,7 +36,7 @@ __author__ = "Xaeian"
 __keywords__ = [
   "utilities", "files", "database", "serial", "crc", "struct",
   "media", "kicad", "plot", "matplotlib", "ngspice", "spice",
-  "dsp", "signal", "filter", "fft", "vibration", "ftp", "sftp"
+  "dsp", "signal", "filter", "fft", "vibration", "ftp", "sftp",
 ]
 __scripts__ = {
   "xn": "xaeian.__main__:main",
@@ -55,7 +55,6 @@ from .files import (
   file_context, Files,
   PATH, DIR, FILE, INI, CSV, JSON,
 )
-
 from .crc import CRC
 from .colors import Color, Ico
 from .log import logger, Logger, Print
@@ -73,6 +72,12 @@ __all__ = [
   "CRC",
   "logger", "Logger", "Print", "Color", "Ico",
 ]
+
+try:
+  from .files import YAML
+  __all__ += ["YAML"]
+except Exception:
+  pass
 
 try:
   from .xtime import Time, TimeInput, time_to

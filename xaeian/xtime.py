@@ -42,28 +42,28 @@ class Time(datetime):
   Extended `datetime` with human-friendly interface.
 
   **Creation:**
-  - `Time()` — current local time
-  - `Time("2025-03-01 12:00")` — parse datetime string
-  - `Time(1700000000)` — from unix timestamp
-  - `Time("2d")` — now + 2 days
-  - `Time("-6h 30m")` — now - 6 hours + 30 minutes
+  - `Time()`: current local time
+  - `Time("2025-03-01 12:00")`: parse datetime string
+  - `Time(1700000000)`: from unix timestamp
+  - `Time("2d")`: now + 2 days
+  - `Time("-6h 30m")`: now - 6 hours + 30 minutes
 
   **Arithmetic:**
-  - `t + "1w"` — add 1 week
-  - `t - "3d"` — subtract 3 days
-  - `t - other` — timedelta between two times
+  - `t + "1w"`: add 1 week
+  - `t - "3d"`: subtract 3 days
+  - `t - other`: timedelta between two times
 
   **Formatting via `to()`:**
-  - `t.to("ts")` — unix timestamp (float)
-  - `t.to("utc")` — convert to UTC
-  - `t.to("iso")` — ISO 8601 string
-  - `t.to("%Y-%m-%d")` — strftime format
+  - `t.to("ts")`: unix timestamp (float)
+  - `t.to("utc")`: convert to UTC
+  - `t.to("iso")`: ISO 8601 string
+  - `t.to("%Y-%m-%d")`: strftime format
 
   **Rounding via `round()`:**
-  - `t.round("h")` — round to hour start
-  - `t.round("d")` — round to day start
-  - `t.round("w")` — round to week start (Monday)
-  - `t.round("mo")` — round to month start
+  - `t.round("h")`: round to hour start
+  - `t.round("d")`: round to day start
+  - `t.round("w")`: round to week start (Monday)
+  - `t.round("mo")`: round to month start
   """
 
   #------------------------------------------------------------------------------------- Construction

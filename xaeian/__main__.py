@@ -4,9 +4,9 @@ COMMANDS = {
   "wifi":  "xaeian.cli.wifi",
   "dupes": "xaeian.cli.dupes",
   "tree":  "xaeian.cli.tree",
-  "min":   "xaeian.mf.min",
-  "meta":  "xaeian.mf.meta",
-  "ico":   "xaeian.mf.ico"
+  "min":   "xaeian.media.min",
+  "meta":  "xaeian.media.meta",
+  "ico":   "xaeian.media.ico"
 }
 
 def main():

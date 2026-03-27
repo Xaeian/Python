@@ -1,10 +1,10 @@
-# xaeian/mf/meta.py
+# xaeian/media/meta.py
 
 """
 Metadata removal for PDFs and images.
 
 Example:
-  >>> from xaeian.mf.meta import scrub_metadata
+  >>> from xaeian.media.meta import scrub_metadata
   >>> scrub_metadata("report.pdf")
   >>> scrub_metadata("photo.jpg", inplace=True)
 """

@@ -171,7 +171,7 @@ def parse_pages(spec:str|int|Sequence[str|int], total:int) -> list[int]:
     if neg: part = part[1:]
     if "-" in part:
       a, b = part.split("-", 1)
-      rng = set(range(int(a), int(b) + 1))
+      rng = set(range(int(a), (int(b) if b else total) + 1))
     else:
       rng = {int(part)}
     if neg: exclude |= rng

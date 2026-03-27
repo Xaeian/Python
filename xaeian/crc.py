@@ -175,13 +175,13 @@ class CRC:
 
 # CRC-32 variants
 crc32_iso = CRC(32, 0x04C11DB7, 0xFFFFFFFF, True, True, 0xFFFFFFFF,False)
-"""CRC-32 ISO 3309 — Ethernet, ZIP, PNG, GZIP."""
+"""CRC-32 ISO 3309: Ethernet, ZIP, PNG, GZIP."""
 
 crc32_aixm = CRC(32, 0x814141AB, 0x00000000, False, False, 0x00000000, False)
-"""CRC-32 AIXM — aviation data exchange."""
+"""CRC-32 AIXM: aviation data exchange."""
 
 crc32_autosar = CRC(32, 0xF4ACFB13, 0xFFFFFFFF, True,  True,  0xFFFFFFFF, False)
-"""CRC-32 AUTOSAR — automotive E2E protection."""
+"""CRC-32 AUTOSAR: automotive E2E protection."""
 
 crc32_cksum = CRC(32, 0x04C11DB7, 0x00000000, False, False, 0xFFFFFFFF, False)
 """CRC-32 POSIX cksum."""
@@ -191,17 +191,17 @@ crc16_kermit = CRC(16, 0x1021, 0x0000, True, True, 0x0000, False)
 """CRC-16 Kermit (CCITT)."""
 
 crc16_modbus = CRC(16, 0x8005, 0xFFFF, True, True, 0x0000, True)
-"""CRC-16 Modbus RTU — industrial communication."""
+"""CRC-16 Modbus RTU: industrial communication."""
 
 crc16_buypass = CRC(16, 0x8005,     0x0000,     False, False, 0x0000, False)
-"""CRC-16 Buypass — payment systems."""
+"""CRC-16 Buypass: payment systems."""
 
 # CRC-8 variants
 crc8_maxim = CRC(8, 0x31, 0x00, True,  True,  0x00, False)
-"""CRC-8 Maxim/Dallas — 1-Wire devices."""
+"""CRC-8 Maxim/Dallas: 1-Wire devices."""
 
 crc8_smbus = CRC(8, 0x07, 0x00, False, False, 0x00, False)
-"""CRC-8 SMBus — System Management Bus."""
+"""CRC-8 SMBus: System Management Bus."""
 
 #---------------------------------------------------------------------------------------- Tests
 

@@ -62,11 +62,11 @@ class SerialProto(Protocol):
 #---------------------------------------------------------------------------------------- Loggers
 
 def default_logger(text:str, level:str="info") -> None:
-  """Default logger — prints to console."""
+  """Default logger: prints to console."""
   print(text)
 
 def null_logger(text:str, level:str="info") -> None:
-  """Silent logger — discards all output."""
+  """Silent logger: discards all output."""
   pass
 
 #------------------------------------------------------------------------------------- SerialPort

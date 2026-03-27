@@ -1,5 +1,10 @@
 ## Changelog `xaeian`
 
+## `0.5.3` YAML
+
+- `files`: split into subpackage, added YAML namespace
+- `log`: `Print.level` property with string setter _(`"DBG"`, `"WRN"`, ...)_
+
 ## `0.5.2` Refactor
 
 - `files.py`: many bugs, full refactor

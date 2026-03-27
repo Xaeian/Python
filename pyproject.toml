@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xaeian"
-version = "0.5.2"
+version = "0.5.3"
 description = "Python utilities for files, strings, time, serial, structs, media, electronics, plotting, and database and more..."
 readme = "readme.md"
 license = {text = "MIT"}
@@ -18,7 +18,7 @@ db = ["psycopg2-binary", "pymysql"]
 db-async = ["aiomysql", "aiosqlite", "asyncpg"]
 dsp = ["scipy"]
 eda = ["PyMuPDF", "pypdf", "sexpdata"]
-mf = ["Pillow", "PyMuPDF", "pypdf"]
+media = ["Pillow", "PyMuPDF", "pypdf"]
 pdf = ["Pillow", "reportlab"]
 plot = ["matplotlib"]
 serial = ["pyserial"]

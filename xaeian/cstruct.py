@@ -60,9 +60,9 @@ class Type(Enum):
   int64 = "q"
   float = "f"
   double = "d"
-  string = "str"   # null-terminated UTF-8 string
-  bytes = "byte"   # length-prefixed (uint16) byte array
-  pad = "pad"      # padding bytes (ignored on decode)
+  string = "str"  # null-terminated UTF-8 string
+  bytes = "byte"  # length-prefixed (uint16) byte array
+  pad = "pad"     # padding bytes (ignored on decode)
 
   @property
   def size(self) -> int:
@@ -268,7 +268,7 @@ class Padding:
   Padding for alignment. Ignored on decode.
 
   Example:
-    Padding(4)           # 4 zero bytes
+    Padding(4)            # 4 zero bytes
     Padding(4, fill=0xFF) # 4 bytes of 0xFF
   """
   def __init__(self, size:int, fill:int=0x00):

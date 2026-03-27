@@ -1,4 +1,4 @@
-# xaeian/mf/img.py
+# xaeian/media/img.py
 
 """
 Image manipulation: resize, convert, compress, metadata.
@@ -6,7 +6,7 @@ Image manipulation: resize, convert, compress, metadata.
 Uses Pillow for all operations.
 
 Example:
-  >>> from xaeian.mf.img import img_resize, img_compress
+  >>> from xaeian.media.img import img_resize, img_compress
   >>> img_resize("photo.jpg", width=800)
   >>> img_compress("photos/", "out/", max_px=1280, quality=85)
 """

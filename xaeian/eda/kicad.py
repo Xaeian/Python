@@ -88,10 +88,10 @@ class KiCad:
     result = cmd_run(args)
     if result.returncode:
       for line in result.stderr.strip().splitlines():
-        p.err(line)
+        if line: p.err(line)
       sys.exit(1)
     for line in result.stdout.strip().splitlines():
-      p.inf(line)
+      if line: p.inf(line)
 
   def netlist(self):
     net_name = self.project_path + self.name + ".net"
@@ -219,7 +219,7 @@ class KiCad:
     ])
     if desc:
       try:
-        from ..mf.pdf import pdf_add_text
+        from ..media.pdf import pdf_add_text
       except ImportError:
         raise ImportError("Install with: pip install xaeian[eda]")
       pdf_add_text(
@@ -251,11 +251,39 @@ class KiCad:
       "Descriptions", (0.95, 0.92, 0.63), drill=False)
     pdf_name = f"./{self.name}-layout.pdf"
     try:
-      from ..mf.pdf import pdf_merge
+      from ..media.pdf import pdf_merge
     except ImportError:
       raise ImportError("Install with: pip install xaeian[eda]")
     pdf_merge(self.pdf_pages, pdf_name)
     FILE.remove(self.pdf_pages)
+
+  def view(self,
+    side:str = "top",
+    width:int = 2000,
+    height:int = 1500,
+    quality:str = "high",
+    background:str = "transparent",
+    zoom:float|None = None,
+    pan:tuple|None = None,
+    perspective:bool = False,
+    floor:bool = False,
+  ):
+    """Render 3D raytraced image of PCB."""
+    path = self.produce_path + self.name + f"-{side}.png"
+    args = [
+      "kicad-cli", "pcb", "render", self.pcb,
+      "--output", path,
+      "--side", side,
+      "--width", str(width),
+      "--height", str(height),
+      "--quality", quality,
+      "--background", background,
+    ]
+    if zoom: args += ["--zoom", str(zoom)]
+    if pan: args += ["--pan", f"{pan[0]},{pan[1]},{pan[2]}"]
+    if perspective: args += ["--perspective"]
+    if floor: args += ["--floor"]
+    KiCad._execute(args)
 
   def cpl(
     self,

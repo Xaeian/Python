@@ -1,5 +1,5 @@
 """
-Lightweight tabular operations on `list[dict]` — pandas-free.
+Lightweight tabular operations on `list[dict]`: pandas-free.
 
 Zero dependencies. Works with data from `CSV.load()`, `JSON.load()`
 or any other source that produces `list[dict]`.
@@ -273,7 +273,7 @@ def join(
   Args:
     on: Key column in left table.
     right_on: Key column in right table (defaults to `on`).
-    how: Join type — `"inner"`, `"left"`, `"right"`, `"outer"`.
+    how: Join type: `"inner"`, `"left"`, `"right"`, `"outer"`.
     lsuffix: Suffix for overlapping left columns.
     rsuffix: Suffix for overlapping right columns.
 

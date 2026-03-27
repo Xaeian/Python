@@ -3,10 +3,10 @@
 """
 Async wrappers for file operations.
 
-Provides async versions of `DIR`, `FILE`, `INI`, `CSV`, `JSON` classes
+Provides async versions of `DIR`, `FILE`, `INI`, `CSV`, `JSON`, `YAML`
 using `asyncio.to_thread()` for non-blocking file I/O.
 
-Same API as sync versions — just `await` the calls.
+Same API as sync versions: just `await` the calls.
 Object-oriented access via `AsyncFiles(root_path=...)`.
 
 Example:
@@ -31,10 +31,15 @@ from .files import (
   _BoundNamespace,
 )
 
+try:
+  from .files import YAML as _YAML
+except ImportError:
+  _YAML = None
+
 __all__ = [
   "PATH", "DIR", "FILE", "INI", "CSV", "JSON",
   "AsyncFiles",
-  "get_context", "set_context", "file_context"
+  "get_context", "set_context", "file_context",
 ]
 
 #----------------------------------------------------------------------------- Async namespaces
@@ -59,18 +64,24 @@ class DIR:
     return await asyncio.to_thread(_DIR.copy, src, dst)
 
   @staticmethod
-  async def folder_list(path, deep=False, basename=False, blacklist=None):
-    return await asyncio.to_thread(_DIR.folder_list, path, deep, basename, blacklist)
+  async def folder_list(path, deep=False, basename=False,
+                        blacklist=None):
+    return await asyncio.to_thread(
+      _DIR.folder_list, path, deep, basename, blacklist,
+    )
 
   @staticmethod
-  async def file_list(path, exts=None, match=None, blacklist=None, basename=False, local=False):
+  async def file_list(path, exts=None, match=None, blacklist=None,
+                      basename=False, local=False):
     return await asyncio.to_thread(
-      _DIR.file_list, path, exts, match, blacklist, basename, local
+      _DIR.file_list, path, exts, match, blacklist, basename, local,
     )
 
   @staticmethod
   async def zip(path, zip_output=None, blacklist=None):
-    return await asyncio.to_thread(_DIR.zip, path, zip_output, blacklist)
+    return await asyncio.to_thread(
+      _DIR.zip, path, zip_output, blacklist,
+    )
 
 class FILE:
   """Async file read/write operations. Same API as `files.FILE`."""
@@ -105,11 +116,15 @@ class FILE:
 
   @staticmethod
   async def append_line(path, line, newline="\n"):
-    return await asyncio.to_thread(_FILE.append_line, path, line, newline)
+    return await asyncio.to_thread(
+      _FILE.append_line, path, line, newline,
+    )
 
   @staticmethod
   async def hash(path, algo="sha256", chunk_size=8192):
-    return await asyncio.to_thread(_FILE.hash, path, algo, chunk_size)
+    return await asyncio.to_thread(
+      _FILE.hash, path, algo, chunk_size,
+    )
 
   @staticmethod
   async def size(path):
@@ -133,7 +148,7 @@ class INI:
                  comment_section_char="# ", comment_field_char=" # "):
     return await asyncio.to_thread(
       _INI.save, path, data, comment_section, comment_field,
-      comment_section_char, comment_field_char
+      comment_section_char, comment_field_char,
     )
 
 class CSV:
@@ -144,25 +159,36 @@ class CSV:
     return await asyncio.to_thread(_CSV.load, path, delimiter, types)
 
   @staticmethod
-  async def load_raw(path, delimiter=",", types=None, include_header=True):
-    return await asyncio.to_thread(_CSV.load_raw, path, delimiter, types, include_header)
+  async def load_raw(path, delimiter=",", types=None,
+                     include_header=True):
+    return await asyncio.to_thread(
+      _CSV.load_raw, path, delimiter, types, include_header,
+    )
 
   @staticmethod
-  async def load_vectors(path, delimiter=",", types=None, group_by=None):
-    return await asyncio.to_thread(_CSV.load_vectors, path, delimiter, types, group_by)
+  async def load_vectors(path, delimiter=",", types=None,
+                         group_by=None):
+    return await asyncio.to_thread(
+      _CSV.load_vectors, path, delimiter, types, group_by,
+    )
 
   @staticmethod
   async def add_row(path, datarow, delimiter=","):
-    return await asyncio.to_thread(_CSV.add_row, path, datarow, delimiter)
+    return await asyncio.to_thread(
+      _CSV.add_row, path, datarow, delimiter,
+    )
 
   @staticmethod
   async def save(path, data, field_names=None, delimiter=","):
-    return await asyncio.to_thread(_CSV.save, path, data, field_names, delimiter)
+    return await asyncio.to_thread(
+      _CSV.save, path, data, field_names, delimiter,
+    )
 
   @staticmethod
   async def save_vectors(path, *columns, header=None, delimiter=","):
     return await asyncio.to_thread(
-      _CSV.save_vectors, path, *columns, header=header, delimiter=delimiter
+      _CSV.save_vectors, path, *columns,
+      header=header, delimiter=delimiter,
     )
 
 class JSON:
@@ -179,31 +205,72 @@ class JSON:
 
   @staticmethod
   async def save_pretty(path, content, indent=2, sort_keys=False):
-    return await asyncio.to_thread(_JSON.save_pretty, path, content, indent, sort_keys)
+    return await asyncio.to_thread(
+      _JSON.save_pretty, path, content, indent, sort_keys,
+    )
 
   @staticmethod
   async def save_smart(path, content, max_line=100, array_wrap=10):
-    return await asyncio.to_thread(_JSON.save_smart, path, content, max_line, array_wrap)
+    return await asyncio.to_thread(
+      _JSON.save_smart, path, content, max_line, array_wrap,
+    )
 
-#---------------------------------------------------------------------- AsyncFiles (bound context)
+#----------------------------------------------------------------------------------- Async YAML
+
+if _YAML is not None:
+  class YAML:
+    """Async YAML file operations."""
+    loads = staticmethod(_YAML.loads)
+    dumps = staticmethod(_YAML.dumps)
+
+    @staticmethod
+    async def load(path, otherwise=None):
+      return await asyncio.to_thread(_YAML.load, path, otherwise)
+
+    @staticmethod
+    async def load_all(path):
+      return await asyncio.to_thread(_YAML.load_all, path)
+
+    @staticmethod
+    async def save(path, content, flow=False):
+      return await asyncio.to_thread(
+        _YAML.save, path, content, flow,
+      )
+
+    @staticmethod
+    async def save_pretty(path, content, indent=2,
+                          sort_keys=False, flow=False):
+      return await asyncio.to_thread(
+        _YAML.save_pretty, path, content, indent,
+        sort_keys, flow,
+      )
+
+    @staticmethod
+    async def save_all(path, documents, flow=False):
+      return await asyncio.to_thread(
+        _YAML.save_all, path, documents, flow,
+      )
+
+  __all__ += ["YAML"]
+
+#------------------------------------------------------------------- AsyncFiles (bound context)
 
 class _AsyncBoundNamespace:
-  """Async proxy that wraps `_BoundNamespace` methods with `asyncio.to_thread`."""
+  """Async proxy that wraps `_BoundNamespace` with `asyncio.to_thread`."""
 
-  # Pure computation — no syscalls, no async needed
   _SYNC_ONLY = frozenset({
     "normalize", "expand", "resolve", "local",
-    "basename", "dirname", "stem", "ext", "with_suffix", "ensure_suffix",
-    "is_under", "join", "match",
+    "basename", "dirname", "stem", "ext", "with_suffix",
+    "ensure_suffix", "is_under", "join", "match",
     "format", "parse", "_strip_inline_comment", "_cast",
-    "smart",
+    "smart", "loads", "dumps",
   })
 
-  def __init__(self, bound_ns: _BoundNamespace):
+  def __init__(self, bound_ns:_BoundNamespace):
     self._bound = bound_ns
     self._cache: dict = {}
 
-  def __getattr__(self, name: str):
+  def __getattr__(self, name:str):
     cached = self._cache.get(name)
     if cached is not None: return cached
     method = getattr(self._bound, name)
@@ -223,10 +290,10 @@ class AsyncFiles:
     >>> fs = AsyncFiles(root_path="/data/project")
     >>> await fs.FILE.load("test.txt")
     >>> await fs.JSON.save("cfg", {"a": 1})
-    >>> fs.PATH.resolve("sub/file.txt")  # sync — no IO
+    >>> fs.PATH.resolve("sub/file.txt")  # sync: no IO
   """
 
-  def __init__(self, root_path: str|None = None, **kwargs):
+  def __init__(self, root_path:str|None=None, **kwargs):
     sync = Files(root_path=root_path, **kwargs)
     self.PATH = sync.PATH  # PATH is all non-IO
     self.DIR = _AsyncBoundNamespace(sync.DIR)
@@ -234,3 +301,5 @@ class AsyncFiles:
     self.INI = _AsyncBoundNamespace(sync.INI)
     self.CSV = _AsyncBoundNamespace(sync.CSV)
     self.JSON = _AsyncBoundNamespace(sync.JSON)
+    if hasattr(sync, "YAML"):
+      self.YAML = _AsyncBoundNamespace(sync.YAML)

@@ -1,4 +1,4 @@
-# `xaeian.mf`
+# `xaeian.media`
 
 Media Files: Compress, convert, and strip metadata from PDFs and images.
 
@@ -7,8 +7,8 @@ Media Files: Compress, convert, and strip metadata from PDFs and images.
 ## Quick start
 
 ```py
-from xaeian.mf.min import compress
-from xaeian.mf.meta import scrub_metadata
+from xaeian.media.min import compress
+from xaeian.media.meta import scrub_metadata
 
 compress("report.pdf")              # → report-min.pdf (Ghostscript /ebook)
 compress("photo.jpg", max_px=1280)  # → photo-min.jpg
@@ -22,10 +22,10 @@ Both `compress()` and `scrub_metadata()` auto-detect PDF vs image by extension.
 
 ## Modules
 
-### `mf.pdf` PDF operations
+### `media.pdf` PDF operations
 
 ```py
-from xaeian.mf.pdf import *
+from xaeian.media.pdf import *
 
 pdf_compress(src, dst=None, level="1.7", settings="/ebook", inplace=False)
 pdf_scrub_metadata(src, dst=None, inplace=False)
@@ -37,10 +37,10 @@ pdf_add_text(src, dst=None, text="DRAFT", x=50, y=50, size=12, pages=None)
 
 Page spec for `pdf_extract`: `"1,3,5-7"`, `[1, 3]`, or `"2-"` (to end).
 
-### `mf.img` Image operations
+### `media.img` Image operations
 
 ```py
-from xaeian.mf.img import *
+from xaeian.media.img import *
 
 img_compress(src, dst=None, max_px=1920, format="keep", quality=80,
   target_kB=None, recursive=True, inplace=False)
@@ -51,10 +51,10 @@ img_scrub_metadata(src, dst=None, inplace=False)
 
 `format` options: `"keep"` _(same as source)_, `"auto"` _(smallest)_, `"avif"`, `"webp"`, `"jpg"`, `"png"`.
 
-### `mf.ico` Favicon generation
+### `media.ico` Favicon generation
 
 ```py
-from xaeian.mf.ico import img_to_ico
+from xaeian.media.ico import img_to_ico
 
 img_to_ico("logo.png", "favicon.ico", sizes=[16, 32, 48], fit="pad")
 ```

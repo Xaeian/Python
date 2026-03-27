@@ -1,4 +1,4 @@
-# xaeian/mf/ico.py
+# xaeian/media/ico.py
 
 """
 Image to ICO conversion -- multi-size favicon generator.
@@ -6,7 +6,7 @@ Image to ICO conversion -- multi-size favicon generator.
 Uses Pillow for image processing, writes ICO manually for full control.
 
 Example:
-  >>> from xaeian.mf.ico import img_to_ico
+  >>> from xaeian.media.ico import img_to_ico
   >>> img_to_ico("logo.png")
   >>> img_to_ico("photo.jpg", sizes=[16, 32, 48], fit="crop")
 """

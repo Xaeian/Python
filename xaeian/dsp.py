@@ -75,7 +75,7 @@ class Spectrum:
 
   @property
   def centroid(self) -> float:
-    """Spectral centroid — amplitude-weighted mean frequency."""
+    """Spectral centroid: amplitude-weighted mean frequency."""
     mag = self.magnitudes
     total = np.sum(mag)
     if total == 0: return 0.0
@@ -83,7 +83,7 @@ class Spectrum:
 
   @property
   def median_freq(self) -> float:
-    """Median frequency — divides power spectrum into equal halves."""
+    """Median frequency: divides power spectrum into equal halves."""
     cumpower = np.cumsum(self.power)
     if cumpower[-1] == 0: return 0.0
     idx = np.searchsorted(cumpower, cumpower[-1] / 2)
@@ -104,7 +104,7 @@ class Spectrum:
 class Signal:
   """Immutable signal container with sample rate and fluent DSP methods.
 
-  Each transform returns a new Signal — originals are never modified.
+  Each transform returns a new Signal: originals are never modified.
   Supports arithmetic: `sig * 2`, `sig1 + sig2`, `-sig`, `abs(sig)`.
 
   Args:
@@ -329,7 +329,7 @@ class Signal:
     """Integrate signal (acceleration → velocity → displacement).
 
     Applies DC removal, Tukey window, high-pass filter,
-    cumulative trapezoidal integration, and detrend — the standard
+    cumulative trapezoidal integration, and detrend: the standard
     vibration analysis pipeline to prevent drift.
 
     Args:

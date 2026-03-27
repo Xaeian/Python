@@ -5,30 +5,50 @@ Python utilities. Zero dependencies for core. Optional extras for time, serial, 
 ## `files`
 
 ```py
-from xaeian import FILE, DIR, JSON, CSV, INI, PATH
+from xaeian import FILE, DIR, JSON, CSV, INI, YAML, PATH
 
+# FILE: read/write/append, auto-creates directories
 FILE.save("data.txt", "Hello!")
 FILE.load("data.txt")
 FILE.append("data.txt", "\nMore")
 FILE.load("data.bin", binary=True)
+FILE.hash("data.bin", algo="md5")
+FILE.exists("data.txt")
 
+# JSON: auto `.json` extension, compact/pretty/smart save
 JSON.save("config", {"debug": True, "port": 8080})
-JSON.load("config")
-JSON.save_pretty("config", cfg)
+JSON.load("config")                    # → dict
+JSON.load("missing", otherwise={})     # → {} if not found
+JSON.save_pretty("config", cfg)        # human-readable
+JSON.save_smart("data", measurements)  # numeric arrays inline
 
+# CSV: list[dict] or column vectors
 CSV.save("users", [{"name": "Jan", "age": 30}])
 CSV.load("users", types={"age": int})
+CSV.load_vectors("sensors", types={"temp": float})
+CSV.add_row("log", {"ts": 1234, "val": 3.14})
 
+# INI: nested dict with sections
 INI.save("settings", {"main": {"key": "value", "num": 42}})
-INI.load("settings")
+INI.load("settings") # → {"main": {"key": "value", "num": 42}}
 
+# YAML: auto `.yaml`/`.yml`, multi-document support (requires pyyaml)
+YAML.save("config", {"debug": True, "port": 8080})
+YAML.load("config") # tries .yaml then .yml
+YAML.save_pretty("config", cfg, sort_keys=True)
+YAML.save_all("fixtures", [doc1, doc2, doc3]) # multi-doc with ---
+YAML.load_all("fixtures") # → [doc1, doc2, doc3]
+
+# DIR: create, list, zip
 DIR.ensure("data/subdir/")
-DIR.file_list("data", exts=[".txt", ".json"])
+DIR.file_list("src", exts=[".py"], blacklist=["__pycache__"])
 DIR.zip("folder", "archive.zip")
 
+# PATH: pure path manipulation (no IO)
 PATH.stem("a/b/file.txt")         # "file"
 PATH.ext("a/b/file.txt")          # ".txt"
 PATH.with_suffix("f.txt", ".md")  # "f.md"
+PATH.resolve("data/cfg")          # "/home/user/project/data/cfg"
 ```
 
 ### Context-based paths
@@ -58,7 +78,7 @@ await fs.FILE.load("test.txt")
 
 ## `table`
 
-Lightweight tabular operations on `list[dict]` — pandas-free.
+Lightweight tabular operations on `list[dict]`: pandas-free.
 
 ```py
 from xaeian.table import where, select, rename, sort_by, aggregate, join, pluck
@@ -284,7 +304,7 @@ quick(x, y, "Voltage [V]").save("plot.png")
   .line(t, v50, "5.0V [V]")
   .line(t, v12, "12V [V]")
   .ylabel("Voltage [V]")
-  .title("Sensor Dashboard — 24h")
+  .title("Sensor Dashboard: 24h")
   .save("dashboard.png", dpi=200))
 # Family of curves (parametric sweep)
 (Plot()
@@ -319,12 +339,12 @@ from xaeian.dsp import Signal
 sig = Signal.from_accel(raw_x, fs=6666, bits=16, g_range=2, label="X")
 sig = Signal.from_adc(raw, fs=1000, bits=12, vref=3.3, units="V")
 sig = Signal([1.0, 2.0, 3.0], fs=1000)  # from array
-# Operators — immutable, returns new Signal
+# Operators: immutable, returns new Signal
 sig * 2      # scale
 sig1 + sig2  # add (same fs required)
 -sig         # invert
 abs(sig)     # rectify
-# Filter chain — SOS Butterworth, zero-phase
+# Filter chain: SOS Butterworth, zero-phase
 clean = sig.highpass(10).lowpass(500).detrend()
 bp = sig.bandpass(100, 1000)
 notch = sig.bandstop(49, 51) # mains rejection

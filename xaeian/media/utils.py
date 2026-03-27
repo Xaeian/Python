@@ -1,6 +1,6 @@
-# xaeian/mf/utils.py
+# xaeian/media/utils.py
 
-"""Shared constants and helpers for mf subpackage."""
+"""Shared constants and helpers for media subpackage."""
 
 import os
 from ..files import DIR

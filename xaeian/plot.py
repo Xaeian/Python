@@ -7,7 +7,7 @@ __extras__ = ("plot", ["matplotlib"])
 """
 Minimal fluent matplotlib wrapper for CLI time-series plotting.
 
-Deferred rendering — traces stored as dicts, figure built on
+Deferred rendering: traces stored as dicts, figure built on
 `show()`/`save()`. Stacked panels with shared x-axis.
 Auto datetime formatting. Escape hatch to raw matplotlib.
 
@@ -40,7 +40,7 @@ except ImportError:
 
 #-------------------------------------------------------------------------------------- Helpers
 
-# Paul Tol "bright" — colorblind-safe, 10 distinct colors
+# Paul Tol "bright": colorblind-safe, 10 distinct colors
 PALETTE = [
   '#4477AA', '#EE6677', '#228833', '#CCBB44', '#66CCEE',
   '#AA3377', '#BBBBBB', '#332288', '#882255', '#117733',
@@ -75,7 +75,7 @@ def _is_datetime(x) -> bool:
 class _SmartDateFormatter(matplotlib.ticker.Formatter):
   """Auto date format based on visible time span.
 
-  Adapts tick labels to data density — shows only what's needed:
+  Adapts tick labels to data density: shows only what's needed:
     < 10 min → `16:30:15`          (seconds matter)
     < 24h    → `16:30`             (time only, date implied)
     1–60 d   → `12:00` normally,   (date appears on day boundary)
@@ -87,10 +87,10 @@ class _SmartDateFormatter(matplotlib.ticker.Formatter):
     dt = mdates.num2date(x)
     span = abs(self.axis.get_view_interval()[1]
       - self.axis.get_view_interval()[0])  # span in days
-    # Wide ranges — date only
+    # Wide ranges: date only
     if span >= 365 * 2:       return dt.strftime('%Y-%m')
     if span >= 60:            return dt.strftime('%y-%m-%d')
-    # Narrow ranges — time only
+    # Narrow ranges: time only
     if span < 10 / 60 / 24:  return dt.strftime('%H:%M:%S')
     if span < 1.0:           return dt.strftime('%H:%M')
     # Multi-day: time on top, date below only when day changes
@@ -111,14 +111,14 @@ def _setup_date_axis(ax):
 
 #-------------------------------------------------------------------------------------- Themes
 
-# Shared rcParams — avoids duplication between clean/dark
+# Shared rcParams: avoids duplication between clean/dark
 _COMMON = {
   'axes.grid': True,
   'axes.spines.top': False,
   'axes.spines.right': False,
   'legend.frameon': True, # rounded box with transparency
   'legend.fancybox': True,
-  'legend.framealpha': 0.88, # slight transparency — data peeks through
+  'legend.framealpha': 0.88, # slight transparency: data peeks through
   'legend.fontsize': 9,
   'axes.labelsize': 10,
   'axes.labelpad': 6, # ylabel ↔ axis gap (pt)
@@ -201,7 +201,7 @@ class Plot:
 
   @property
   def _target(self) -> dict:
-    """Current target for traces/config — twin if active, else main panel."""
+    """Current target for traces/config: twin if active, else main panel."""
     return self._cur['twin'] if self._cur['twin'] is not None else self._cur
 
   def panel(self, height:float=1.0) -> Plot:
@@ -238,7 +238,7 @@ class Plot:
     return self._add('scatter', x, y, label, kw)
 
   def step(self, x, y, label:str|tuple|None=None, where:str="post", **kw) -> Plot:
-    """Add step trace — ideal for digital signals, FSM states."""
+    """Add step trace: ideal for digital signals, FSM states."""
     kw['where'] = where
     return self._add('step', x, y, label, kw)
 
@@ -404,13 +404,13 @@ class Plot:
       for pi, (panel, ax) in enumerate(zip(panels, axes)):
         is_last = (pi == n - 1)
         color_idx = self._draw_traces(ax, panel, color_idx)
-        # Twin axis — separate y-scale, merged legend
+        # Twin axis: separate y-scale, merged legend
         if panel['twin'] and panel['twin']['traces']:
           tax = ax.twinx()
           tax.spines['right'].set_visible(True)  # theme hides it
           color_idx = self._draw_traces(tax, panel['twin'], color_idx)
           self._apply_axis(tax, panel['twin'], is_twin=True)
-          # Legend on tax — twin renders on top so legend must be there
+          # Legend on tax: twin renders on top so legend must be there
           self._apply_legend(ax, panel, merge_from=tax)
         else:
           self._apply_legend(ax, panel)
@@ -599,11 +599,11 @@ def demo():
     .line(t, v50, "5.0V [V]")
     .line(t, v12, "12V [V]")
     .ylabel("Voltage [V]")
-    .title("Sensor Dashboard — 24h")
+    .title("Sensor Dashboard: 24h")
     .show())
 
 def demo_family():
-  """Family of curves — simulated parametric sweep."""
+  """Family of curves: simulated parametric sweep."""
   t = np.linspace(0, 1e-3, 200)
   # Simulate sweep results: Simulation.sweep() returns this structure
   results = {}
@@ -619,7 +619,7 @@ def demo_family():
     .hline(3.3, label="Logic high", color="#EE6677", ls="--")
     .xlabel("Time [s]")
     .ylabel("Output [V]")
-    .title("RC Step Response — Parametric Sweep")
+    .title("RC Step Response: Parametric Sweep")
     .show())
 
 if __name__ == "__main__":
