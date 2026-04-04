@@ -1,16 +1,16 @@
 # xaeian/eda/ee.py
 
 """
-Electronics helpers — E-series and voltage converter resistor selection.
+Electronics helpers: E-series and voltage converter resistor selection.
 
 Constants:
-  `E6`, `E12`, `E24` — standard resistor value series
+  `E6`, `E12`, `E24`: standard resistor value series
 
 Functions:
-  `expand_series` — expand series across decades
+  `expand_series`: expand series across decades
 
 Classes:
-  `VConv` — voltage converter resistor divider formulas and finder
+  `VConv`: voltage converter resistor divider formulas and finder
 
 Example:
   >>> from xaeian.eda.ee import E24, VConv, expand_series
@@ -48,72 +48,66 @@ def expand_series(
   """
   return sorted(set(round(x * m, 2) for m in decades for x in series))
 
-#----------------------------------------------------------------------------- VConv class
+#---------------------------------------------------------------------------------- VConv class
 
 class VConv:
-  """Voltage converter resistor divider formulas and finder."""
+  """Voltage converter resistor divider — callable with `.find()`."""
 
-  @staticmethod
-  def RDIV(R1:float, R2:float, vref:float=3.3) -> float:
-    """Generic resistor divider: `Vout = Vref * R1 / (R1 + R2)`"""
-    return vref * (R1 / (R1 + R2))
+  def __init__(self, formula, vref:float, doc:str=""):
+    self._formula = formula
+    self.vref = vref
+    self.__doc__ = doc
 
-  @staticmethod
-  def AOZ1282(R1:float, R2:float, vref:float=0.8) -> float:
-    """AOZ1282 buck: `Vout = Vref * (1 + R1/R2)`"""
-    return vref * (1 + (R1 / R2))
+  def __call__(self, R1:float, R2:float, vref:float|None=None) -> float:
+    return self._formula(R1, R2, vref if vref is not None else self.vref)
 
-  @staticmethod
-  def MC34063(R1:float, R2:float, vref:float=1.25) -> float:
-    """MC34063 converter: `Vout = Vref * (1 + R2/R1)`"""
-    return vref * (1 + (R2 / R1))
+  def __repr__(self):
+    return f"<VConv vref={self.vref}>"
 
-  @staticmethod
-  def LM337(R1:float, R2:float, vref:float=1.25) -> float:
-    """LM337 negative regulator."""
-    return -vref * (1 + (R2 / R1)) + (100e-9 * R2)
-
-  @staticmethod
-  def LM317(R1:float, R2:float, vref:float=1.25) -> float:
-    """LM317 positive regulator."""
-    return vref * (1 + (R2 / R1)) + (100e-9 * R2)
-
-  @staticmethod
-  def find(
+  def find(self,
     vtarget:float,
-    formula:Callable|None = None,
     rseries:list[float]|None = None,
     vref:float|None = None,
     tolerance:float = 0.1,
     limit:int = 5,
   ) -> list[tuple[float, float, float]]:
-    """
-    Find R1/R2 combinations closest to target voltage.
-
-    Args:
-      vtarget: Desired output voltage.
-      formula: Divider formula (default: RDIV).
-      rseries: Resistor values in kΩ (default: E6+E12+E24 expanded).
-      vref: Reference voltage override.
-      tolerance: Max voltage deviation.
-      limit: Max results to return.
+    """Find R1/R2 closest to target voltage.
 
     Returns:
       List of `(R1_kΩ, R2_kΩ, Vout)` tuples, best match first.
-
-    Example:
-      >>> VConv.find(5.0, VConv.AOZ1282)
-      [(5.6, 1.0, 5.28), (4.7, 1.0, 4.56), ...]
     """
-    if formula is None: formula = VConv.RDIV
     if rseries is None:
       rseries = expand_series(sorted(set(E6 + E12 + E24)))
+    ref = vref if vref is not None else self.vref
     results = []
     for R1 in rseries:
       for R2 in rseries:
-        vout = formula(R1, R2, vref) if vref else formula(R1, R2)
+        vout = self._formula(R1, R2, ref)
         diff = abs(vout - vtarget)
         if diff <= tolerance:
           results.append((diff, R1, R2, vout))
     results.sort(key=lambda x: x[0])
     return [(R1, R2, vout) for (_, R1, R2, vout) in results[:limit]]
+
+#-------------------------------------------------------------------------- Converter instances
+
+RDIV = VConv(
+  lambda R1, R2, vref: vref * R1 / (R1 + R2),
+  vref=3.3, doc="Resistor divider: Vout = Vref * R1 / (R1 + R2)",
+)
+AOZ1282 = VConv(
+  lambda R1, R2, vref: vref * (1 + R1 / R2),
+  vref=0.8, doc="AOZ1282 buck: Vout = Vref * (1 + R1/R2)",
+)
+MC34063 = VConv(
+  lambda R1, R2, vref: vref * (1 + R2 / R1),
+  vref=1.25, doc="MC34063: Vout = Vref * (1 + R2/R1)",
+)
+LM317 = VConv(
+  lambda R1, R2, vref: vref * (1 + R2 / R1) + 100e-9 * R2,
+  vref=1.25, doc="LM317 positive regulator",
+)
+LM337 = VConv(
+  lambda R1, R2, vref: -vref * (1 + R2 / R1) + 100e-9 * R2,
+  vref=1.25, doc="LM337 negative regulator",
+)

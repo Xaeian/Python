@@ -11,11 +11,18 @@ Example:
   >>> img_to_ico("photo.jpg", sizes=[16, 32, 48], fit="crop")
 """
 
-import os, struct
+import os, sys, struct
 from io import BytesIO
 from typing import Literal
-from PIL import Image, ImageOps
+from xaeian import Print, Color as c
 from .utils import require_file
+
+try:
+  from PIL import Image, ImageOps
+except ImportError:
+  raise ImportError("Pillow is required: pip install Pillow")
+
+p = Print()
 
 DEFAULT_SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
 
@@ -81,7 +88,10 @@ def img_to_ico(
     Output file path.
   """
   src = require_file(src, "Image")
-  img = ImageOps.exif_transpose(Image.open(src)).convert("RGBA")
+  try:
+    img = ImageOps.exif_transpose(Image.open(src)).convert("RGBA")
+  except Exception as e:
+    raise ValueError(f"Cannot open image: {e}")
   img = _make_square(img, fit)
   icon_sizes = _pick_sizes(max(img.size), sizes, upscale)
   resample = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
@@ -129,8 +139,40 @@ def main():
     help="Allow upscaling beyond source size")
   parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
   args = parser.parse_args()
-  sizes = [int(s) for s in args.sizes.split(",")] if args.sizes else None
-  print(img_to_ico(args.src, args.dst, sizes, args.fit, args.upscale))
+  name = os.path.basename(args.src)
+  sizes = None
+  if args.sizes:
+    try:
+      sizes = [int(s.strip()) for s in args.sizes.split(",")]
+      if any(s < 1 or s > 512 for s in sizes):
+        p.err(f"Sizes must be {c.CYAN}1{c.END}–{c.CYAN}512{c.END} px")
+        sys.exit(1)
+    except ValueError:
+      p.err(f"Invalid sizes {c.BLUE}{args.sizes}{c.END} {c.GREY}(expected comma-separated "
+        f"integers){c.END}")
+      sys.exit(1)
+  try:
+    result = img_to_ico(args.src, args.dst, sizes, args.fit, args.upscale)
+  except FileNotFoundError:
+    p.err(f"File {c.ORANGE}{name}{c.END} not found")
+    sys.exit(1)
+  except ValueError as e:
+    p.err(f"Cannot process {c.ORANGE}{name}{c.END} | {e}")
+    sys.exit(1)
+  except Exception as e:
+    p.err(f"Failed to convert {c.ORANGE}{name}{c.END} | {e}")
+    sys.exit(1)
+  out_name = os.path.basename(result)
+  img = Image.open(args.src)
+  src_w, src_h = img.size
+  icon_sizes = _pick_sizes(max(src_w, src_h), sizes, args.upscale)
+  sizes_str = f"{c.GREY},{c.END}".join(f"{c.CYAN}{s}{c.END}" for s in icon_sizes)
+  file_kB = os.path.getsize(result) / 1024
+  p.ok(f"Converted {c.ORANGE}{name}{c.END} → {c.BLUE}{out_name}{c.END} "
+    f"{c.GREY}({file_kB:.1f} kB){c.END}")
+  p.gap(f"Source: {c.CYAN}{src_w}{c.END}×{c.CYAN}{src_h}{c.END} px, "
+    f"fit: {c.BLUE}{args.fit}{c.END}, "
+    f"sizes: [{sizes_str}]")
 
 if __name__ == "__main__":
   main()

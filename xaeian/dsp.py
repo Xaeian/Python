@@ -1,9 +1,5 @@
 # xaeian/dsp.py
 
-from __future__ import annotations
-
-__extras__ = ("dsp", ["scipy"])
-
 """
 Signal processing for embedded sensor data.
 
@@ -14,22 +10,25 @@ Fluent API: each transform returns a new Signal, enabling chaining like
 Requires: `pip install xaeian[dsp]`
 
 Example:
-  >>> from xaeian.signal import Signal
-  >>> sig = Signal([1, 2, 3, 2, 1], fs=1000)
+  >>> from xaeian.dsp import Signal
+  >>> sig = Signal.sine(50, duration=0.1, fs=1000)
   >>> sig.lowpass(100).rms
   >>> sig * 2 + sig
 """
 
-import numpy as np
+from __future__ import annotations
+
+__extras__ = ("dsp", ["scipy", "numpy"])
 
 try:
+  import numpy as np
   from scipy.signal import (
     butter, sosfilt, sosfiltfilt, sosfreqz,
     detrend as _detrend, hilbert, welch, windows,
   )
   from scipy.integrate import cumulative_trapezoid
-except ImportError:
-  raise ImportError("Install with: pip install xaeian[dsp]")
+except ImportError as e:
+  raise ImportError("Install with: pip install xaeian[dsp]  (scipy + numpy)") from e
 
 #--------------------------------------------------------------------------------- Spectrum
 
@@ -123,7 +122,8 @@ class Signal:
   __slots__ = ('_data', '_fs', '_units', '_label')
 
   def __init__(self, data, fs:float=1000, units:str="", label:str=""):
-    self._data = np.asarray(data, dtype=np.float64).ravel()
+    self._data = np.array(data, dtype=np.float64, copy=True).flatten()
+    self._data.flags.writeable = False
     self._fs = float(fs)
     self._units = units
     self._label = label
@@ -132,9 +132,9 @@ class Signal:
     """Create new Signal preserving metadata. Core of immutable chaining."""
     return self.__class__(
       data if data is not None else self._data,
-      fs=fs or self._fs,
-      units=units or self._units,
-      label=label or self._label,
+      fs=fs if fs is not None else self._fs,
+      units=units if units is not None else self._units,
+      label=label if label is not None else self._label,
     )
 
   #----------------------------------------------------------------------------- Properties
@@ -142,9 +142,7 @@ class Signal:
   @property
   def data(self) -> np.ndarray:
     """Raw sample array (read-only view)."""
-    v = self._data.view()
-    v.flags.writeable = False
-    return v
+    return self._data.view()
 
   @property
   def fs(self) -> float:
@@ -204,10 +202,16 @@ class Signal:
 
   #----------------------------------------------------------------------------- Operators
 
+  def _check_compat(self, other:Signal):
+    """Verify fs and length match for Signal-Signal operations."""
+    if self._fs != other._fs:
+      raise ValueError(f"Sample rates differ: {self._fs} vs {other._fs}")
+    if len(self._data) != len(other._data):
+      raise ValueError(f"Lengths differ: {len(self._data)} vs {len(other._data)}")
+
   def __add__(self, other):
     if isinstance(other, Signal):
-      if self._fs != other._fs:
-        raise ValueError(f"Sample rates differ: {self._fs} vs {other._fs}")
+      self._check_compat(other)
       return self._new(self._data + other._data)
     return self._new(self._data + np.asarray(other))
 
@@ -216,8 +220,7 @@ class Signal:
 
   def __sub__(self, other):
     if isinstance(other, Signal):
-      if self._fs != other._fs:
-        raise ValueError(f"Sample rates differ: {self._fs} vs {other._fs}")
+      self._check_compat(other)
       return self._new(self._data - other._data)
     return self._new(self._data - np.asarray(other))
 
@@ -226,8 +229,7 @@ class Signal:
 
   def __mul__(self, other):
     if isinstance(other, Signal):
-      if self._fs != other._fs:
-        raise ValueError(f"Sample rates differ: {self._fs} vs {other._fs}")
+      self._check_compat(other)
       return self._new(self._data * other._data)
     return self._new(self._data * np.asarray(other))
 
@@ -236,6 +238,7 @@ class Signal:
 
   def __truediv__(self, other):
     if isinstance(other, Signal):
+      self._check_compat(other)
       return self._new(self._data / other._data)
     return self._new(self._data / np.asarray(other))
 
@@ -258,9 +261,9 @@ class Signal:
     return self._new(self._data[key])
 
   def __array__(self, dtype=None):
-    """NumPy interop: `np.asarray(sig)` returns raw data."""
+    """NumPy interop: `np.asarray(sig)` returns copy of data."""
     if dtype: return self._data.astype(dtype)
-    return self._data
+    return self._data.copy()
 
   def __iter__(self):
     return iter(self._data)
@@ -286,14 +289,14 @@ class Signal:
     return self._new(filt(sos, self._data))
 
   def bandpass(self, low_Hz:float, high_Hz:float, order:int=4,
-               zero_phase:bool=True) -> Signal:
+    zero_phase:bool=True) -> Signal:
     """Butterworth band-pass filter."""
     sos = butter(order, [low_Hz, high_Hz], 'band', fs=self._fs, output='sos')
     filt = sosfiltfilt if zero_phase else sosfilt
     return self._new(filt(sos, self._data))
 
   def bandstop(self, low_Hz:float, high_Hz:float, order:int=4,
-               zero_phase:bool=True) -> Signal:
+    zero_phase:bool=True) -> Signal:
     """Butterworth band-stop (notch) filter."""
     sos = butter(order, [low_Hz, high_Hz], 'bandstop', fs=self._fs, output='sos')
     filt = sosfiltfilt if zero_phase else sosfilt
@@ -402,7 +405,7 @@ class Signal:
   #------------------------------------------------------------------------ Filter response
 
   def freq_response(self, cutoff_Hz:float|list, btype:str="low",
-                    order:int=4, n:int=2000) -> tuple[np.ndarray, np.ndarray]:
+    order:int=4, n:int=2000) -> tuple[np.ndarray, np.ndarray]:
     """Compute frequency response of a Butterworth filter.
 
     Args:
@@ -421,9 +424,8 @@ class Signal:
   #-------------------------------------------------------------------------- Factories
 
   @classmethod
-  def from_adc(cls, raw, fs:float, bits:int=12, vref:float=3.3,
-               offset:int|None=None, scale:float|None=None,
-               units:str="V", label:str="") -> Signal:
+  def from_adc(cls, raw, fs:float, bits:int=12, vref:float=3.3, offset:int|None=None,
+    scale:float|None=None, units:str="V", label:str="") -> Signal:
     """Create Signal from raw ADC integer values.
 
     Args:
@@ -448,11 +450,11 @@ class Signal:
 
   @classmethod
   def from_accel(cls, raw, fs:float, bits:int=16, g_range:float=2.0,
-                 label:str="") -> Signal:
-    """Create Signal from accelerometer raw data.
+    label:str="") -> Signal:
+    """Create Signal from signed accelerometer raw data (typical IMU int16).
 
     Args:
-      raw: Raw accelerometer values.
+      raw: Signed raw accelerometer values (centered around zero).
       fs: Sample rate in Hz.
       bits: ADC resolution.
       g_range: Full-scale range in g (e.g. ±2g → 2.0).
@@ -461,7 +463,7 @@ class Signal:
       >>> ax = Signal.from_accel(raw_x, fs=6666, bits=16, g_range=2, label="X")
     """
     scale = (g_range * 9.81) / (2 ** (bits - 1))
-    return cls.from_adc(raw, fs, bits, scale=scale, offset=2**(bits-1),
+    return cls.from_adc(raw, fs, bits, scale=scale, offset=0,
       units="m/s²", label=label)
 
   @classmethod
@@ -473,21 +475,23 @@ class Signal:
     """
     if not signals: raise ValueError("Need at least one signal")
     fs = signals[0]._fs
+    n = len(signals[0]._data)
     for s in signals[1:]:
       if s._fs != fs: raise ValueError("All signals must have same sample rate")
+      if len(s._data) != n: raise ValueError("All signals must have same length")
     squared = sum(s._data ** 2 for s in signals)
     return cls(np.sqrt(squared), fs=fs, units=signals[0]._units, label="magnitude")
 
   @classmethod
   def sine(cls, freq_Hz:float, duration:float=1.0, fs:float=1000,
-           amplitude:float=1.0, phase:float=0) -> Signal:
+    amplitude:float=1.0, phase:float=0) -> Signal:
     """Generate sine wave test signal."""
     t = np.arange(int(fs * duration)) / fs
     return cls(amplitude * np.sin(2 * np.pi * freq_Hz * t + phase), fs=fs)
 
   @classmethod
   def noise(cls, duration:float=1.0, fs:float=1000,
-            amplitude:float=1.0) -> Signal:
+    amplitude:float=1.0) -> Signal:
     """Generate white noise test signal."""
     n = int(fs * duration)
     return cls(amplitude * np.random.randn(n), fs=fs)
@@ -508,8 +512,7 @@ class Signal:
     if not isinstance(other, Signal): return NotImplemented
     return self._fs == other._fs and np.array_equal(self._data, other._data)
 
-  def __hash__(self):
-    return id(self)
+  __hash__ = None  # unhashable: numpy data not safely hashable
 
   def copy(self) -> Signal:
     """Deep copy of signal."""
@@ -520,7 +523,7 @@ class Signal:
 def demo():
   """Signal processing demo: filter, FFT, vibration metrics."""
   # Generate test signal: 50Hz + 200Hz + noise
-  t = np.linspace(0, 1, 10000)
+  t = np.arange(10000) / 10000
   raw = 2 * np.sin(2 * np.pi * 50 * t) + 0.5 * np.sin(2 * np.pi * 200 * t)
   raw += 0.3 * np.random.randn(len(t))
   sig = Signal(raw, fs=10000, units="m/s²", label="accel_x")

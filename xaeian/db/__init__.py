@@ -160,6 +160,8 @@ _LAZY = {
   "MysqlAsyncDatabase": (".mysql_async", "MysqlAsyncDatabase"),
   "SqliteDatabase": (".sqlite", "SqliteDatabase"),
   "SqliteAsyncDatabase": (".sqlite_async", "SqliteAsyncDatabase"),
+  "KeyValue": (".kv", "KeyValue"),
+  "AsyncKeyValue": (".kv_async", "AsyncKeyValue"),
 }
 
 if TYPE_CHECKING:
@@ -169,6 +171,8 @@ if TYPE_CHECKING:
   from .mysql_async import MysqlAsyncDatabase
   from .sqlite import SqliteDatabase
   from .sqlite_async import SqliteAsyncDatabase
+  from .kv import KeyValue
+  from .kv_async import AsyncKeyValue
 
 def __getattr__(name:str):
   if name not in _LAZY:

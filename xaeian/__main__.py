@@ -4,6 +4,7 @@ COMMANDS = {
   "wifi":  "xaeian.cli.wifi",
   "dupes": "xaeian.cli.dupes",
   "tree":  "xaeian.cli.tree",
+  "fonts": "xaeian.cli.fonts",
   "min":   "xaeian.media.min",
   "meta":  "xaeian.media.meta",
   "ico":   "xaeian.media.ico"

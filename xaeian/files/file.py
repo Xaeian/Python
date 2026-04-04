@@ -3,7 +3,7 @@
 """File read/write operations."""
 
 import os, hashlib
-from typing import Sequence
+from typing import Iterator, Sequence
 from .config import get_context
 from .path import PATH
 from .dir import DIR
@@ -59,6 +59,28 @@ class FILE:
     path = PATH.resolve(path, read=True)
     with open(path, "r", encoding=cfg.encoding) as file:
       return file.readlines()
+
+  @staticmethod
+  def iter_lines(path:str, strip:bool=False) -> Iterator[str]:
+    """
+    Iterate lines from text file without loading entire content.
+
+    Args:
+      path: File path.
+      strip: Strip whitespace from each line when True.
+
+    Yields:
+      Lines from file.
+
+    Example:
+      >>> for line in FILE.iter_lines("big.log", strip=True):
+      ...   if "ERROR" in line: print(line)
+    """
+    cfg = get_context()
+    path = PATH.resolve(path, read=True)
+    with open(path, "r", encoding=cfg.encoding) as file:
+      for line in file:
+        yield line.strip() if strip else line
 
   @staticmethod
   def save(path:str, content:str|bytes):

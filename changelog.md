@@ -1,5 +1,14 @@
 ## Changelog `xaeian`
 
+## `0.6.0` KiCad, Database key-value & Fixes
+
+- `eda`: Submodules for KiCad footprint and symbol generation and cleanup
+- `db`: Key-value store for database backends _(`KeyValue`, `AsyncKeyValue`)_
+- `db`: Adding **pool** to asynchronous database SQL controller versions
+- `cli/fonts`: Script for converting fonts for web use
+- `files`: Added `DIR.unzip` as counterpart to `DIR.zip`
+- Bug fixes, immutability hardening, and dependency declarations across existing modules
+- 
 ## `0.5.3` YAML
 
 - `files`: split into subpackage, added YAML namespace

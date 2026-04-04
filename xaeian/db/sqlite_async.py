@@ -1,6 +1,6 @@
 # xaeian/db/sqlite_async.py
 
-"""SQLite async implementation."""
+"""SQLite async implementation with persistent connection."""
 from __future__ import annotations
 
 import os
@@ -16,9 +16,10 @@ from .utils import (
 
 class SqliteAsyncDatabase(AbstractAsyncDatabase):
   """
-  SQLite async database (aiosqlite).
+  SQLite async database (aiosqlite) with persistent connection.
 
-  Uses `RETURNING` clause (SQLite 3.35+).
+  On `start()`, opens a single connection with WAL mode.
+  Without `start()`, falls back to per-query connections (backward compat).
 
   Args:
     db_name: Database file path or `":memory:"`.
@@ -26,23 +27,65 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
 
   Example:
     >>> db = SqliteAsyncDatabase("app.db")
+    >>> await db.start()
     >>> await db.insert("users", {"name": "Jan"})
+    >>> await db.close()
   """
   def __init__(self, db_name:str, log:Logger|None=None):
     super().__init__()
     self.db_name = db_name
     self.log = log
+    self._persistent = None
 
   async def conn(self):
+    """Create new standalone connection."""
     import aiosqlite
     return await aiosqlite.connect(self.db_name)
+
+  #--------------------------------------------------------------------------------- Lifecycle
+
+  @asynccontextmanager
+  async def _connect(self):
+    """Get connection — persistent or new (fallback)."""
+    if self._persistent:
+      try:
+        yield self._persistent
+      except Exception:
+        try: await self._persistent.rollback()
+        except Exception: pass
+        raise
+    else:
+      conn = await self.conn()
+      try:
+        yield conn
+      finally:
+        await conn.close()
+
+  async def start(self):
+    """Open persistent connection with WAL mode."""
+    if self._persistent: return
+    self._persistent = await self.conn()
+    if self.db_name != ":memory:":
+      await self._persistent.execute("PRAGMA journal_mode=WAL")
+      await self._persistent.execute("PRAGMA synchronous=NORMAL")
+    await self._persistent.execute("PRAGMA busy_timeout=5000")
+    await self._persistent.execute("PRAGMA foreign_keys=ON")
+
+  async def close(self):
+    """Close persistent connection."""
+    if self._persistent:
+      await self._persistent.close()
+      self._persistent = None
 
   #-------------------------------------------------------------------------------- Transaction
 
   @asynccontextmanager
   async def transaction(self):
     if self._conn is not None: raise RuntimeError("Transaction already active")
-    self._conn = await self.conn()
+    if self._persistent:
+      self._conn = self._persistent
+    else:
+      self._conn = await self.conn()
     try:
       yield self
       await self._conn.commit()
@@ -50,7 +93,8 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
       await self._conn.rollback()
       raise
     finally:
-      await self._conn.close()
+      if self._conn is not self._persistent:
+        await self._conn.close()
       self._conn = None
 
   def _rowcount(self, cur) -> int:
@@ -70,18 +114,15 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
         return rc
       except aiosqlite.Error as e:
         self._err("exec", e, sql, p)
-    conn = None
     try:
-      conn = await self.conn()
-      cur = await conn.execute(sql, p)
-      rc = self._rowcount(cur)
-      await cur.close()
-      await conn.commit()
-      return rc
+      async with self._connect() as conn:
+        cur = await conn.execute(sql, p)
+        rc = self._rowcount(cur)
+        await cur.close()
+        await conn.commit()
+        return rc
     except aiosqlite.Error as e:
       self._err("exec", e, sql, p)
-    finally:
-      if conn: await conn.close()
 
   async def exec_many(self, sql:str, params_list:list) -> int:
     import aiosqlite
@@ -94,18 +135,15 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
         return rc
       except aiosqlite.Error as e:
         self._err("exec_many", e, sql, tuple(pl))
-    conn = None
     try:
-      conn = await self.conn()
-      cur = await conn.executemany(sql, pl)
-      rc = self._rowcount(cur)
-      await cur.close()
-      await conn.commit()
-      return rc
+      async with self._connect() as conn:
+        cur = await conn.executemany(sql, pl)
+        rc = self._rowcount(cur)
+        await cur.close()
+        await conn.commit()
+        return rc
     except aiosqlite.Error as e:
       self._err("exec_many", e, sql, tuple(pl))
-    finally:
-      if conn: await conn.close()
 
   async def exec_batch(self, sqls:list[tuple[str, Any]]|list[str]|str) -> int:
     import aiosqlite
@@ -132,16 +170,13 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
     if self.in_transaction():
       try: return await run(self._conn)
       except aiosqlite.Error as e: self._err("exec_batch", e)
-    conn = None
     try:
-      conn = await self.conn()
-      total = await run(conn)
-      await conn.commit()
-      return total
+      async with self._connect() as conn:
+        total = await run(conn)
+        await conn.commit()
+        return total
     except aiosqlite.Error as e:
       self._err("exec_batch", e)
-    finally:
-      if conn: await conn.close()
 
   #-------------------------------------------------------------------------------------- Query
 
@@ -163,17 +198,14 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
         return process(rows)
       except aiosqlite.Error as e:
         self._err("get_rows", e, sql, p)
-    conn = None
     try:
-      conn = await self.conn()
-      cur = await conn.execute(sql, p)
-      rows = await cur.fetchall()
-      await cur.close()
-      return process(rows)
+      async with self._connect() as conn:
+        cur = await conn.execute(sql, p)
+        rows = await cur.fetchall()
+        await cur.close()
+        return process(rows)
     except aiosqlite.Error as e:
       self._err("get_rows", e, sql, p)
-    finally:
-      if conn: await conn.close()
 
   async def get_dicts(self, sql:str, params=None, cols:list[str]|None=None, json:list[str]|None=None) -> list[dict]:
     import aiosqlite
@@ -187,18 +219,15 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
         return to_dicts(rows, columns, json)
       except aiosqlite.Error as e:
         self._err("get_dicts", e, sql, p)
-    conn = None
     try:
-      conn = await self.conn()
-      cur = await conn.execute(sql, p)
-      rows = await cur.fetchall()
-      columns = cols or [c[0] for c in cur.description]
-      await cur.close()
-      return to_dicts(rows, columns, json)
+      async with self._connect() as conn:
+        cur = await conn.execute(sql, p)
+        rows = await cur.fetchall()
+        columns = cols or [c[0] for c in cur.description]
+        await cur.close()
+        return to_dicts(rows, columns, json)
     except aiosqlite.Error as e:
       self._err("get_dicts", e, sql, p)
-    finally:
-      if conn: await conn.close()
 
   async def _insert_returning(self, table:str, data:dict, ret:str) -> Any:
     import aiosqlite
@@ -215,18 +244,15 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
         return row[0] if row else None
       except aiosqlite.Error as e:
         self._err("insert", e, sql, tuple(d.values()))
-    conn = None
     try:
-      conn = await self.conn()
-      cur = await conn.execute(sql, tuple(d.values()))
-      row = await cur.fetchone()
-      await cur.close()
-      await conn.commit()
-      return row[0] if row else None
+      async with self._connect() as conn:
+        cur = await conn.execute(sql, tuple(d.values()))
+        row = await cur.fetchone()
+        await cur.close()
+        await conn.commit()
+        return row[0] if row else None
     except aiosqlite.Error as e:
       self._err("insert", e, sql, tuple(d.values()))
-    finally:
-      if conn: await conn.close()
 
   #------------------------------------------------------------------------------------- Schema
 
@@ -250,7 +276,7 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
     t = ident(table)
     cols = ", ".join(ident(k) for k in d.keys())
     vals = ph(len(d), self.ph)
-    conf = on if isinstance(on, str) else ", ".join(on)
+    conf = ident(on) if isinstance(on, str) else ", ".join(ident(x) for x in on)
     upd_cols = update or [k for k in d.keys() if k not in (on if isinstance(on, list) else [on])]
     sets = ", ".join(f"{ident(k)} = excluded.{ident(k)}" for k in upd_cols)
     sql = f"INSERT INTO {t} ({cols}) VALUES {vals} ON CONFLICT ({conf}) DO UPDATE SET {sets}"

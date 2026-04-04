@@ -8,6 +8,7 @@ from ..log import Logger, Print
 
 from .abstract import AbstractDatabase
 from .utils import ident, ph, serialize_dict
+
 class MysqlDatabase(AbstractDatabase):
   """
   MySQL database (pymysql).

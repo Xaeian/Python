@@ -59,13 +59,45 @@ class AbstractAsyncDatabase(ABC):
 
   @abstractmethod
   async def conn(self):
-    """Create new database connection."""
+    """Create new standalone connection (outside pool)."""
     raise NotImplementedError
 
   @abstractmethod
   def transaction(self):
     """Transaction context manager."""
     raise NotImplementedError
+
+  #--------------------------------------------------------------------------------- Lifecycle
+
+  @property
+  def pool(self):
+    """Raw connection pool. None for backends without pooling."""
+    return None
+
+  async def start(self):
+    """Initialize connection pool or persistent connection.
+
+    Called automatically on first query (lazy init), or explicitly
+    for eager initialization (e.g. in FastAPI lifespan).
+
+    Example:
+      >>> await db.start()
+      >>> # or
+      >>> async with db:
+      ...   await db.get_dicts("SELECT * FROM users")
+    """
+    pass
+
+  async def close(self):
+    """Close connection pool or persistent connection."""
+    pass
+
+  async def __aenter__(self):
+    await self.start()
+    return self
+
+  async def __aexit__(self, *exc):
+    await self.close()
 
   #------------------------------------------------------------------------------------ Execute
 

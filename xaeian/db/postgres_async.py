@@ -1,8 +1,9 @@
 # xaeian/db/postgres_async.py
 
-"""PostgreSQL async implementation."""
+"""PostgreSQL async implementation with connection pooling."""
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 from ..log import Logger, Print
@@ -12,9 +13,10 @@ from .utils import ident, serialize_params, serialize_dict, split_sql, parse_jso
 
 class PostgresAsyncDatabase(AbstractAsyncDatabase):
   """
-  PostgreSQL async database (asyncpg).
+  PostgreSQL async database (asyncpg) with connection pooling.
 
-  Converts `?`/`%s` placeholders to `$1`, `$2`, ...
+  Pool is created lazily on first query or explicitly via `start()`.
+  Use `close()` for clean shutdown.
 
   Args:
     db_name: Database name.
@@ -23,10 +25,17 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
     password: Password.
     port: Server port.
     log: Logger instance.
+    min_pool: Minimum pool connections (created on start).
+    max_pool: Maximum pool connections.
 
   Example:
     >>> db = PostgresAsyncDatabase("mydb", user="postgres", password="secret")
+    >>> await db.start()
     >>> user_id = await db.insert("users", {"name": "Jan"}, returning="id")
+    >>> await db.close()
+    >>> # or as context manager:
+    >>> async with PostgresAsyncDatabase("mydb", ...) as db:
+    ...   await db.insert("users", {"name": "Jan"})
   """
   def __init__(
     self,
@@ -36,6 +45,8 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
     password: str = "",
     port: int = 5432,
     log: Logger|Print|None = None,
+    min_pool: int = 1,
+    max_pool: int = 10,
   ):
     super().__init__()
     self.host = host
@@ -45,6 +56,10 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
     self.db_name = db_name
     self.log = log
     self.ph = "$"
+    self._pool = None
+    self._pool_lock = asyncio.Lock()
+    self._min_pool = min_pool
+    self._max_pool = max_pool
 
   def _pg(self, sql:str) -> str:
     """Convert `?` or `%s` placeholders to `$1`, `$2`, ..."""
@@ -64,6 +79,7 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
     return "".join(result)
 
   async def conn(self):
+    """Create standalone connection (outside pool)."""
     import asyncpg
     return await asyncpg.connect(
       host=self.host, port=self.port,
@@ -71,13 +87,53 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
       database=self.db_name
     )
 
+  #--------------------------------------------------------------------------------- Lifecycle
+
+  async def _ensure_pool(self):
+    if self._pool is not None:
+      return self._pool
+    async with self._pool_lock:
+      if self._pool is None:
+        import asyncpg
+        self._pool = await asyncpg.create_pool(
+          host=self.host, port=self.port,
+          user=self.user, password=self.password,
+          database=self.db_name,
+          min_size=self._min_pool, max_size=self._max_pool,
+        )
+    return self._pool
+
+  @asynccontextmanager
+  async def _connect(self):
+    """Acquire connection from pool."""
+    pool = await self._ensure_pool()
+    async with pool.acquire() as conn:
+      yield conn
+
+  @property
+  def pool(self):
+    """Raw asyncpg pool for COPY protocol, etc."""
+    return self._pool
+
+  async def start(self):
+    """Eagerly create connection pool."""
+    await self._ensure_pool()
+
+  async def close(self):
+    """Close connection pool."""
+    if self._pool:
+      await self._pool.close()
+      self._pool = None
+
   #-------------------------------------------------------------------------------- Transaction
 
   @asynccontextmanager
   async def transaction(self):
     if self._conn is not None: raise RuntimeError("Transaction already active")
-    self._conn = await self.conn()
-    tr = self._conn.transaction()
+    pool = await self._ensure_pool()
+    conn = await pool.acquire()
+    self._conn = conn
+    tr = conn.transaction()
     await tr.start()
     try:
       yield self
@@ -86,8 +142,8 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
       await tr.rollback()
       raise
     finally:
-      await self._conn.close()
       self._conn = None
+      await pool.release(conn)
 
   #------------------------------------------------------------------------------------ Execute
 
@@ -102,15 +158,12 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
         return self._parse_status(result)
       except asyncpg.PostgresError as e:
         self._err("exec", e, sql2, p)
-    conn = None
     try:
-      conn = await self.conn()
-      result = await conn.execute(sql2, *p)
-      return self._parse_status(result)
+      async with self._connect() as conn:
+        result = await conn.execute(sql2, *p)
+        return self._parse_status(result)
     except asyncpg.PostgresError as e:
       self._err("exec", e, sql2, p)
-    finally:
-      if conn: await conn.close()
 
   def _parse_status(self, status:str) -> int:
     """Parse asyncpg status string like `INSERT 0 1` or `UPDATE 5`."""
@@ -129,15 +182,12 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
         return len(pl)
       except asyncpg.PostgresError as e:
         self._err("exec_many", e, sql2, tuple(pl))
-    conn = None
     try:
-      conn = await self.conn()
-      await conn.executemany(sql2, pl)
-      return len(pl)
+      async with self._connect() as conn:
+        await conn.executemany(sql2, pl)
+        return len(pl)
     except asyncpg.PostgresError as e:
       self._err("exec_many", e, sql2, tuple(pl))
-    finally:
-      if conn: await conn.close()
 
   async def exec_batch(self, sqls:list[tuple[str, Any]]|list[str]|str) -> int:
     import asyncpg
@@ -162,16 +212,12 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
     if self.in_transaction():
       try: return await run(self._conn)
       except asyncpg.PostgresError as e: self._err("exec_batch", e)
-    conn = None
     try:
-      conn = await self.conn()
-      async with conn.transaction():
-        total = await run(conn)
-      return total
+      async with self._connect() as conn:
+        async with conn.transaction():
+          return await run(conn)
     except asyncpg.PostgresError as e:
       self._err("exec_batch", e)
-    finally:
-      if conn: await conn.close()
 
   #-------------------------------------------------------------------------------------- Query
 
@@ -192,15 +238,12 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
         return process(rows)
       except asyncpg.PostgresError as e:
         self._err("get_rows", e, sql2, p)
-    conn = None
     try:
-      conn = await self.conn()
-      rows = await conn.fetch(sql2, *p)
-      return process(rows)
+      async with self._connect() as conn:
+        rows = await conn.fetch(sql2, *p)
+        return process(rows)
     except asyncpg.PostgresError as e:
       self._err("get_rows", e, sql2, p)
-    finally:
-      if conn: await conn.close()
 
   async def get_dicts(self, sql:str, params=None, cols:list[str]|None=None, json:list[str]|None=None) -> list[dict]:
     import asyncpg
@@ -223,15 +266,12 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
         return convert(rows)
       except asyncpg.PostgresError as e:
         self._err("get_dicts", e, sql2, p)
-    conn = None
     try:
-      conn = await self.conn()
-      rows = await conn.fetch(sql2, *p)
-      return convert(rows)
+      async with self._connect() as conn:
+        rows = await conn.fetch(sql2, *p)
+        return convert(rows)
     except asyncpg.PostgresError as e:
       self._err("get_dicts", e, sql2, p)
-    finally:
-      if conn: await conn.close()
 
   async def _insert_returning(self, table:str, data:dict, ret:str) -> Any:
     import asyncpg
@@ -246,15 +286,12 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
         return row[0] if row else None
       except asyncpg.PostgresError as e:
         self._err("insert", e, sql, tuple(d.values()))
-    conn = None
     try:
-      conn = await self.conn()
-      row = await conn.fetchrow(sql, *d.values())
-      return row[0] if row else None
+      async with self._connect() as conn:
+        row = await conn.fetchrow(sql, *d.values())
+        return row[0] if row else None
     except asyncpg.PostgresError as e:
       self._err("insert", e, sql, tuple(d.values()))
-    finally:
-      if conn: await conn.close()
 
   #------------------------------------------------------------------------------------- Schema
 
@@ -286,7 +323,7 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
     t = ident(table)
     cols = ", ".join(ident(k) for k in d.keys())
     vals = ", ".join(f"${i+1}" for i in range(len(d)))
-    conf = on if isinstance(on, str) else ", ".join(on)
+    conf = ident(on) if isinstance(on, str) else ", ".join(ident(x) for x in on)
     upd_cols = update or [k for k in d.keys() if k not in (on if isinstance(on, list) else [on])]
     sets = ", ".join(f"{ident(k)} = EXCLUDED.{ident(k)}" for k in upd_cols)
     sql = f"INSERT INTO {t} ({cols}) VALUES ({vals}) ON CONFLICT ({conf}) DO UPDATE SET {sets}"

@@ -29,3 +29,14 @@ xn wifi -o wifi.json
 ```
 
 Windows (`netsh`) and Linux (`nmcli` / NetworkManager files).
+
+## `fonts`: Font file renamer
+
+```sh
+xn fonts web/fonts/
+xn fonts web/fonts/ --css web/css/fonts.css
+xn fonts web/fonts/ --dry-run
+```
+
+Rename font files to `{family}-{weight}[-italic].{ext}` convention.
+Optionally generates `@font-face` CSS.

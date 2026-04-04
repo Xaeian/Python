@@ -301,7 +301,7 @@ def _log_summary(
     p.inf(f"Package data: {c.GREY}{', '.join(package_data)}{c.END}")
   if meta.get("scripts"):
     for cmd, entry in meta["scripts"].items():
-      p.item(f"Script: {c.TURQUS}{cmd}{c.END} -> {c.GREY}{entry}{c.END}")
+      p.item(f"Script: {c.TURQUS}{cmd}{c.END} → {c.GREY}{entry}{c.END}")
 
 #--------------------------------------------------------------------------------------- Public
 

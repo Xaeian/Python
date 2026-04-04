@@ -114,17 +114,27 @@ class CSV:
 
   @staticmethod
   def add_row(path:str, datarow:dict[str, Any]|list[Any],
-              delimiter:str=","):
-    """Append single row to CSV file."""
+              delimiter:str=",", header:list[str]|None=None):
+    """
+    Append single row to CSV file.
+
+    Args:
+      header: Column names for list rows (written if file is new).
+    """
     if datarow is None: raise ValueError("datarow must not be None")
     cfg = get_context()
     path = ensure_suffix(path, ".csv")
     path = PATH.resolve(path, read=False)
     DIR.ensure(path, is_file=True)
-    file_exists = os.path.isfile(path)
+    file_exists = os.path.isfile(path) and os.path.getsize(path) > 0
     with open(path, "a", newline="", encoding=cfg.encoding) as csv_file:
       if isinstance(datarow, dict):
-        field_names = list(datarow.keys())
+        if file_exists:
+          with open(path, "r", newline="", encoding=cfg.encoding) as f:
+            reader = csv.reader(f, delimiter=delimiter)
+            field_names = next(reader)
+        else:
+          field_names = list(datarow.keys())
         writer = csv.DictWriter(
           csv_file, fieldnames=field_names, delimiter=delimiter,
         )
@@ -132,6 +142,8 @@ class CSV:
         writer.writerow(datarow)
       elif isinstance(datarow, list):
         writer = csv.writer(csv_file, delimiter=delimiter)
+        if not file_exists and header:
+          writer.writerow(header)
         writer.writerow(datarow)
       else:
         raise ValueError("datarow must be dict or list")

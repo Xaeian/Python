@@ -241,3 +241,45 @@ class DIR:
         rel = os.path.relpath(f, src)
         zipf.write(f, rel)
     return PATH.normalize(zip_output)
+
+  @staticmethod
+  def unzip(path:str, output:str|None=None) -> str:
+    """
+    Extract ZIP archive to directory.
+
+    Args:
+      path: Source ZIP archive path.
+      output: Output directory (default: archive name without `.zip`).
+
+    Returns:
+      Output directory path.
+    """
+    src = PATH.resolve(path, read=True)
+    if not os.path.isfile(src):
+      raise FileNotFoundError(f"Archive not found: {src}")
+    if output is None:
+      output = PATH.with_suffix(src, "")
+    output = PATH.resolve(output, read=False)
+    os.makedirs(output, exist_ok=True)
+    with zipfile.ZipFile(src, "r") as zf:
+      zf.extractall(output)
+    return PATH.normalize(output)
+  
+  @staticmethod
+  def unzip_bytes(data:bytes, output:str) -> str:
+    """
+    Extract ZIP archive from bytes to directory.
+
+    Args:
+      data: ZIP archive as bytes.
+      output: Output directory path.
+
+    Returns:
+      Output directory path.
+    """
+    import io
+    output = PATH.resolve(output, read=False)
+    os.makedirs(output, exist_ok=True)
+    with zipfile.ZipFile(io.BytesIO(data), "r") as zf:
+      zf.extractall(output)
+    return PATH.normalize(output)

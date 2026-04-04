@@ -15,7 +15,7 @@ import os
 from io import BytesIO
 from typing import Literal
 from PIL import Image, ImageOps
-from ..files import DIR
+from ..files import DIR, PATH
 from .utils import IMG_EXTS, require_file, resolve_dst
 
 #---------------------------------------------------------------------------------------- Types
@@ -162,9 +162,21 @@ def img_scrub_metadata(src:str, dst:str|None=None, inplace:bool=False) -> str:
   image = Image.open(src)
   data = list(image.getdata())
   clean = Image.new(image.mode, image.size)
+  if image.mode == "P":
+    clean.putpalette(image.getpalette())
+    if "transparency" in image.info:
+      clean.info["transparency"] = image.info["transparency"]
   clean.putdata(data)
   out_path = resolve_dst(src, dst, inplace, "nometa")
-  clean.save(out_path)
+  ext = PATH.ext(out_path).lower()
+  if ext == ".png":
+    clean.save(out_path, optimize=True, compress_level=9)
+  elif ext in (".jpg", ".jpeg"):
+    clean.save(out_path, quality="keep", optimize=True, progressive=True, subsampling="keep")
+  elif ext == ".webp":
+    clean.save(out_path, method=6)
+  else:
+    clean.save(out_path)
   return out_path
 
 #-------------------------------------------------------------------------------------- Resize

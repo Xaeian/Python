@@ -338,7 +338,7 @@ from xaeian.dsp import Signal
 # From raw ADC / accelerometer data
 sig = Signal.from_accel(raw_x, fs=6666, bits=16, g_range=2, label="X")
 sig = Signal.from_adc(raw, fs=1000, bits=12, vref=3.3, units="V")
-sig = Signal([1.0, 2.0, 3.0], fs=1000)  # from array
+sig = Signal(samples, fs=1000) # from array
 # Operators: immutable, returns new Signal
 sig * 2      # scale
 sig1 + sig2  # add (same fs required)
@@ -376,8 +376,4 @@ mag = Signal.magnitude(sig_x, sig_y, sig_z)
 # Test signals
 Signal.sine(100, duration=1.0, fs=10000)
 Signal.noise(duration=1.0, fs=10000)
-```
-
-```sh
-py -m xaeian.dsp   # demo: filter, FFT, metrics, operators
 ```

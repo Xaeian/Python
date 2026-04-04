@@ -1,6 +1,6 @@
 # `xaeian.db`
 
-Lightweight database abstraction. SQLite, MySQL, PostgreSQL — sync and async.
+Lightweight database abstraction. SQLite, MySQL, PostgreSQL: sync and async.
 
 ## Install
 
@@ -91,6 +91,85 @@ user = await db.find_one("users", id=42)
 async with db.transaction():
   await db.insert("orders", {"user_id": 1})
   await db.update("users", {"balance": 0}, "id = ?", 1)
+```
+
+## Connection Pooling (Async)
+
+Async backends use connection pooling: pool is created lazily on first query.
+No code changes needed, existing usage works as before.
+
+For explicit lifecycle _(recommended for services)_:
+
+```py
+db = AsyncDatabase("postgres", "mydb", user="postgres", password="secret")
+await db.start() # create pool eagerly, fail fast if DB unreachable
+# ... use db ...
+await db.close() # clean shutdown
+
+# or as context manager:
+async with AsyncDatabase("postgres", "mydb", user="postgres", password="secret") as db:
+  await db.insert("users", {"name": "Jan"})
+```
+
+FastAPI lifespan:
+
+```py
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app):
+  await db.start()
+  yield
+  await db.close()
+
+app = FastAPI(lifespan=lifespan)
+```
+
+Pool configuration _(direct class import)_:
+
+```py
+from xaeian.db import PostgresAsyncDatabase, MysqlAsyncDatabase
+
+db = PostgresAsyncDatabase("mydb", user="postgres", password="secret",
+  min_pool=2, max_pool=20)
+db = MysqlAsyncDatabase("mydb", user="root", password="secret",
+  min_pool=2, max_pool=20)
+```
+
+Raw pool access for advanced operations _(COPY protocol, cursors)_:
+
+```py
+async with db.pool.acquire() as conn:
+  await conn.copy_from_query("SELECT * FROM users", format="csv", header=True)
+```
+
+SQLite uses a single persistent connection with WAL mode instead of pooling.
+Sync backends don't use pooling: each query opens a new connection.
+
+## Key-Value Store
+
+```py
+from xaeian.db import Database, KeyValue, AsyncKeyValue
+
+# Sync
+db = Database("sqlite", "app.db")
+kv = KeyValue(db)
+kv.set("active_table", "pilot")
+kv.get("active_table")       # "pilot"
+kv.all()                     # {"active_table": "pilot", ...}
+kv.delete("active_table")
+
+# Async
+db = AsyncDatabase("postgres", "mydb", user="postgres", password="secret")
+kv = AsyncKeyValue(db)
+await kv.set("maintenance", "true")
+await kv.get("maintenance")  # "true"
+await kv.all()               # {"maintenance": "true", ...}
+```
+
+Custom table name:
+```py
+kv = KeyValue(db, table="_settings")
 ```
 
 ## Auto-Conversion

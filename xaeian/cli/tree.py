@@ -8,10 +8,12 @@ Example:
   >>> tree("src/", exts=[".py"], ignore=["__pycache__"])
 """
 
-import os
+import os, sys
 from ..files import PATH, JSON
 from ..log import Print
 from ..colors import Color as c
+
+p = Print()
 
 #------------------------------------------------------------------------------------ Internals
 
@@ -159,29 +161,39 @@ def main():
     help="Save stats to JSON file")
   parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
   args = parser.parse_args()
-  p = Print()
+  root = os.path.abspath(args.root)
+  if not os.path.isdir(root):
+    p.err(f"Directory {c.ORANGE}{root}{c.END} not found")
+    sys.exit(1)
   ignore = DEFAULT_IGNORE.copy()
   if args.ignore:
     ignore.update(args.ignore)
-  result = tree(
-    args.root,
-    exts=args.exts,
-    ignore=ignore,
-    show_hidden=args.hidden,
-    show_size=args.size,
-    max_depth=args.depth,
-    dirs_only=args.dirs,
-    color=not args.no_color,
-  )
+  try:
+    result = tree(
+      args.root,
+      exts=args.exts,
+      ignore=ignore,
+      show_hidden=args.hidden,
+      show_size=args.size,
+      max_depth=args.depth,
+      dirs_only=args.dirs,
+      color=not args.no_color,
+    )
+  except PermissionError:
+    p.err(f"No read permission for {c.ORANGE}{root}{c.END}")
+    sys.exit(1)
+  except Exception as e:
+    p.err(f"Tree failed | {e}")
+    sys.exit(1)
   for line in result["lines"]:
     print(line)
   print()
   p.inf(f"{c.TEAL}{result['dirs']}{c.END} directories, "
-        f"{c.CYAN}{result['files']}{c.END} files, "
-        f"{c.GREY}{_fmt_size(result['size']).strip()}{c.END} total")
+    f"{c.CYAN}{result['files']}{c.END} files, "
+    f"{c.GREY}{_fmt_size(result['size']).strip()}{c.END} total")
   if args.output:
     JSON.save_pretty(args.output, {
-      "root": os.path.abspath(args.root),
+      "root": root,
       "dirs": result["dirs"],
       "files": result["files"],
       "size": result["size"],

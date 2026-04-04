@@ -9,9 +9,12 @@ Example:
   >>> compress("photo.jpg", max_px=1280, quality=85)
 """
 
-import os
+import os, sys
 from typing import Sequence
-from .utils import PDF_EXTS, IMG_EXTS
+from xaeian import Print, Color as c
+from .utils import PDF_EXTS, IMG_EXTS, require_file
+
+p = Print()
 
 def compress(
   src: str,
@@ -48,15 +51,20 @@ def compress(
   Returns:
     str for single PDF, list[dict] for image(s).
   """
+  if os.path.isdir(src):
+    from .img import img_compress
+    return img_compress(src, dst, max_px, img_format, quality, target_kB, avif_speed,
+      recursive, inplace)
+  src = require_file(src, "Input")
   ext = os.path.splitext(src)[1].lower()
   if ext in PDF_EXTS:
     from .pdf import pdf_compress
     return pdf_compress(src, dst, pdf_level, pdf_settings, pdf_programs, inplace)
-  if ext in IMG_EXTS or os.path.isdir(src):
+  if ext in IMG_EXTS:
     from .img import img_compress
     return img_compress(src, dst, max_px, img_format, quality, target_kB, avif_speed,
       recursive, inplace)
-  raise ValueError(f"Unsupported format: {ext}")
+  raise ValueError(f"Unsupported format: {ext} (expected PDF, image, or directory)")
 
 EXAMPLES = """
 examples:
@@ -107,18 +115,52 @@ def main():
     help="Don't walk subdirectories")
   parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
   args = parser.parse_args()
-  result = compress(
-    args.src, args.dst, args.inplace,
-    args.pdf_level, args.pdf_settings,
-    max_px=args.max_px, img_format=args.img_format, quality=args.quality,
-    target_kB=args.target_kb, avif_speed=args.avif_speed, recursive=not args.no_recursive,
-  )
+  name = os.path.basename(args.src.rstrip("/\\")) or args.src
+  ext = os.path.splitext(name)[1].lower()
+  try:
+    result = compress(
+      args.src, args.dst, args.inplace,
+      args.pdf_level, args.pdf_settings,
+      max_px=args.max_px, img_format=args.img_format, quality=args.quality,
+      target_kB=args.target_kb, avif_speed=args.avif_speed,
+      recursive=not args.no_recursive,
+    )
+  except FileNotFoundError:
+    p.err(f"File {c.ORANGE}{name}{c.END} not found")
+    sys.exit(1)
+  except ValueError as e:
+    p.err(f"Format {c.BLUE}{ext}{c.END} not supported "
+      f"{c.GREY}(PDF, image, or directory expected){c.END}")
+    sys.exit(1)
+  except Exception as e:
+    p.err(f"Failed to compress {c.ORANGE}{name}{c.END} | {e}")
+    sys.exit(1)
   if isinstance(result, str):
-    print(result)
+    orig_kB = os.path.getsize(args.src) / 1024
+    new_kB = os.path.getsize(result) / 1024
+    ratio = (new_kB / orig_kB * 100) if orig_kB else 0
+    out_name = os.path.basename(result)
+    p.ok(f"Compressed {c.ORANGE}{name}{c.END} → {c.BLUE}{out_name}{c.END}")
+    p.gap(f"{c.CYAN}{orig_kB:.0f}{c.END} → {c.CYAN}{new_kB:.0f}{c.END} kB "
+      f"{c.GREY}({ratio:.0f}%){c.END}")
   elif isinstance(result, list):
+    if not result:
+      p.wrn(f"No images found in {c.ORANGE}{name}{c.END}")
+      sys.exit(0)
+    total_orig, total_new = 0, 0
     for r in result:
-      ratio = f"{r['new_kB']:.0f}/{r['orig_kB']:.0f} kB"
-      print(f"  {r['src']} -> {r['dst']}  ({ratio})")
+      src_name = os.path.basename(r["src"])
+      dst_name = os.path.basename(r["dst"])
+      ratio = (r["new_kB"] / r["orig_kB"] * 100) if r["orig_kB"] else 0
+      p.ok(f"{c.ORANGE}{src_name}{c.END} → {c.BLUE}{dst_name}{c.END} "
+        f"{c.CYAN}{r['orig_kB']:.0f}{c.END}→{c.CYAN}{r['new_kB']:.0f}{c.END} kB "
+        f"{c.GREY}({ratio:.0f}%){c.END}")
+      total_orig += r["orig_kB"]
+      total_new += r["new_kB"]
+    if len(result) > 1:
+      total_ratio = (total_new / total_orig * 100) if total_orig else 0
+      p.inf(f"Total: {c.CYAN}{total_orig:.0f}{c.END} → {c.CYAN}{total_new:.0f}{c.END} kB "
+        f"{c.GREY}({total_ratio:.0f}%, {len(result)} files){c.END}")
 
 if __name__ == "__main__":
   main()

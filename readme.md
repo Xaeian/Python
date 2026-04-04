@@ -2,6 +2,27 @@
 
 Python utilities. Zero dependencies for core. Optional extras for time, serial, media, database and more...
 
+## Philosophy
+
+Xaeian wraps stdlib boilerplate into intent-level APIs. You read what code does, not how. In real projects this cuts **~35%** of code volume.
+
+This follows the **Zen** of Python:
+
+- Beautiful over ugly: `Time() + "15m"` vs `datetime.now(tz=...) + timedelta(minutes=15)`
+- Simple over complex: `db.find_one("users", id=42)` vs acquire/try/finally/dict/close
+- Flat over nested: `DIR.zip(src, out)` vs `os.walk` + `zipfile` + `os.path.relpath` loop
+- Readability counts: code reads like intentions, not implementation
+- One obvious way to do it: `crc16_modbus.encode(frame)`, `JSON.load(path)`, `Time(ts).to("iso")`
+- Errors should never pass silently: `DatabaseError` wraps driver exceptions with context
+- Namespaces are one honking great idea: `FILE`, `DIR`, `PATH`, `CSV`, `JSON`, `CRC` as static classes
+
+Trade-offs:
+
+- Explicit over implicit: `PATH.resolve` auto-joins with CWD, `db.insert` auto-serializes dicts to JSON and ISO strings to datetime. Convenient in 95% of cases, surprising in the rest. This is a deliberate choice. Where needed, defaults can be disabled (`auto_resolve=False`).
+- Performance: extra abstraction layer adds overhead. Path resolution, auto-serialization, placeholder conversion on every call. Negligible for APIs and tools. Not suited for tight loops processing millions of rows.
+
+Type safety comes from Pydantic models and Python type hints on the application layer. Xaeian provides the plumbing underneath. Each layer does one thing and stays out of the way. It works best when you control the stack end-to-end and value compact code over maximum configurability.
+
 ## Install
 
 ```sh

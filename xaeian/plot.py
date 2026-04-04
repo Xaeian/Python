@@ -1,9 +1,5 @@
 # xaeian/plot.py
 
-from __future__ import annotations
-
-__extras__ = ("plot", ["matplotlib"])
-
 """
 Minimal fluent matplotlib wrapper for CLI time-series plotting.
 
@@ -27,6 +23,10 @@ Example:
   ...   .save("dashboard.png"))
 """
 
+from __future__ import annotations
+
+__extras__ = ("plot", ["matplotlib", "numpy"])
+
 import os
 from datetime import datetime, date
 
@@ -35,21 +35,24 @@ try:
   import matplotlib.pyplot as plt
   import matplotlib.dates as mdates
   import numpy as np
-except ImportError:
-  raise ImportError("Install with: pip install xaeian[plot]")
+except ImportError as e:
+  raise ImportError("Install with: pip install xaeian[plot]  (matplotlib + numpy)") from e
 
 #-------------------------------------------------------------------------------------- Helpers
 
-# Paul Tol "bright": colorblind-safe, 10 distinct colors
+# Paul Tol colorblind-safe: bright (1-7), vibrant (8-10), muted (11-20)
 PALETTE = [
   '#4477AA', '#EE6677', '#228833', '#CCBB44', '#66CCEE',
   '#AA3377', '#BBBBBB', '#332288', '#882255', '#117733',
+  '#44AA99', '#EE8866', '#CC6677', '#DDCC77', '#999933',
+  '#6699CC', '#661100', '#004488', '#AA4499', '#EEDD88',
 ]
 
 def _parse_label(label:str|tuple|None) -> tuple[str, str]:
   """Parse `"Name [unit]"` or `("Name", "unit")` → `(name, unit)`."""
   if label is None: return ("", "")
   if isinstance(label, (list, tuple)):
+    if not label: return ("", "")
     return (str(label[0]), str(label[1]) if len(label) > 1 else "")
   s = str(label)
   i = s.rfind("[")
@@ -70,7 +73,7 @@ def _is_datetime(x) -> bool:
   v = x[0] if hasattr(x, '__getitem__') else next(iter(x), None)
   return isinstance(v, (datetime, date, np.datetime64))
 
-#-------------------------------------------------------------------------------- Date formatter
+#------------------------------------------------------------------------------- Date formatter
 
 class _SmartDateFormatter(matplotlib.ticker.Formatter):
   """Auto date format based on visible time span.
@@ -78,9 +81,9 @@ class _SmartDateFormatter(matplotlib.ticker.Formatter):
   Adapts tick labels to data density: shows only what's needed:
     < 10 min → `16:30:15`          (seconds matter)
     < 24h    → `16:30`             (time only, date implied)
-    1–60 d   → `12:00` normally,   (date appears on day boundary)
+    1-60 d   → `12:00` normally,   (date appears on day boundary)
                `12:00\\n25-03-01`  (time on top, date below)
-    60d–2y   → `25-03-01`          (days only)
+    60d-2y   → `25-03-01`          (days only)
     > 2y     → `2025-03`           (months only)
   """
   def __call__(self, x, pos=None):
@@ -109,7 +112,7 @@ def _setup_date_axis(ax):
   ax.xaxis.set_major_locator(loc)
   ax.xaxis.set_major_formatter(_SmartDateFormatter())
 
-#-------------------------------------------------------------------------------------- Themes
+#--------------------------------------------------------------------------------------- Themes
 
 # Shared rcParams: avoids duplication between clean/dark
 _COMMON = {
@@ -187,7 +190,7 @@ class Plot:
     self._axes: list[plt.Axes] = []
     self._rendered = False
 
-  #----------------------------------------------------------------------------- Panel management
+  #--------------------------------------------------------------------------- Panel management
 
   @staticmethod
   def _empty_panel() -> dict:
@@ -196,7 +199,7 @@ class Plot:
       'xlim': None, 'ylim': None,
       'logx': False, 'logy': False,
       'grid': None, 'legend': None,
-      'twin': None,  # when set: dict with traces/ylabel/ylim/logy
+      'twin': None, # when set: dict with traces/ylabel/ylim/logy
     }
 
   @property
@@ -311,7 +314,7 @@ class Plot:
     )
     return self
 
-  #----------------------------------------------------------------------------- Configuration
+  #------------------------------------------------------------------------------ Configuration
 
   def title(self, text:str) -> Plot:
     """Figure suptitle (above all panels)."""
@@ -363,7 +366,7 @@ class Plot:
     self._size = (w, h)
     return self
 
-  #--------------------------------------------------------------------------------- Rendering
+  #---------------------------------------------------------------------------------- Rendering
 
   def _finalize_panels(self) -> list[dict]:
     """Collect all panels (including current), skip empty ones."""
@@ -381,7 +384,12 @@ class Plot:
     if self._rendered: return
     panels = self._finalize_panels()
     if not panels:
-      self._fig, _ = plt.subplots()
+      style = THEMES.get(self._theme, THEMES['clean'])
+      with plt.rc_context(style):
+        fig, ax = plt.subplots(figsize=self._size, dpi=self._dpi)
+      if self._title: fig.suptitle(self._title, fontsize=12, fontweight='bold')
+      if self._xlabel: ax.set_xlabel(self._xlabel)
+      self._fig, self._axes = fig, [ax]
       self._rendered = True
       return
     n = len(panels)
@@ -399,7 +407,6 @@ class Plot:
         w_pad=7/72, h_pad=7/72, wspace=0.02, hspace=0.06,
       )
       axes = [axarr[i, 0] for i in range(n)]
-      has_datetime = False
       color_idx = 0
       for pi, (panel, ax) in enumerate(zip(panels, axes)):
         is_last = (pi == n - 1)
@@ -417,10 +424,12 @@ class Plot:
         self._apply_axis(ax, panel)
         if panel['grid'] is not None: ax.grid(panel['grid'])
         # Auto-detect datetime x-data → smart date formatting
-        for tr in panel['traces']:
+        all_traces = panel['traces']
+        if panel['twin']:
+          all_traces = all_traces + panel['twin']['traces']
+        for tr in all_traces:
           if tr['x'] is not None and _is_datetime(tr['x']):
             _setup_date_axis(ax)
-            has_datetime = True
             break
         # Inner panels: hide x-tick labels (shared x shows on bottom)
         if not is_last and n > 1:
@@ -463,6 +472,7 @@ class Plot:
       if kind in ('line', 'scatter', 'step', 'fill', 'bar'):
         if 'color' not in kw and 'c' not in kw:
           kw['color'] = PALETTE[color_idx % len(PALETTE)]
+          tr['kw']['color'] = kw['color']  # persist for `_apply_axis`
         color_idx += 1
       # Dispatch to matplotlib primitives
       if   kind == 'line':    ax.plot(tr['x'], tr['y'], **kw)
@@ -493,7 +503,7 @@ class Plot:
         if color:
           ax.set_ylabel(ylabel, color=color)
           ax.tick_params(axis='y', colors=color)
-          return
+          ylabel = None  # already set with color
     if ylabel: ax.set_ylabel(ylabel)
     # Y limits
     ylim = panel.get('ylim')
@@ -514,7 +524,7 @@ class Plot:
     if panel.get('logy'): ax.set_yscale('log')
     if not is_twin and panel.get('logx'): ax.set_xscale('log')
 
-  #--------------------------------------------------------------------------------- Terminals
+  #---------------------------------------------------------------------------------- Terminals
 
   def show(self) -> Plot:
     """Render and display (blocks until window closed)."""
@@ -542,7 +552,7 @@ class Plot:
       self._axes = []
       self._rendered = False
 
-  #------------------------------------------------------------------------------ Escape hatches
+  #----------------------------------------------------------------------------- Escape hatches
 
   @property
   def fig(self) -> plt.Figure:
@@ -556,7 +566,7 @@ class Plot:
     self._render()
     return self._axes
 
-  #------------------------------------------------------------------------------------- Special
+  #------------------------------------------------------------------------------------ Special
 
   def __repr__(self):
     panels = self._finalize_panels()
@@ -567,7 +577,7 @@ class Plot:
   def __del__(self):
     self.close()
 
-#----------------------------------------------------------------------------------- Convenience
+#---------------------------------------------------------------------------------- Convenience
 
 def quick(x, y, label:str|tuple|None=None, **kw) -> Plot:
   """One-liner: `quick(x, y, "Data [V]").show()`"""

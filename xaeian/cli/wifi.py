@@ -11,11 +11,12 @@ Example:
   ...   print(net["ssid"], net["password"])
 """
 
-import os, re, subprocess, platform
+import os, sys, re, subprocess, platform
 from ..files import JSON
 from ..log import Print
 from ..colors import Color as c
 
+p = Print()
 
 #------------------------------------------------------------------------------------ Internals
 
@@ -124,14 +125,25 @@ def main():
     help="Save JSON report to file")
   parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
   args = parser.parse_args()
-  p = Print()
-  p.inf("Scanning saved Wi-Fi profiles...")
-  networks = wifi_passwords()
+  system = platform.system()
+  if system not in ("Windows", "Linux"):
+    p.err(f"Platform {c.BLUE}{system}{c.END} not supported "
+      f"{c.GREY}(Windows or Linux required){c.END}")
+    sys.exit(1)
+  p.inf(f"Scanning Wi-Fi profiles {c.GREY}({system}){c.END}...")
+  try:
+    networks = wifi_passwords()
+  except Exception as e:
+    p.err(f"Scan failed | {e}")
+    sys.exit(1)
   if not networks:
     p.wrn("No saved Wi-Fi networks found")
   else:
     has_pw = sum(1 for n in networks if n["password"])
-    p.inf(f"Found {c.TEAL}{len(networks)}{c.END} networks ({c.CYAN}{has_pw}{c.END} with password)")
+    no_pw = len(networks) - has_pw
+    p.ok(f"Found {c.TEAL}{len(networks)}{c.END} networks "
+      f"({c.CYAN}{has_pw}{c.END} with password"
+      f"{', ' + c.GREY + str(no_pw) + ' open' + c.END if no_pw else ''})")
     max_ssid = max(len(n["ssid"]) for n in networks)
     for n in networks:
       ssid = n["ssid"].ljust(max_ssid)

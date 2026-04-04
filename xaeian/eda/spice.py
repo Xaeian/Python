@@ -34,23 +34,27 @@ def parse_output(path:str) -> dict[str, list[float]]:
   """Parse ngspice ASCII wrdata/print output → `{column: [values]}`.
 
   Handles two formats:
-    - **wrdata**: two-column `index value` lines per variable
-    - **print/nutmeg**: header block (Title/Date/Variables/Values)
+    - **nutmeg**: header block with variable names → `{"TIME": [...], "V(OUT)": [...]}`
+    - **wrdata**: positional columns → `{"x": [...], "col0": [...], "col1": [...]}`
+      Signal names are not in wrdata format; use `Simulation.run()`
+      for automatic name remapping from template.
 
   Args:
     path: Path to ngspice output file.
 
   Returns:
-    Dict mapping uppercase column names to value lists.
+    Dict mapping column names to value lists.
 
   Raises:
     FileNotFoundError: Output file missing (simulation likely failed).
     ValueError: Cannot parse output format.
 
   Example:
-    >>> data = parse_output("result.out")
+    >>> data = parse_output("result.out")  # nutmeg
     >>> data["V(OUT)"][:3]
     [0.0, 0.0012, 0.0025]
+    >>> data = parse_output("wrdata.out")  # wrdata
+    >>> data["x"], data["col0"]
   """
   text = FILE.load(path)
   if not text: raise FileNotFoundError(f"Empty or missing: {path}")
@@ -60,10 +64,12 @@ def parse_output(path:str) -> dict[str, list[float]]:
   return _parse_wrdata(text)
 
 def _parse_wrdata(text:str) -> dict[str, list[float]]:
-  """Parse wrdata format: `index  value` per line, blocks separated by blanks."""
+  """Parse wrdata format: `x  y` per line, blocks separated by blanks.
+
+  First column (x/sweep var) captured from first block.
+  Y-values keyed as `col0`, `col1`, ... — remapped by `Simulation`.
+  """
   lines = text.strip().splitlines()
-  # wrdata: first column = x (sweep var), second = y
-  # Multi-variable: separated by blank lines
   blocks: list[list[str]] = []
   current: list[str] = []
   for line in lines:
@@ -78,17 +84,21 @@ def _parse_wrdata(text:str) -> dict[str, list[float]]:
   if not blocks: raise ValueError("No data in wrdata output")
   result: dict[str, list[float]] = {}
   for i, block in enumerate(blocks):
-    key = f"col{i}"
-    vals = []
+    x_vals = []
+    y_vals = []
     for line in block:
       parts = line.split()
       if len(parts) >= 2:
-        try: vals.append(float(parts[1]))
+        try:
+          x_vals.append(float(parts[0]))
+          y_vals.append(float(parts[1]))
         except ValueError: continue
       elif len(parts) == 1:
-        try: vals.append(float(parts[0]))
+        try: y_vals.append(float(parts[0]))
         except ValueError: continue
-    if vals: result[key] = vals
+    if i == 0 and x_vals:
+      result["x"] = x_vals
+    if y_vals: result[f"col{i}"] = y_vals
   return result
 
 def _parse_nutmeg(text:str) -> dict[str, list[float]]:
@@ -250,9 +260,37 @@ class Simulation:
     if params:
       suffix = "_".join(f"{k}={v}" for k, v in sorted(params.items())
         if k != "FILE")
+      suffix = re.sub(r'[^\w=.]', '_', suffix)[:120]
     else:
       suffix = "default"
     return os.path.join(self.work_dir, f"{self.name}_{suffix}.csv")
+
+  def _wrdata_vars(self) -> list[str]:
+    """Extract variable names from `wrdata {FILE} var1 var2 ...` in template."""
+    m = re.search(r'wrdata\s+\{FILE\}\s+(.+)', self._template, re.IGNORECASE)
+    if not m: return []
+    return [v.strip() for v in m.group(1).split() if v.strip()]
+
+  def _sweep_var(self) -> str:
+    """Detect sweep variable name from analysis command."""
+    if re.search(r'\.tran\b', self._template, re.IGNORECASE): return "TIME"
+    if re.search(r'\.ac\b', self._template, re.IGNORECASE): return "FREQUENCY"
+    if re.search(r'\.dc\b', self._template, re.IGNORECASE): return "V-SWEEP"
+    return "X"
+
+  def _remap_wrdata(self, data:dict[str, list[float]]) -> dict[str, list[float]]:
+    """Remap wrdata `x`/`col0`/`col1` keys to proper signal names."""
+    if "col0" not in data: return data
+    # Remap x → sweep variable
+    if "x" in data:
+      data[self._sweep_var()] = data.pop("x")
+    # Remap col0, col1, ... → variable names from template
+    vars = self._wrdata_vars()
+    for i, var_name in enumerate(vars):
+      key = f"col{i}"
+      if key in data:
+        data[var_name.upper()] = data.pop(key)
+    return data
 
   def _out_path(self, run_id:str) -> str:
     return os.path.join(self.work_dir, f"{self.name}_{run_id}.out")
@@ -324,7 +362,7 @@ class Simulation:
     # Run ngspice in batch mode
     result = cmd_run(
       [self._ngspice, "-b", cir_path],
-      capture=True,
+      capture=True, timeout=self.timeout,
     )
     if result.returncode != 0:
       stderr = (result.stderr or "").strip()
@@ -347,6 +385,7 @@ class Simulation:
       # Cleanup temp files
       FILE.remove(cir_path)
       FILE.remove(out_path)
+    data = self._remap_wrdata(data)
     data = self._apply_transforms(data)
     if self.verbose: self._print.ok(f"{self.name} done ({sum(len(v) for v in data.values())} values)")
     # Cache result

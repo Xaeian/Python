@@ -1,8 +1,9 @@
 # xaeian/db/mysql_async.py
 
-"""MySQL async implementation."""
+"""MySQL async implementation with connection pooling."""
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 from ..log import Logger, Print
@@ -15,9 +16,11 @@ from .utils import (
 
 class MysqlAsyncDatabase(AbstractAsyncDatabase):
   """
-  MySQL async database (aiomysql).
+  MySQL async database (aiomysql) with connection pooling.
 
-  Uses `lastrowid` for `insert(..., returning=)`.
+  Pool is created lazily on first query or explicitly via `start()`.
+  Pool uses `autocommit=True` — each statement commits immediately.
+  Transactions use explicit `begin()`/`commit()`.
 
   Args:
     db_name: Database name.
@@ -26,10 +29,14 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
     password: Password.
     port: Server port.
     log: Logger instance.
+    min_pool: Minimum pool connections.
+    max_pool: Maximum pool connections.
 
   Example:
     >>> db = MysqlAsyncDatabase("mydb", user="root", password="secret")
+    >>> await db.start()
     >>> await db.insert("users", {"name": "Jan"})
+    >>> await db.close()
   """
   def __init__(
     self,
@@ -39,6 +46,8 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
     password: str = "",
     port: int = 3306,
     log: Logger|Print|None = None,
+    min_pool: int = 1,
+    max_pool: int = 10,
   ):
     super().__init__()
     self.host = host
@@ -48,8 +57,13 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
     self.db_name = db_name
     self.ph = "%s"
     self.log = log
+    self._pool = None
+    self._pool_lock = asyncio.Lock()
+    self._min_pool = min_pool
+    self._max_pool = max_pool
 
   async def conn(self):
+    """Create standalone connection (outside pool)."""
     import aiomysql
     return await aiomysql.connect(
       host=self.host, port=self.port,
@@ -61,12 +75,55 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
     conn.close()
     await conn.wait_closed()
 
+  #--------------------------------------------------------------------------------- Lifecycle
+
+  async def _ensure_pool(self):
+    if self._pool is not None:
+      return self._pool
+    async with self._pool_lock:
+      if self._pool is None:
+        import aiomysql
+        self._pool = await aiomysql.create_pool(
+          host=self.host, port=self.port,
+          user=self.user, password=self.password,
+          db=self.db_name,
+          minsize=self._min_pool, maxsize=self._max_pool,
+          autocommit=True, pool_recycle=3600,
+        )
+    return self._pool
+
+  @asynccontextmanager
+  async def _connect(self):
+    """Acquire connection from pool."""
+    pool = await self._ensure_pool()
+    async with pool.acquire() as conn:
+      yield conn
+
+  @property
+  def pool(self):
+    """Raw aiomysql pool."""
+    return self._pool
+
+  async def start(self):
+    """Eagerly create connection pool."""
+    await self._ensure_pool()
+
+  async def close(self):
+    """Close connection pool."""
+    if self._pool:
+      self._pool.close()
+      await self._pool.wait_closed()
+      self._pool = None
+
   #-------------------------------------------------------------------------------- Transaction
 
   @asynccontextmanager
   async def transaction(self):
     if self._conn is not None: raise RuntimeError("Transaction already active")
-    self._conn = await self.conn()
+    pool = await self._ensure_pool()
+    conn = await pool.acquire()
+    self._conn = conn
+    await conn.begin()
     try:
       yield self
       await self._conn.commit()
@@ -74,8 +131,8 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
       await self._conn.rollback()
       raise
     finally:
-      await self._close(self._conn)
       self._conn = None
+      pool.release(conn)
 
   def _rowcount(self, cur) -> int:
     return max(0, cur.rowcount) if cur.rowcount is not None else 0
@@ -93,18 +150,13 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
           return self._rowcount(cur)
       except aiomysql.Error as e:
         self._err("exec", e, sql, p)
-    conn = None
     try:
-      conn = await self.conn()
-      async with conn.cursor() as cur:
-        await cur.execute(sql, p)
-        rc = self._rowcount(cur)
-      await conn.commit()
-      return rc
+      async with self._connect() as conn:
+        async with conn.cursor() as cur:
+          await cur.execute(sql, p)
+          return self._rowcount(cur)
     except aiomysql.Error as e:
       self._err("exec", e, sql, p)
-    finally:
-      if conn: await self._close(conn)
 
   async def exec_many(self, sql:str, params_list:list) -> int:
     import aiomysql
@@ -116,18 +168,20 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
           return self._rowcount(cur)
       except aiomysql.Error as e:
         self._err("exec_many", e, sql, tuple(pl))
-    conn = None
     try:
-      conn = await self.conn()
-      async with conn.cursor() as cur:
-        await cur.executemany(sql, pl)
-        rc = self._rowcount(cur)
-      await conn.commit()
-      return rc
+      async with self._connect() as conn:
+        await conn.begin()
+        try:
+          async with conn.cursor() as cur:
+            await cur.executemany(sql, pl)
+            rc = self._rowcount(cur)
+          await conn.commit()
+          return rc
+        except Exception:
+          await conn.rollback()
+          raise
     except aiomysql.Error as e:
       self._err("exec_many", e, sql, tuple(pl))
-    finally:
-      if conn: await self._close(conn)
 
   async def exec_batch(self, sqls:list[tuple[str, Any]]|list[str]|str) -> int:
     import aiomysql
@@ -154,17 +208,19 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
           return await run(cur)
       except aiomysql.Error as e:
         self._err("exec_batch", e)
-    conn = None
     try:
-      conn = await self.conn()
-      async with conn.cursor() as cur:
-        total = await run(cur)
-      await conn.commit()
-      return total
+      async with self._connect() as conn:
+        await conn.begin()
+        try:
+          async with conn.cursor() as cur:
+            total = await run(cur)
+          await conn.commit()
+          return total
+        except Exception:
+          await conn.rollback()
+          raise
     except aiomysql.Error as e:
       self._err("exec_batch", e)
-    finally:
-      if conn: await self._close(conn)
 
   #-------------------------------------------------------------------------------------- Query
 
@@ -185,16 +241,13 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
           return process(await cur.fetchall())
       except aiomysql.Error as e:
         self._err("get_rows", e, sql, p)
-    conn = None
     try:
-      conn = await self.conn()
-      async with conn.cursor() as cur:
-        await cur.execute(sql, p)
-        return process(await cur.fetchall())
+      async with self._connect() as conn:
+        async with conn.cursor() as cur:
+          await cur.execute(sql, p)
+          return process(await cur.fetchall())
     except aiomysql.Error as e:
       self._err("get_rows", e, sql, p)
-    finally:
-      if conn: await self._close(conn)
 
   async def get_dicts(self, sql:str, params=None, cols:list[str]|None=None, json:list[str]|None=None) -> list[dict]:
     import aiomysql
@@ -208,18 +261,15 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
         return to_dicts(rows, columns, json)
       except aiomysql.Error as e:
         self._err("get_dicts", e, sql, p)
-    conn = None
     try:
-      conn = await self.conn()
-      async with conn.cursor() as cur:
-        await cur.execute(sql, p)
-        rows = await cur.fetchall()
-        columns = cols or [c[0] for c in cur.description]
-      return to_dicts(rows, columns, json)
+      async with self._connect() as conn:
+        async with conn.cursor() as cur:
+          await cur.execute(sql, p)
+          rows = await cur.fetchall()
+          columns = cols or [c[0] for c in cur.description]
+        return to_dicts(rows, columns, json)
     except aiomysql.Error as e:
       self._err("get_dicts", e, sql, p)
-    finally:
-      if conn: await self._close(conn)
 
   async def _insert_returning(self, table:str, data:dict, ret:str) -> Any:
     """MySQL uses `lastrowid` (ignores `ret` column name)."""
@@ -236,18 +286,13 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
           return cur.lastrowid
       except aiomysql.Error as e:
         self._err("insert", e, sql, tuple(d.values()))
-    conn = None
     try:
-      conn = await self.conn()
-      async with conn.cursor() as cur:
-        await cur.execute(sql, tuple(d.values()))
-        result = cur.lastrowid
-      await conn.commit()
-      return result
+      async with self._connect() as conn:
+        async with conn.cursor() as cur:
+          await cur.execute(sql, tuple(d.values()))
+          return cur.lastrowid
     except aiomysql.Error as e:
       self._err("insert", e, sql, tuple(d.values()))
-    finally:
-      if conn: await self._close(conn)
 
   #------------------------------------------------------------------------------------- Schema
 
@@ -285,24 +330,42 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
 
   async def create_database(self, name:str|None=None) -> bool:
     if self.in_transaction(): raise RuntimeError("create_database() not allowed in transaction")
+    import aiomysql
     name = name or self.db_name
     self._valid_db(name)
     if await self.has_database(name): return False
     backup, self.db_name = self.db_name, None
     try:
-      await self.exec(f"CREATE DATABASE `{name}`")
-      return True
+      conn = await self.conn()
+      try:
+        async with conn.cursor() as cur:
+          await cur.execute(f"CREATE DATABASE `{name}`")
+        await conn.commit()
+        return True
+      finally:
+        await self._close(conn)
+    except aiomysql.Error as e:
+      self._err("create_database", e)
     finally:
       self.db_name = backup
 
   async def drop_database(self, name:str|None=None) -> bool:
     if self.in_transaction(): raise RuntimeError("drop_database() not allowed in transaction")
+    import aiomysql
     name = name or self.db_name
     self._valid_db(name)
     if not await self.has_database(name): return False
     backup, self.db_name = self.db_name, None
     try:
-      await self.exec(f"DROP DATABASE `{name}`")
-      return True
+      conn = await self.conn()
+      try:
+        async with conn.cursor() as cur:
+          await cur.execute(f"DROP DATABASE `{name}`")
+        await conn.commit()
+        return True
+      finally:
+        await self._close(conn)
+    except aiomysql.Error as e:
+      self._err("drop_database", e)
     finally:
       self.db_name = backup

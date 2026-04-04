@@ -18,7 +18,7 @@ Example:
   >>> kc.ok()
 """
 
-import sys, re
+import re
 try:
   from sexpdata import loads
 except ImportError:
@@ -58,7 +58,7 @@ class KiCad:
         for el in comp[1:]:
           if _tagged(el, "ref"): d["Reference"] = el[1]
           elif _tagged(el, "value"): d["Value"] = el[1]
-          elif _tagged(el, "footprint"): d["Pacage"] = el[1]
+          elif _tagged(el, "footprint"): d["Package"] = el[1]
           elif _tagged(el, "datasheet"): d["Datasheet"] = el[1]
           elif _tagged(el, "description"): d["Description"] = el[1]
           elif _tagged(el, "property") and len(el) >= 2:
@@ -66,11 +66,10 @@ class KiCad:
             for sub in el[1:]:
               if _tagged(sub, "name"): name = sub[1]
               elif _tagged(sub, "value"): value = sub[1]
-            if name == "dnp":
+            if name and name.lower() == "dnp":
               d["DNP"] = True
             elif name:
-              if value: d[str(name)] = value
-              else: value = ""
+              d[str(name)] = value if value else ""
         set_defaults([d],
           DNP=False, Count=1, Datasheet="",
           Manufacturer="", Code="",
@@ -87,9 +86,11 @@ class KiCad:
   def _execute(args:list[str]):
     result = cmd_run(args)
     if result.returncode:
-      for line in result.stderr.strip().splitlines():
-        if line: p.err(line)
-      sys.exit(1)
+      errors = [l for l in result.stderr.strip().splitlines() if l]
+      for line in errors: p.err(line)
+      raise RuntimeError(
+        f"kicad-cli failed (exit {result.returncode}): {args[2] if len(args) > 2 else args[0]}"
+      )
     for line in result.stdout.strip().splitlines():
       if line: p.inf(line)
 
@@ -118,15 +119,17 @@ class KiCad:
     components = KiCad.load_netlist(
       self.project_path + self.name + ".net"
     )
-    # Filter out empty codes and DNP
-    rows = where(components, lambda r:
+    # Filter out DNP
+    rows = where(components, lambda r: not r.get("DNP", False))
+    rows = exclude(rows, "DNP")
+    # All fitted components (for generic BOM)
+    self._all_rows:list[dict] = rows
+    # Components with ordering code (for contractor BOMs)
+    coded = where(rows, lambda r:
       str(r.get("Code", "")).strip().lower() not in ("", "-")
     )
-    rows = where(rows, lambda r: not r.get("DNP", False))
-    rows = exclude(rows, "DNP")
-    # Group by manufacturer + code
-    self.rows:list[dict] = aggregate(rows, ["Manufacturer", "Code"], {
-      "Value": "first", "Pacage": "first", "Description": "first",
+    self.rows:list[dict] = aggregate(coded, ["Manufacturer", "Code"], {
+      "Value": "first", "Package": "first", "Description": "first",
       "LCSC": "first", "DigiKey": "first", "Farnell": "first",
       "Mouser": "first", "TME": "first", "Datasheet": "first",
       "Count": "sum", "Reference": "join",
@@ -144,33 +147,40 @@ class KiCad:
   ):
     """Generate BOM CSV, optionally formatted for a contractor."""
     tag = re.sub(r"[^a-z0-9]", "", contractor.lower())
-    rows = [dict(r) for r in self.rows]  # shallow copy
     if tag == "jlcpcb":
+      rows = [dict(r) for r in self.rows]
       add_column(rows, "Comment", lambda r:
         f'{r["Manufacturer"]}; {r["Code"]}; {r["Description"]}'
       )
-      rows = select(rows, "Comment", "Reference", "Pacage", "LCSC")
+      rows = select(rows, "Comment", "Reference", "Package", "LCSC")
       rows = rename(rows, {
         "Reference": "Designator",
-        "Pacage": "Footprint",
+        "Package": "Footprint",
         "LCSC": "JLCPCB Part #",
       })
       if not suffix: suffix = "jlcpcb-bom"
     elif tag == "eurocircuits":
+      rows = [dict(r) for r in self.rows]
       add_column(rows, "Device", lambda r:
         f'{r["Manufacturer"]} — {r["Code"]}'
       )
       rows = select(rows,
-        "Count", "Value", "Reference", "Device", "Pacage",
+        "Count", "Value", "Reference", "Device", "Package",
         "Description", "DigiKey", "Farnell", "Mouser", "TME",
       )
       if not suffix: suffix = "eurocir-bom"
     else:
+      rows = aggregate([dict(r) for r in self._all_rows],
+        ["Value", "Package", "Manufacturer", "Code"], {
+          "Description": "first", "Datasheet": "first",
+          "LCSC": "first", "Count": "sum", "Reference": "join",
+        },
+      )
       has_lcsc = any(
         str(r.get("LCSC", "")).strip() for r in rows
       )
       cols = [
-        "Manufacturer", "Code", "Value", "Pacage",
+        "Value", "Package", "Manufacturer", "Code",
         "Description", "Count", "Datasheet", "Reference",
       ] + (["LCSC"] if has_lcsc else [])
       rows = select(rows, *cols)
@@ -208,7 +218,7 @@ class KiCad:
     desc:str="", desc_color:tuple=(0, 0, 0), drill:bool=True,
   ):
     """Export single PDF page from PCB layers."""
-    pdf_name = f"./{self.name}-{name}.pdf"
+    pdf_name = f"{self.produce_path}{self.name}-{name}.pdf"
     KiCad._execute([
       "kicad-cli", "pcb", "export", "pdf", self.pcb,
       "--output", pdf_name,
@@ -228,28 +238,33 @@ class KiCad:
       )
     self.pdf_pages.append(pdf_name)
 
-  def pdf_layout(self, top:bool=True, bot:bool=False):
+  def pdf_layout(self, top:bool=True, bot:bool=False, drill:bool=False):
     """Generate multi-page PCB layout PDF."""
     self.pdf_pages = []
     grey = (0.69, 0.69, 0.69)
     if top:
       self.pdf_page("el-top",
         ["User.Drawings", "F.Fab", "Edge.Cuts"],
-        "TOP Component", grey)
+        "TOP Component", grey, drill=drill)
     if bot:
       self.pdf_page("el-bot",
         ["User.Drawings", "B.Fab", "Edge.Cuts"],
-        "BOT Component", grey)
+        "BOT Component", grey, drill=drill)
     self.pdf_page("cu-top",
       ["User.Drawings", "F.Cu", "F.Paste", "F.Mask", "Edge.Cuts"],
       "TOP Copper", (0.79, 0.20, 0.20))
     self.pdf_page("cu-bot",
       ["User.Drawings", "B.Cu", "B.Paste", "B.Mask", "Edge.Cuts"],
       "BOT Copper", (0.31, 0.49, 0.75))
-    self.pdf_page("desc",
-      ["User.Drawings", "F.SilkS", "B.SilkS", "Edge.Cuts"],
-      "Descriptions", (0.95, 0.92, 0.63), drill=False)
-    pdf_name = f"./{self.name}-layout.pdf"
+    if top:
+      self.pdf_page("desc-top",
+        ["User.Drawings", "F.SilkS", "Edge.Cuts"],
+        "TOP Descriptions", (0.95, 0.92, 0.63), drill=False)
+    if bot:
+      self.pdf_page("desc-bot",
+        ["User.Drawings", "B.SilkS", "Edge.Cuts"],
+        "BOT Descriptions", (0.91, 0.70, 0.65), drill=False)
+    pdf_name = f"{self.produce_path}{self.name}-layout.pdf"
     try:
       from ..media.pdf import pdf_merge
     except ImportError:
@@ -348,7 +363,7 @@ class KiCad:
 
   def pdf_schema(self):
     """Export schematic as PDF."""
-    pdf_name = "./" + self.name + "-schema.pdf"
+    pdf_name = self.produce_path + self.name + "-schema.pdf"
     KiCad._execute([
       "kicad-cli", "sch", "export", "pdf",
       self.sch, "--output", pdf_name,

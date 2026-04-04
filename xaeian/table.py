@@ -29,7 +29,7 @@ Example:
   >>> from xaeian.table import where, select, sort_by, aggregate
   >>> rows = CSV.load("data")
   >>> active = where(rows, lambda r: r["status"] == "active")
-  >>> summary = aggregate(active, "dept", total=lambda g: sum(r["salary"] for r in g))
+  >>> summary = aggregate(active, "dept", {"salary": "sum"})
 """
 
 from typing import Any, Callable, Literal
@@ -37,6 +37,19 @@ from collections import Counter
 
 Rows = list[dict[str, Any]]
 Key = str | Callable[[dict], Any]
+
+def _all_cols(rows:Rows) -> set[str]:
+  """Collect all keys across all rows."""
+  out: set[str] = set()
+  for r in rows:
+    out.update(r.keys())
+  return out
+
+def _safe_sort_key(v:Any) -> Any:
+  """Wrap value so mixed types compare by type name first, then by value."""
+  if isinstance(v, tuple):
+    return tuple(_safe_sort_key(x) for x in v)
+  return (type(v).__name__, v)
 
 def _getter(key:Key) -> Callable[[dict], Any]:
   """Resolve string key to row accessor."""
@@ -138,11 +151,17 @@ def set_defaults(rows:Rows, **defaults:Any) -> Rows:
 
 def sort_by(rows:Rows, key:Key, *, reverse:bool=False) -> Rows:
   """
-  Sort rows by column or callable.
+  Sort rows by column or callable. `None` values always sort last.
 
   For multi-key: `sort_by(rows, lambda r: (r["dept"], -r["salary"]))`
   """
-  return sorted(rows, key=_getter(key), reverse=reverse)
+  fn = _getter(key)
+  has = [r for r in rows if fn(r) is not None]
+  nah = [r for r in rows if fn(r) is None]
+  try:
+    return sorted(has, key=fn, reverse=reverse) + nah
+  except TypeError:
+    return sorted(has, key=lambda r: _safe_sort_key(fn(r)), reverse=reverse) + nah
 
 def unique(rows:Rows, key:Key|None=None) -> Rows:
   """
@@ -160,8 +179,13 @@ def unique(rows:Rows, key:Key|None=None) -> Rows:
   fn = _getter(key) if key else lambda r: tuple(sorted(r.items()))
   for r in rows:
     k = fn(r)
-    if k not in seen:
-      seen.add(k)
+    try:
+      h = k
+      hash(h)
+    except TypeError:
+      h = repr(k)
+    if h not in seen:
+      seen.add(h)
       result.append(r)
   return result
 
@@ -241,10 +265,16 @@ def aggregate(
         out[col] = len(values)
       elif func == "min":
         clean = [v for v in values if v is not None]
-        out[col] = min(clean) if clean else None
+        try:
+          out[col] = min(clean) if clean else None
+        except TypeError:
+          out[col] = None
       elif func == "max":
         clean = [v for v in values if v is not None]
-        out[col] = max(clean) if clean else None
+        try:
+          out[col] = max(clean) if clean else None
+        except TypeError:
+          out[col] = None
       elif func == "mean":
         nums = [v for v in values if isinstance(v, (int, float))]
         out[col] = (sum(nums) / len(nums)) if nums else None
@@ -285,8 +315,8 @@ def join(
   for r in right:
     k = r.get(rk)
     index.setdefault(k, []).append(r)
-  left_cols = set(columns(left)) if left else set()
-  right_cols = set(columns(right)) if right else set()
+  left_cols = _all_cols(left) if left else set()
+  right_cols = _all_cols(right) if right else set()
   overlap = (left_cols & right_cols) - {on, rk}
   def _merge(lr:dict|None, rr:dict|None) -> dict:
     out = {}
@@ -326,10 +356,11 @@ def concat(*tables:Rows) -> Rows:
   all_cols: list[str] = []
   seen: set[str] = set()
   for t in tables:
-    for col in columns(t):
-      if col not in seen:
-        all_cols.append(col)
-        seen.add(col)
+    for r in t:
+      for col in r.keys():
+        if col not in seen:
+          all_cols.append(col)
+          seen.add(col)
   result = []
   for t in tables:
     for r in t:
@@ -379,12 +410,21 @@ def describe(rows:Rows, col:str) -> dict[str, Any]:
   values = pluck(rows, col)
   non_null = [v for v in values if v is not None]
   nums = [v for v in non_null if isinstance(v, (int, float))]
+  try:
+    uniq = len(set(non_null))
+  except TypeError:
+    uniq = len({repr(v) for v in non_null})
+  try:
+    vmin = min(non_null) if non_null else None
+    vmax = max(non_null) if non_null else None
+  except TypeError:
+    vmin = vmax = None
   return {
     "count": len(values),
     "nulls": len(values) - len(non_null),
-    "unique": len(set(non_null)),
-    "min": min(non_null) if non_null else None,
-    "max": max(non_null) if non_null else None,
+    "unique": uniq,
+    "min": vmin,
+    "max": vmax,
     "mean": (sum(nums) / len(nums)) if nums else None,
   }
   

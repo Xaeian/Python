@@ -11,11 +11,13 @@ Example:
   >>> groups = find_dupes("archive/", zips=True, min_size=1024)
 """
 
-import os, hashlib, zipfile
+import os, sys, hashlib, zipfile
 from collections import defaultdict
 from ..files import FILE, JSON
 from ..log import Print
 from ..colors import Color as c
+
+p = Print()
 
 #------------------------------------------------------------------------------------ Internals
 
@@ -144,21 +146,30 @@ def main():
     help="Save JSON report to file")
   parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
   args = parser.parse_args()
-  p = Print()
   root = os.path.abspath(args.root)
-  p.inf(f"Scanning {c.ORANGE}{root}{c.END}...")
-  groups = find_dupes(root, args.algo, args.min_size, args.zips, args.follow_symlinks)
+  if not os.path.isdir(root):
+    p.err(f"Directory {c.ORANGE}{root}{c.END} not found")
+    sys.exit(1)
+  p.inf(f"Scanning {c.ORANGE}{root}{c.END} "
+    f"{c.GREY}({args.algo}, min {_fmt_size(args.min_size)}"
+    f"{', +zips' if args.zips else ''}){c.END}")
+  try:
+    groups = find_dupes(root, args.algo, args.min_size, args.zips, args.follow_symlinks)
+  except Exception as e:
+    p.err(f"Scan failed | {e}")
+    sys.exit(1)
   if not groups:
     p.ok("No duplicates found")
   else:
     total_files = sum(g["count"] for g in groups)
     wasted = sum((g["count"] - 1) * g["size"] for g in groups)
-    p.ok(f"Found {c.TEAL}{len(groups)}{c.END} duplicate groups, "
-         f"{c.TEAL}{total_files}{c.END} files, "
-         f"{c.ORANGE}{_fmt_size(wasted)}{c.END} wasted")
+    p.wrn(f"Found {c.TEAL}{len(groups)}{c.END} duplicate groups, "
+      f"{c.TEAL}{total_files}{c.END} files, "
+      f"{c.ORANGE}{_fmt_size(wasted)}{c.END} wasted")
     print()
     for i, g in enumerate(groups, 1):
-      p.inf(f"[{i}] {c.CYAN}{_fmt_size(g['size'])}{c.END} x{g['count']} {c.GREY}{g['hash'][:16]}...{c.END}")
+      p.inf(f"[{c.GOLD}{i}{c.END}] {c.CYAN}{_fmt_size(g['size'])}{c.END} "
+        f"x{g['count']} {c.GREY}{g['hash'][:16]}...{c.END}")
       for path in g["paths"]:
         p.gap(f"{c.GREY}{os.path.relpath(path, root)}{c.END}")
   if args.output:

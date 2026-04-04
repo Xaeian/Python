@@ -65,7 +65,7 @@ class SqliteDatabase(AbstractDatabase):
     t = ident(table)
     cols = ", ".join(ident(k) for k in d.keys())
     vals = ph(len(d), self.ph)
-    conf = on if isinstance(on, str) else ", ".join(on)
+    conf = ident(on) if isinstance(on, str) else ", ".join(ident(x) for x in on)
     upd_cols = update or [k for k in d.keys() if k not in (on if isinstance(on, list) else [on])]
     sets = ", ".join(f"{ident(k)} = excluded.{ident(k)}" for k in upd_cols)
     sql = f"INSERT INTO {t} ({cols}) VALUES {vals} ON CONFLICT ({conf}) DO UPDATE SET {sets}"

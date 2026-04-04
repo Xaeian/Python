@@ -69,8 +69,35 @@ class PATH:
     return PATH.normalize(full)
 
   @staticmethod
+  def rel(path:str, base:str|None=None) -> str:
+    """
+    Return path relative to base (or `root_path`).
+
+    Args:
+      path: Target path.
+      base: Reference directory. Defaults to `root_path`.
+
+    Returns:
+      Relative path string, or absolute if on different drive.
+
+    Example:
+      >>> PATH.rel("/home/user/project/src/main.py")
+      'src/main.py'
+    """
+    cfg = get_context()
+    abs_path = PATH.resolve(path)
+    abs_base = PATH.resolve(base) if base else cfg.root_path
+    try:
+      rel = os.path.relpath(abs_path, abs_base)
+    except ValueError:
+      return PATH.normalize(abs_path)
+    rel = PATH.normalize(rel)
+    if rel == ".": return ""
+    return rel
+
+  @staticmethod
   def local(path:str, base:str|None=None, prefix:str="") -> str:
-    """Convert absolute path to path relative to given base (or `root_path`)."""
+    """Deprecated: use `PATH.rel()`. Kept for backward compatibility."""
     cfg = get_context()
     abs_path = PATH.resolve(path)
     if base is None: base = cfg.root_path
@@ -78,7 +105,7 @@ class PATH:
     try:
       rel = os.path.relpath(abs_path, abs_base)
       rel = PATH.normalize(rel)
-      if not rel.startswith(".."):
+      if not rel.startswith("../") and rel != "..":
         if rel == ".": rel = ""
         if prefix:
           sep = "" if prefix.endswith("/") else "/"
@@ -157,7 +184,8 @@ class PATH:
       rel = os.path.relpath(abs_path, abs_base)
     except ValueError:
       return False
-    return not PATH.normalize(rel).startswith("..")
+    rel = PATH.normalize(rel)
+    return rel != ".." and not rel.startswith("../")
 
   @staticmethod
   def join(*parts:str, read:bool=True) -> str:
