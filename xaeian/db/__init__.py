@@ -144,11 +144,12 @@ from .utils import (
   ident, ph, to_dicts, serialize, serialize_params, serialize_dict,
   split_sql, norm, parse_json, parse_row
 )
+from .kv_common import KvEntry
 
 __all__ = [
   "Database", "AsyncDatabase", "DatabaseType", "DatabaseError",
   "ident", "ph", "to_dicts", "serialize", "serialize_params", "serialize_dict",
-  "split_sql", "norm", "parse_json", "parse_row",
+  "split_sql", "norm", "parse_json", "parse_row", "KvEntry"
 ]
 
 #--------------------------------------------------------------------------------- Lazy Imports

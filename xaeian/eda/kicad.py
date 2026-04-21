@@ -18,7 +18,7 @@ Example:
   >>> kc.ok()
 """
 
-import re
+import sys, re
 try:
   from sexpdata import loads
 except ImportError:
@@ -58,7 +58,7 @@ class KiCad:
         for el in comp[1:]:
           if _tagged(el, "ref"): d["Reference"] = el[1]
           elif _tagged(el, "value"): d["Value"] = el[1]
-          elif _tagged(el, "footprint"): d["Package"] = el[1]
+          elif _tagged(el, "footprint"): d["Pacage"] = el[1]
           elif _tagged(el, "datasheet"): d["Datasheet"] = el[1]
           elif _tagged(el, "description"): d["Description"] = el[1]
           elif _tagged(el, "property") and len(el) >= 2:
@@ -66,10 +66,11 @@ class KiCad:
             for sub in el[1:]:
               if _tagged(sub, "name"): name = sub[1]
               elif _tagged(sub, "value"): value = sub[1]
-            if name and name.lower() == "dnp":
+            if name == "dnp":
               d["DNP"] = True
             elif name:
-              d[str(name)] = value if value else ""
+              if value: d[str(name)] = value
+              else: value = ""
         set_defaults([d],
           DNP=False, Count=1, Datasheet="",
           Manufacturer="", Code="",
@@ -86,50 +87,50 @@ class KiCad:
   def _execute(args:list[str]):
     result = cmd_run(args)
     if result.returncode:
-      errors = [l for l in result.stderr.strip().splitlines() if l]
-      for line in errors: p.err(line)
-      raise RuntimeError(
-        f"kicad-cli failed (exit {result.returncode}): {args[2] if len(args) > 2 else args[0]}"
-      )
+      for line in result.stderr.strip().splitlines():
+        if line: p.err(line)
+      sys.exit(1)
     for line in result.stdout.strip().splitlines():
       if line: p.inf(line)
-
-  def netlist(self):
-    net_name = self.project_path + self.name + ".net"
-    KiCad._execute([
-      "kicad-cli", "sch", "export", "netlist",
-      self.sch, "--output", net_name,
-    ])
 
   def __init__(self, project_path:str="./", produce_path:str="./produce"):
     self.project_path:str = self._fix_path(project_path)
     self.produce_path:str = self._fix_path(produce_path)
     DIR.ensure(self.produce_path)
-    files = DIR.file_list(
+    pcb_files = DIR.file_list(
+      self.project_path, exts=[".kicad_pcb"], basename=True,
+    )
+    sch_files = DIR.file_list(
       self.project_path, exts=[".kicad_sch"], basename=True,
     )
-    if not files:
+    if not pcb_files and not sch_files:
       raise FileNotFoundError(
-        "No '.kicad_sch' file found in " + self.project_path
+        "No '.kicad_pcb' or '.kicad_sch' found in " + self.project_path
       )
-    self.name:str = PATH.stem(files[0])
+    self.name:str = PATH.stem((pcb_files or sch_files)[0])
     self.pcb = self.project_path + self.name + ".kicad_pcb"
     self.sch = self.project_path + self.name + ".kicad_sch"
-    self.netlist()
-    components = KiCad.load_netlist(
-      self.project_path + self.name + ".net"
-    )
-    # Filter out DNP
-    rows = where(components, lambda r: not r.get("DNP", False))
-    rows = exclude(rows, "DNP")
-    # All fitted components (for generic BOM)
-    self._all_rows:list[dict] = rows
-    # Components with ordering code (for contractor BOMs)
-    coded = where(rows, lambda r:
+    self.has_pcb = bool(pcb_files)
+    self.has_sch = bool(sch_files)
+    self.rows:list[dict] = []
+    if self.has_sch:
+      self._load_bom()
+
+  def _load_bom(self):
+    """Export netlist and parse BOM rows."""
+    net_name = self.project_path + self.name + ".net"
+    KiCad._execute([
+      "kicad-cli", "sch", "export", "netlist",
+      self.sch, "--output", net_name,
+    ])
+    components = KiCad.load_netlist(net_name)
+    rows = where(components, lambda r:
       str(r.get("Code", "")).strip().lower() not in ("", "-")
     )
-    self.rows:list[dict] = aggregate(coded, ["Manufacturer", "Code"], {
-      "Value": "first", "Package": "first", "Description": "first",
+    rows = where(rows, lambda r: not r.get("DNP", False))
+    rows = exclude(rows, "DNP")
+    self.rows = aggregate(rows, ["Manufacturer", "Code"], {
+      "Value": "first", "Pacage": "first", "Description": "first",
       "LCSC": "first", "DigiKey": "first", "Farnell": "first",
       "Mouser": "first", "TME": "first", "Datasheet": "first",
       "Count": "sum", "Reference": "join",
@@ -146,41 +147,37 @@ class KiCad:
     suffix:str = "",
   ):
     """Generate BOM CSV, optionally formatted for a contractor."""
+    if not self.rows:
+      p.wrn("No schematic: skipping BOM")
+      return
     tag = re.sub(r"[^a-z0-9]", "", contractor.lower())
+    rows = [dict(r) for r in self.rows]  # shallow copy
     if tag == "jlcpcb":
-      rows = [dict(r) for r in self.rows]
       add_column(rows, "Comment", lambda r:
         f'{r["Manufacturer"]}; {r["Code"]}; {r["Description"]}'
       )
-      rows = select(rows, "Comment", "Reference", "Package", "LCSC")
+      rows = select(rows, "Comment", "Reference", "Pacage", "LCSC")
       rows = rename(rows, {
         "Reference": "Designator",
-        "Package": "Footprint",
+        "Pacage": "Footprint",
         "LCSC": "JLCPCB Part #",
       })
       if not suffix: suffix = "jlcpcb-bom"
     elif tag == "eurocircuits":
-      rows = [dict(r) for r in self.rows]
       add_column(rows, "Device", lambda r:
-        f'{r["Manufacturer"]} — {r["Code"]}'
+        f'{r["Manufacturer"]}: {r["Code"]}'
       )
       rows = select(rows,
-        "Count", "Value", "Reference", "Device", "Package",
+        "Count", "Value", "Reference", "Device", "Pacage",
         "Description", "DigiKey", "Farnell", "Mouser", "TME",
       )
       if not suffix: suffix = "eurocir-bom"
     else:
-      rows = aggregate([dict(r) for r in self._all_rows],
-        ["Value", "Package", "Manufacturer", "Code"], {
-          "Description": "first", "Datasheet": "first",
-          "LCSC": "first", "Count": "sum", "Reference": "join",
-        },
-      )
       has_lcsc = any(
         str(r.get("LCSC", "")).strip() for r in rows
       )
       cols = [
-        "Value", "Package", "Manufacturer", "Code",
+        "Manufacturer", "Code", "Value", "Pacage",
         "Description", "Count", "Datasheet", "Reference",
       ] + (["LCSC"] if has_lcsc else [])
       rows = select(rows, *cols)
@@ -189,6 +186,9 @@ class KiCad:
 
   def gerber(self):
     """Export gerber + drill files and package as ZIP."""
+    if not self.has_pcb:
+      p.wrn("No PCB file: skipping gerber")
+      return
     gerbers_path = self.produce_path + "gerber"
     KiCad._execute([
       "kicad-cli", "pcb", "export", "gerbers", self.pcb,
@@ -218,7 +218,7 @@ class KiCad:
     desc:str="", desc_color:tuple=(0, 0, 0), drill:bool=True,
   ):
     """Export single PDF page from PCB layers."""
-    pdf_name = f"{self.produce_path}{self.name}-{name}.pdf"
+    pdf_name = f"./{self.name}-{name}.pdf"
     KiCad._execute([
       "kicad-cli", "pcb", "export", "pdf", self.pcb,
       "--output", pdf_name,
@@ -238,33 +238,31 @@ class KiCad:
       )
     self.pdf_pages.append(pdf_name)
 
-  def pdf_layout(self, top:bool=True, bot:bool=False, drill:bool=False):
+  def pdf_layout(self, top:bool=True, bot:bool=False):
     """Generate multi-page PCB layout PDF."""
+    if not self.has_pcb:
+      p.wrn("No PCB file: skipping layout PDF")
+      return
     self.pdf_pages = []
     grey = (0.69, 0.69, 0.69)
     if top:
       self.pdf_page("el-top",
         ["User.Drawings", "F.Fab", "Edge.Cuts"],
-        "TOP Component", grey, drill=drill)
+        "TOP Component", grey)
     if bot:
       self.pdf_page("el-bot",
         ["User.Drawings", "B.Fab", "Edge.Cuts"],
-        "BOT Component", grey, drill=drill)
+        "BOT Component", grey)
     self.pdf_page("cu-top",
       ["User.Drawings", "F.Cu", "F.Paste", "F.Mask", "Edge.Cuts"],
       "TOP Copper", (0.79, 0.20, 0.20))
     self.pdf_page("cu-bot",
       ["User.Drawings", "B.Cu", "B.Paste", "B.Mask", "Edge.Cuts"],
       "BOT Copper", (0.31, 0.49, 0.75))
-    if top:
-      self.pdf_page("desc-top",
-        ["User.Drawings", "F.SilkS", "Edge.Cuts"],
-        "TOP Descriptions", (0.95, 0.92, 0.63), drill=False)
-    if bot:
-      self.pdf_page("desc-bot",
-        ["User.Drawings", "B.SilkS", "Edge.Cuts"],
-        "BOT Descriptions", (0.91, 0.70, 0.65), drill=False)
-    pdf_name = f"{self.produce_path}{self.name}-layout.pdf"
+    self.pdf_page("desc",
+      ["User.Drawings", "F.SilkS", "B.SilkS", "Edge.Cuts"],
+      "Descriptions", (0.95, 0.92, 0.63), drill=False)
+    pdf_name = f"./{self.name}-layout.pdf"
     try:
       from ..media.pdf import pdf_merge
     except ImportError:
@@ -284,6 +282,9 @@ class KiCad:
     floor:bool = False,
   ):
     """Render 3D raytraced image of PCB."""
+    if not self.has_pcb:
+      p.wrn("No PCB file: skipping 3D render")
+      return
     path = self.produce_path + self.name + f"-{side}.png"
     args = [
       "kicad-cli", "pcb", "render", self.pcb,
@@ -308,6 +309,9 @@ class KiCad:
     jlcpcb_format:bool = False,
   ):
     """Export component placement list (pick & place)."""
+    if not self.has_pcb:
+      p.wrn("No PCB file: skipping CPL")
+      return
     pos_name = self.produce_path + self.name + "-pos-all.csv"
     KiCad._execute([
       "kicad-cli", "pcb", "export", "pos", self.pcb,
@@ -317,7 +321,6 @@ class KiCad:
       "--exclude-dnp",
     ])
     rows = CSV.load(pos_name)
-    # Reference must end with digit, not start with digit/+/-
     rows = where(rows, lambda r:
       re.search(r"\d$", str(r.get("Ref", ""))) is not None
     )
@@ -332,7 +335,6 @@ class KiCad:
     if dnp:
       dnp_set = set(dnp)
       rows = where(rows, lambda r: r.get("Ref") not in dnp_set)
-    # Apply rotation corrections
     for rotation, refs in rotation_refs.items():
       ref_set = set(refs)
       for r in rows:
@@ -363,7 +365,10 @@ class KiCad:
 
   def pdf_schema(self):
     """Export schematic as PDF."""
-    pdf_name = self.produce_path + self.name + "-schema.pdf"
+    if not self.has_sch:
+      p.wrn("No schematic: skipping schema PDF")
+      return
+    pdf_name = "./" + self.name + "-schema.pdf"
     KiCad._execute([
       "kicad-cli", "sch", "export", "pdf",
       self.sch, "--output", pdf_name,

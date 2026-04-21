@@ -1,4 +1,9 @@
-## Changelog `xaeian`
+## Changes `xaeian`
+
+## `0.6.1` Remove PDF module
+
+* Extract PDF generation into a separate package
+* Minor fixes in `cli/fonts` and `KeyValue` in `db`
 
 ## `0.6.0` KiCad, Database key-value & Fixes
 

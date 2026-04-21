@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xaeian"
-version = "0.6.0"
+version = "0.6.1"
 description = "Python utilities for files, strings, time, serial, structs, media, electronics, plotting, and database and more..."
 readme = "readme.md"
 license = {text = "MIT"}
@@ -19,11 +19,10 @@ db-async = ["aiomysql", "aiosqlite", "asyncpg"]
 dsp = ["numpy", "scipy"]
 eda = ["PyMuPDF", "pypdf", "sexpdata"]
 media = ["Pillow", "PyMuPDF", "pypdf"]
-pdf = ["Pillow", "reportlab"]
 plot = ["matplotlib", "numpy"]
 serial = ["pyserial"]
 time = ["pytz", "tzlocal"]
-all = ["Pillow", "PyMuPDF", "aiomysql", "aiosqlite", "asyncpg", "matplotlib", "numpy", "psycopg2-binary", "pymysql", "pypdf", "pyserial", "pytz", "reportlab", "scipy", "sexpdata", "tzlocal"]
+all = ["Pillow", "PyMuPDF", "aiomysql", "aiosqlite", "asyncpg", "matplotlib", "numpy", "psycopg2-binary", "pymysql", "pypdf", "pyserial", "pytz", "scipy", "sexpdata", "tzlocal"]
 
 [project.scripts]
 xn = "xaeian.__main__:main"

@@ -34,7 +34,6 @@ pip install xaeian[dsp]       # + scipy
 pip install xaeian[db]        # + pymysql, psycopg2
 pip install xaeian[db-async]  # + aiomysql, asyncpg, aiosqlite
 pip install xaeian[media]     # + pypdf, PyMuPDF, Pillow
-pip install xaeian[pdf]       # + reportlab, Pillow
 pip install xaeian[eda]       # + sexpdata, pypdf, PyMuPDF
 pip install xaeian[sftp]      # + paramiko
 pip install xaeian[all]       # everything
@@ -143,7 +142,6 @@ xn ico logo.png -o favicon.ico
 | `dsp`         | Signal processing, SOS filters, FFT, vibration     | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#dsp)         |
 | `db`          | Database abstraction _(SQLite, MySQL, PostgreSQL)_ | [xaeian/db/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/db/readme.md)       |
 | `media`       | Compress, convert, strip metadata _(PDF & images)_ | [xaeian/media/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/media/readme.md) |
-| `pdf`         | PDF document generation _(reportlab)_              | [xaeian/pdf/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/pdf/readme.md)     |
 | `eda`         | E-series, KiCad export, NgSpice runner             | [xaeian/eda/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/eda/readme.md)     |
 | `net`         | Network clients _(SFTP, FTP)_                      | [xaeian/net/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/net/readme.md)     |
 | `cli`         | tree, dupes, wifi scripts                          | [xaeian/cli/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/cli/readme.md)     |
