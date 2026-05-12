@@ -71,6 +71,13 @@ db.find("users", order="name", limit=10)
 async with db.transaction():
   db.update("users", {"verified": True}, "id = ?", 42)
 
+# Serial recorders: threaded read + 1Hz CSV append
+from xaeian.serial import Recorder, RecorderPool
+recs = [Recorder(p, name=n, regex=Recorder.SCI_NORM)
+  for n, p in {"U1": "COM7", "I1": "COM8"}.items()]
+pool = RecorderPool(recs, period_ms=1000, csv_path="series.csv")
+pool.start(); ...; pool.stop()
+
 # Plot: fluent, stacked panels, auto datetime
 from xaeian.plot import Plot
 (Plot(theme="dark")
@@ -124,24 +131,22 @@ xn ico logo.png -o favicon.ico
 
 ## Modules
 
-| Module        | Description                                        | Docs                                                                                        |
-| ------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `files`       | FILE, DIR, PATH, JSON, CSV, INI                    | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#files)       |
-| `files_async` | Async wrappers via `asyncio.to_thread()`           | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#files_async) |
-| `table`       | Lightweight tabular ops on `list[dict]`            | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#table)       |
-| `xstring`     | Split, replace, strip comments, passwords          | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#xstring)     |
-| `xtime`       | Datetime parsing, arithmetic, rounding             | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#xtime)       |
-| `colors`      | ANSI 256-color terminal codes                      | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#colors)      |
-| `log`         | Colored logging with file rotation                 | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#log)         |
-| `crc`         | CRC-8/16/32 with predefined variants               | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#crc)         |
-| `cstruct`     | Binary struct serialization _(C-like)_             | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#cstruct)     |
-| `cmd`         | Shell command helpers                              | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#cmd)         |
-| `serial_port` | Serial communication with colored output           | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#serial_port) |
-| `cbash`       | Embedded device console protocol                   | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#cbash)       |
-| `plot`        | Fluent matplotlib wrapper with stacked panels      | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#plot)        |
-| `dsp`         | Signal processing, SOS filters, FFT, vibration     | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#dsp)         |
-| `db`          | Database abstraction _(SQLite, MySQL, PostgreSQL)_ | [xaeian/db/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/db/readme.md)       |
-| `media`       | Compress, convert, strip metadata _(PDF & images)_ | [xaeian/media/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/media/readme.md) |
-| `eda`         | E-series, KiCad export, NgSpice runner             | [xaeian/eda/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/eda/readme.md)     |
-| `net`         | Network clients _(SFTP, FTP)_                      | [xaeian/net/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/net/readme.md)     |
-| `cli`         | tree, dupes, wifi scripts                          | [xaeian/cli/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/cli/readme.md)     |
+| Module        | Description                                              | Docs                                                                                            |
+| ------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `files`       | FILE, DIR, PATH, JSON, CSV, INI, YAML, async             | [xaeian/files/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/files/readme.md)     |
+| `table`       | Lightweight tabular ops on `list[dict]`                  | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#table)           |
+| `xstring`     | Split, replace, strip comments, passwords                | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#xstring)         |
+| `xtime`       | Datetime parsing, arithmetic, rounding                   | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#xtime)           |
+| `colors`      | ANSI 256-color terminal codes                            | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#colors)          |
+| `log`         | Colored logging with file rotation                       | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#log)             |
+| `crc`         | CRC-8/16/32 with predefined variants                     | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#crc)             |
+| `cstruct`     | Binary struct serialization _(C-like)_                   | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#cstruct)         |
+| `cmd`         | Shell command helpers                                    | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#cmd)             |
+| `serial`      | Port, recorders with CSV logging, embedded shell client  | [xaeian/serial/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/serial/readme.md)   |
+| `plot`        | Fluent matplotlib wrapper with stacked panels            | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#plot)            |
+| `dsp`         | Signal processing, SOS filters, FFT, vibration           | [xaeian/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/readme.md#dsp)             |
+| `db`          | Database abstraction _(SQLite, MySQL, PostgreSQL)_       | [xaeian/db/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/db/readme.md)           |
+| `media`       | Compress, convert, strip metadata _(PDF & images)_       | [xaeian/media/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/media/readme.md)     |
+| `eda`         | E-series, KiCad export, NgSpice runner                   | [xaeian/eda/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/eda/readme.md)         |
+| `net`         | Network clients _(SFTP, FTP)_                            | [xaeian/net/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/net/readme.md)         |
+| `cli`         | tree, dupes, wifi scripts                                | [xaeian/cli/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/cli/readme.md)         |

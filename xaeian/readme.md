@@ -2,79 +2,7 @@
 
 Python utilities. Zero dependencies for core. Optional extras for time, serial, media, database and more...
 
-## `files`
-
-```py
-from xaeian import FILE, DIR, JSON, CSV, INI, YAML, PATH
-
-# FILE: read/write/append, auto-creates directories
-FILE.save("data.txt", "Hello!")
-FILE.load("data.txt")
-FILE.append("data.txt", "\nMore")
-FILE.load("data.bin", binary=True)
-FILE.hash("data.bin", algo="md5")
-FILE.exists("data.txt")
-
-# JSON: auto `.json` extension, compact/pretty/smart save
-JSON.save("config", {"debug": True, "port": 8080})
-JSON.load("config")                    # → dict
-JSON.load("missing", otherwise={})     # → {} if not found
-JSON.save_pretty("config", cfg)        # human-readable
-JSON.save_smart("data", measurements)  # numeric arrays inline
-
-# CSV: list[dict] or column vectors
-CSV.save("users", [{"name": "Jan", "age": 30}])
-CSV.load("users", types={"age": int})
-CSV.load_vectors("sensors", types={"temp": float})
-CSV.add_row("log", {"ts": 1234, "val": 3.14})
-
-# INI: nested dict with sections
-INI.save("settings", {"main": {"key": "value", "num": 42}})
-INI.load("settings") # → {"main": {"key": "value", "num": 42}}
-
-# YAML: auto `.yaml`/`.yml`, multi-document support (requires pyyaml)
-YAML.save("config", {"debug": True, "port": 8080})
-YAML.load("config") # tries .yaml then .yml
-YAML.save_pretty("config", cfg, sort_keys=True)
-YAML.save_all("fixtures", [doc1, doc2, doc3]) # multi-doc with ---
-YAML.load_all("fixtures") # → [doc1, doc2, doc3]
-
-# DIR: create, list, zip
-DIR.ensure("data/subdir/")
-DIR.file_list("src", exts=[".py"], blacklist=["__pycache__"])
-DIR.zip("folder", "archive.zip")
-
-# PATH: pure path manipulation (no IO)
-PATH.stem("a/b/file.txt")         # "file"
-PATH.ext("a/b/file.txt")          # ".txt"
-PATH.with_suffix("f.txt", ".md")  # "f.md"
-PATH.resolve("data/cfg")          # "/home/user/project/data/cfg"
-```
-
-### Context-based paths
-
-```py
-from xaeian import Files, file_context
-
-fs = Files(root_path="/app/data")
-fs.JSON.load("config") # /app/data/config.json
-fs.FILE.save("log.txt", "ok") # /app/data/log.txt
-
-with file_context(root_path="/tmp"):
-  FILE.save("temp.txt", "...") # /tmp/temp.txt
-```
-
-### Async
-
-```py
-from xaeian.files_async import FILE, JSON, AsyncFiles
-
-await FILE.load("data.txt")
-await JSON.save("config", {"key": "value"})
-
-fs = AsyncFiles(root_path="/app/data")
-await fs.FILE.load("test.txt")
-```
+See submodule READMEs for `xaeian.files` and `xaeian.serial`.
 
 ## `table`
 
@@ -222,37 +150,6 @@ exists("gcc")                 # True/False
 which("python3", "python")    # "/usr/bin/python3"
 output("git rev-parse HEAD")  # "a1b2c3d..."
 run("make -j4", cwd="build")  # CompletedProcess
-```
-
-## `serial_port`
-
-Requires `pip install xaeian[serial]`.
-
-```py
-from xaeian.serial_port import SerialPort, serial_scan
-from xaeian.crc import crc16_modbus
-
-serial_scan() # ["COM3", "COM4"]
-
-with SerialPort("COM3", 115200, crc=crc16_modbus) as sp:
-  sp.send(b"AT\r\n")
-  response = sp.read()
-```
-
-## `cbash`
-
-Embedded device console. Requires `pip install xaeian[serial]`.
-
-```py
-from xaeian.cbash import CBash
-
-with CBash("COM3") as cb:
-  cb.ping()
-  cb.set_time()
-  files = cb.file_list()
-  cb.file_select("config")
-  content = cb.file_load_str()
-  cb.reboot()
 ```
 
 ## `sftp`

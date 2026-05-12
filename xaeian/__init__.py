@@ -13,8 +13,7 @@ Modules:
   - `xaeian.cmd`: Shell command helpers
   - `xaeian.xtime`: Datetime parsing and arithmetic
   - `xaeian.cstruct`: Binary struct serialization
-  - `xaeian.serial_port`: Serial communication
-  - `xaeian.cbash`: Embedded device console
+  - `xaeian.serial`: Serial communication (port, recorders, shell client)
   - `xaeian.sftp`: SFTP/SSH client for deployment and data collection
   - `xaeian.plot`: Fluent matplotlib wrapper
   - `xaeian.dsp`: Signal processing (filter, FFT, vibration metrics)
@@ -25,10 +24,11 @@ Modules:
 
 Example:
   >>> from xaeian import logger, JSON, split_sql, Files, Plot
+  >>> from xaeian.serial import Shell, RecorderPool
   >>> from xaeian.db import Database
 """
 
-__version__ = "0.6.2"
+__version__ = "0.7.0"
 __repo__ = "Xaeian/Python"
 __python__ = ">=3.12"
 __description__ = "Python utilities for files, strings, time, serial, structs, media, electronics, plotting, and database and more..."
@@ -86,9 +86,16 @@ except Exception:
   pass
 
 try:
-  from .serial_port import SerialPort, serial_scan
-  from .cbash import CBash
-  __all__ += ["SerialPort", "CBash", "serial_scan"]
+  from .serial import (
+    SerialPort, serial_scan,
+    Recorder, MultiRecorder, RecorderPool,
+    Shell, convert_value,
+  )
+  __all__ += [
+    "SerialPort", "serial_scan",
+    "Recorder", "MultiRecorder", "RecorderPool",
+    "Shell", "convert_value",
+  ]
 except Exception:
   pass
 

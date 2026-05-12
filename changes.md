@@ -1,9 +1,15 @@
 # Changes `xaeian`
 
+## `0.7.0` Serial submodule
+
+- `serial`: new submodule, replaces `serial_port` and `cbash` _(breaking)_
+- `Recorder`, `RecorderPool`: threaded value capture with CSV
+- `Shell`: renamed from `CBash`
+
 ## `0.6.2` Recorder
 
-* `serial_port`: Recorder bug fix
-* `eda`: Minor fixes
+- `serial_port`: Recorder bug fix
+- `eda`: Minor fixes
 
 ## `0.6.1` Remove PDF module
 
