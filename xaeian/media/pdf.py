@@ -30,7 +30,7 @@ def pdf_compress(
   src: str,
   dst: str|None = None,
   level: PdfCompatLevel = "1.7",
-  settings: PdfSettings = "/ebook",
+  settings: PdfSettings = "/screen",
   programs: Sequence[str] = ("gswin64c", "gswin32c", "gs"),
   inplace: bool = False,
 ) -> str:

@@ -339,8 +339,21 @@ class SerialPort:
 class Recorder(SerialPort):
   """
   Serial port reader that continuously reads and parses numeric values.
-  Handles partial lines and connection timeouts gracefully.
+  Robust to mid-value `\\r\\n` splits — accumulates raw bytes into a rolling
+  buffer and extracts the latest match via unanchored regex.
+
+  Numeric regex patterns (use with `read_value`):
+    `SCI_NORM` - 1.23456e+02 (SCPI, Brymen, Rigol)
+    `SCI`      - general scientific notation
+    `FLOAT`    - 123.456
+    `NUM`      - int or float
   """
+  SCI_NORM = r"-?[1-9]\.\d+[eE][+-]?\d{2}"
+  SCI = r"-?\d+\.?\d*[eE][+-]?\d+"
+  FLOAT = r"-?\d+\.\d+"
+  NUM = r"-?\d+(?:\.\d+)?"
+
+  _BUF_MAX = 4096
 
   def __init__(
     self,
@@ -359,9 +372,9 @@ class Recorder(SerialPort):
   ):
     """
     Args:
-      name: Device identifier for logging
-      color: Output color for this device
-      err_delay: Seconds without data before disconnect
+      name: Device identifier for logging.
+      color: Output color for this device.
+      err_delay: Seconds without data before disconnect.
     """
     self.name = name
     self.color = color
@@ -377,7 +390,7 @@ class Recorder(SerialPort):
     super().print(text, prefix)
 
   def _check_timeout(self) -> bool:
-    """Returns True if connection timed out."""
+    """Returns `True` if connection timed out."""
     if self.err_time and time.time() > self.err_time:
       self.disconnect()
       self.print_error(f"Serial port {self.port} not responding")
@@ -400,36 +413,54 @@ class Recorder(SerialPort):
 
   def read_value(self, regex:str|None=None) -> float|None:
     """
-    Read and parse numeric value from serial.
-    Handles partial lines by keeping leftover data between calls.
+    Read and parse numeric value from serial stream.
+    Robust to mid-value `\\r\\n` splits — `\\r\\n` is dropped before matching.
+    Console prints only complete lines (partial held until newline arrives).
+
+    Args:
+      regex: Pattern to extract (anchors `^`/`$` stripped automatically).
+        Use class constants: `Recorder.SCI_NORM`, `Recorder.SCI`,
+        `Recorder.FLOAT`, `Recorder.NUM`.
     """
     if self._check_timeout():
       self._leftover = ""
+      self._print_buf = ""
       self.value = None
       return None
     if not self.connect():
-      self.value = None
       self._leftover = ""
+      self._print_buf = ""
+      self.value = None
       return None
     try:
-      lines = self.read_lines(self.color)
-      if not lines: return self.value
-      if self._leftover:
-        lines[0] = self._leftover + (lines[0] or "")
-        self._leftover = ""
-      for i, line in enumerate(reversed(lines)):
-        if not line: continue
-        if regex and not re.match(regex, line):
-          if i == 0: self._leftover = line
-          continue
+      resp = self.serial.read(self.buffer_size)
+      if not resp: return self.value
+      text = resp.decode("utf-8", errors="ignore")
+      self._print_buf += text
+      parts = re.split(r"[\r\n]+", self._print_buf)
+      self._print_buf = parts[-1]
+      for line in parts[:-1]:
+        if line.strip(): self.print(f"{self.color}{line.strip()}{c.END}")
+      if len(self._print_buf) > self._BUF_MAX:
+        self._print_buf = self._print_buf[-self._BUF_MAX:]
+      self._leftover += re.sub(r"[\r\n]+", "", text)
+      if len(self._leftover) > self._BUF_MAX:
+        self._leftover = self._leftover[-self._BUF_MAX:]
+      pattern = regex or self.NUM
+      if pattern.startswith("^"): pattern = pattern[1:]
+      if pattern.endswith("$"): pattern = pattern[:-1]
+      matches = list(re.finditer(pattern, self._leftover))
+      if matches:
+        last = matches[-1]
         try:
-          self.value = float(line)
+          self.value = float(last.group())
           self._reset_timeout()
-          break
+          self._leftover = self._leftover[last.end():]
         except ValueError:
           pass
     except Exception:
       self._leftover = ""
+      self._print_buf = ""
       if self.debug: raise
     return self.value
 

@@ -123,8 +123,7 @@ def _compact_pad(m) -> str:
   parts.append(f'(uuid "{uid}"))')
   return " ".join(parts)
 
-def clean_footprint(filepath:str, style:Style=L,
-  restyle:bool=True, dry:bool=False,
+def clean_footprint(filepath:str, style:Style=L, restyle:bool=True, dry:bool=False,
 ) -> tuple[int, int]:
   """Clean and compact a hand-drawn `.kicad_mod` footprint.
 
@@ -165,10 +164,10 @@ def clean_footprint(filepath:str, style:Style=L,
   if restyle:
     # Fix Reference + Value font to style
     text = re.sub(
-      r'(\(property "(Reference|Value)" [^(]*)'
+      r'(\(property "(Reference|Value)" .+?)'
       r'(\(size )\d+\.?\d*\s+\d+\.?\d*\)',
       rf'\g<1>\g<3>{fs} {fs})',
-      text,
+      text, flags=re.DOTALL,
     )
     text = re.sub(
       r'(\(property "(Reference|Value)" .+?)'

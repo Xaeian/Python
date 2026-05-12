@@ -259,9 +259,14 @@ class KiCad:
     self.pdf_page("cu-bot",
       ["User.Drawings", "B.Cu", "B.Paste", "B.Mask", "Edge.Cuts"],
       "BOT Copper", (0.31, 0.49, 0.75))
-    self.pdf_page("desc",
-      ["User.Drawings", "F.SilkS", "B.SilkS", "Edge.Cuts"],
-      "Descriptions", (0.95, 0.92, 0.63), drill=False)
+    if top:
+      self.pdf_page("desc-top",
+        ["User.Drawings", "F.SilkS", "Edge.Cuts"],
+        "TOP Descriptions", (0.95, 0.92, 0.63), drill=False)
+    if bot:
+      self.pdf_page("desc-bot",
+        ["User.Drawings", "B.SilkS", "Edge.Cuts"],
+        "BOT Descriptions", (0.91, 0.69, 0.65), drill=False)
     pdf_name = f"./{self.name}-layout.pdf"
     try:
       from ..media.pdf import pdf_merge
@@ -288,17 +293,17 @@ class KiCad:
     path = self.produce_path + self.name + f"-{side}.png"
     args = [
       "kicad-cli", "pcb", "render", self.pcb,
-      "--output", path,
-      "--side", side,
-      "--width", str(width),
-      "--height", str(height),
-      "--quality", quality,
-      "--background", background,
+      f"--output={path}",
+      f"--side={side}",
+      f"--width={width}",
+      f"--height={height}",
+      f"--quality={quality}",
+      f"--background={background}",
     ]
-    if zoom: args += ["--zoom", str(zoom)]
-    if pan: args += ["--pan", f"{pan[0]},{pan[1]},{pan[2]}"]
-    if perspective: args += ["--perspective"]
-    if floor: args += ["--floor"]
+    if zoom: args.append(f"--zoom={zoom}")
+    if pan: args.append(f"--pan='{pan[0]},{pan[1]},{pan[2]}'")
+    if perspective: args.append("--perspective")
+    if floor: args.append("--floor")
     KiCad._execute(args)
 
   def cpl(

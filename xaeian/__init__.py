@@ -28,7 +28,7 @@ Example:
   >>> from xaeian.db import Database
 """
 
-__version__ = "0.6.1"
+__version__ = "0.6.2"
 __repo__ = "Xaeian/Python"
 __python__ = ">=3.12"
 __description__ = "Python utilities for files, strings, time, serial, structs, media, electronics, plotting, and database and more..."
