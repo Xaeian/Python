@@ -296,7 +296,7 @@ def _log_summary(
     p.inf(f"Dependencies: {c.GREY}{', '.join(meta['dependencies'])}{c.END}")
   if extras:
     for name, deps in sorted(extras.items(), key=lambda x: (x[0] == "all", x[0])):
-      p.item(f"[{c.SKY}{name}{c.END}]: {c.GREY}{', '.join(deps)}{c.END}")
+      p.item(f"[{c.CREAM}{name}{c.END}]: {c.GREY}{', '.join(deps)}{c.END}")
   if package_data:
     p.inf(f"Package data: {c.GREY}{', '.join(package_data)}{c.END}")
   if meta.get("scripts"):

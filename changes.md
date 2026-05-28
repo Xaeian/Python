@@ -1,5 +1,10 @@
 # Changes `xaeian`
 
+## `0.7.1` Fix
+
+- `serial`: `mbb_load` fix, recorders own their threads
+- `eda`: BOM/CPL refinements, 3D render colors
+
 ## `0.7.0` Serial submodule
 
 - `serial`: new submodule, replaces `serial_port` and `cbash` _(breaking)_

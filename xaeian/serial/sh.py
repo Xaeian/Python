@@ -292,20 +292,36 @@ class Shell(SerialPort):
     return True
 
   def mbb_load(self) -> bytes|None:
-    """Load entire content of active MBB as bytes."""
+    """
+    Load entire content of active MBB as bytes.
+
+    Each `mbb load <limit> <offset>` chunk is deterministic: device sends
+    exactly `limit` raw bytes followed by `\\r\\n` from `DBG_Enter()`. Read
+    the exact byte count requested, then consume the trailing newline.
+    No buffer-size guessing.
+    """
     info = self.mbb_info()
     if info is None: return None
     used, _ = info
     if used == 0: return b""
-    pack_count = (used + self.pack_size - 1) // self.pack_size
-    result = b""
-    for i in range(pack_count):
-      offset = i * self.pack_size
-      # binary response from device - use raw read path
-      chunk = self._exec_bytes(f"mbb load {self.pack_size} {offset}")
-      if chunk is None: return None
-      result += chunk
-    return result[:used]  # last chunk may be partial, trim to exact size
+    result = bytearray()
+    offset = 0
+    while offset < used:
+      limit = min(self.pack_size, used - offset)
+      cmd = f"mbb load {limit} {offset}"
+      if self.console_mode: cmd += "\n"
+      self.send(cmd)
+      if self.strip_echo:
+        self.serial.read_until(b"\n")
+      chunk = self.serial.read(limit)
+      if len(chunk) != limit:
+        self.print_error(f"mbb_load short read off={offset} {len(chunk)}/{limit}")
+        return None
+      self.print(f"{c.SALMON}{bytes(chunk)}{c.END}")
+      result.extend(chunk)
+      self.serial.read(2)  # DBG_Enter() trailing \r\n
+      offset += limit
+    return bytes(result)
 
   def mbb_load_str(self, strict:bool = True) -> str|None:
     """Load active MBB as utf-8 string. `strict=False` drops non-ASCII bytes."""

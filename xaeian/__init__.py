@@ -28,7 +28,7 @@ Example:
   >>> from xaeian.db import Database
 """
 
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 __repo__ = "Xaeian/Python"
 __python__ = ">=3.12"
 __description__ = "Python utilities for files, strings, time, serial, structs, media, electronics, plotting, and database and more..."
@@ -88,12 +88,12 @@ except Exception:
 try:
   from .serial import (
     SerialPort, serial_scan,
-    Recorder, MultiRecorder, RecorderPool,
+    Recorder, MultiRecorder,
     Shell, convert_value,
   )
   __all__ += [
     "SerialPort", "serial_scan",
-    "Recorder", "MultiRecorder", "RecorderPool",
+    "Recorder", "MultiRecorder",
     "Shell", "convert_value",
   ]
 except Exception:

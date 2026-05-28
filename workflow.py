@@ -40,11 +40,22 @@ def get_meta(pkg_dir:str) -> dict:
   except Exception: pass
   return meta
 
+def has_svglib(root:str) -> bool:
+  """Check if `svglib` is in `pyproject.toml` dependencies."""
+  toml = PATH.join(root, "pyproject.toml")
+  if not PATH.is_file(toml): return False
+  try: return "svglib" in FILE.load(toml)
+  except Exception: return False
+
 #------------------------------------------------------------------------------------- Generate
 
-def generate_workflow(meta:dict) -> str:
+def generate_workflow(meta:dict, cairo:bool=False) -> str:
   """Generate publish.yml content."""
   python_ver = meta["python"].replace(">=", "").replace(">", "")
+  cairo_step = (
+    "      - run: sudo apt-get update && "
+    "sudo apt-get install -y libcairo2-dev pkg-config python3-dev\n"
+  ) if cairo else ""
   return f'''name: Publish PyPI
 
 on:
@@ -62,7 +73,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "{python_ver}"
-      - run: pip install build
+{cairo_step}      - run: pip install build
       - run: python -m build
       - run: pip install -e .
       - uses: pypa/gh-action-pypi-publish@release/v1
@@ -82,12 +93,16 @@ def generate(package:str, output:str|None=None):
     p.err(f"{c.ORANGE}{pkg_dir}{c.END} is not a directory")
     sys.exit(1)
   meta = get_meta(pkg_dir)
+  root = PATH.dirname(pkg_dir)
+  cairo = has_svglib(root)
   python_ver = meta["python"].replace(">=", "").replace(">", "")
-  p.inf(f"Python: {c.SKY}{python_ver}{c.END}")
+  p.inf(f"Python: {c.TURQUS}{python_ver}{c.END}")
   if meta["repo"]:
     p.gap(f"https://github.com/{c.SKY}{meta['repo']}{c.END}")
-  workflow = generate_workflow(meta)
-  out = output or PATH.join(PATH.dirname(pkg_dir), ".github", "workflows", "publish.yml")
+  if cairo:
+    p.inf(f"Cairo: {c.VIOLET}libcairo2-dev{c.GREY} (svglib detected){c.END}")
+  workflow = generate_workflow(meta, cairo)
+  out = output or PATH.join(root, ".github", "workflows", "publish.yml")
   DIR.ensure(out)
   FILE.save(out, workflow)
   p.ok(f"Generated {c.GREY}{PATH.dirname(out)}/{c.END}{c.ORANGE}{PATH.basename(out)}{c.END}")

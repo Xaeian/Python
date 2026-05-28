@@ -3,45 +3,40 @@
 __extras__ = ("serial", ["pyserial"])
 
 """
-Continuous numeric reader and recorder pool.
+Threaded numeric value recorder.
 
-`Recorder` extends `SerialPort` with stream-based value parsing. Each instance
-owns its parsing contract (regex, single vs multi-value). The pool calls a
-uniform `update()` method per recorder - polymorphism handles the variation.
+`Recorder` extends `SerialPort` with stream-based value parsing - reads bytes
+in a background thread, extracts numeric values via regex, exposes the latest
+via `.value`. Robust to mid-value `\\r\\n` splits (Brymen, Rigol).
 
-`MultiRecorder` handles instruments emitting N values per line separated by
-e.g. `,`. Subclass `Recorder` for any other shape (header filtering, etc.).
+`MultiRecorder` handles N values per line, separator-delimited, exposes them
+via `.values`.
 
-`RecorderPool` accepts pre-configured recorders, runs a read thread per
-recorder, plus a reap thread that snapshots and writes CSV at `period_ms`.
+Both classes are pure data sources. Lifecycle: `start()` spawns reader thread,
+`stop()` signals and joins it. Application code decides what to do with the
+values (CSV, DB, MQTT, plot - not the library's concern).
 
 Example:
-  >>> from xaeian.serial import Recorder, MultiRecorder, RecorderPool
-  >>> recs = [
-  ...   Recorder("COM7", name="U1", regex=Recorder.SCI_NORM),
-  ...   MultiRecorder("COM8", name="STM", count=4,
-  ...     columns=["U", "I", "T", "RPM"], regex=Recorder.FLOAT),
-  ... ]
-  >>> pool = RecorderPool(recs, csv_path="series.csv")
-  >>> pool.start()
-  >>> # ... do work ...
-  >>> pool.stop()
+  >>> from xaeian.serial import Recorder
+  >>> rec = Recorder("COM7", name="U1", regex=Recorder.SCI_NORM)
+  >>> rec.start()
+  >>> # ... rec.value updates in background ...
+  >>> rec.stop()
 """
 
 import re, time, threading
 from .port import SerialPort
 from ..colors import Color as c
-from ..xtime import Time
-from ..files import CSV
 
 #------------------------------------------------------------------------------------- Recorder
 
 class Recorder(SerialPort):
   """
-  Stream-based single numeric value reader.
+  Stream-based single numeric value reader with background thread.
 
   Accumulates raw bytes into a rolling buffer and extracts the latest match
-  via unanchored regex. Robust to mid-value `\\r\\n` splits (Brymen, Rigol).
+  via unanchored regex. The reader thread updates `self.value` continuously
+  while running.
 
   Numeric regex patterns (use as `regex=` arg):
     `SCI_NORM` - 1.23456e+02 (SCPI, Brymen, Rigol)
@@ -91,10 +86,11 @@ class Recorder(SerialPort):
     self.err_delay_ms = err_delay_ms
     self.err_time:float = 0
     self.value:float|None = None
-    self._buffer = ""             # char-stream (no \r\n) for read_value
-    self._print_buf = ""          # incomplete display line awaiting \r\n
+    self._buffer = ""                # char-stream (no \r\n) for read_value
+    self._print_buf = ""             # incomplete display line awaiting \r\n
     self._lines_seen:list[str] = []  # complete lines (used by MultiRecorder)
-    self._snapshot:dict = {name: None}  # last-known row contribution
+    self._stop_event = threading.Event()
+    self._thread:threading.Thread|None = None
     super().__init__(port, baudrate, timeout, buffer_size,
       print_console, print_file, time_disp, time_utc, time_format)
 
@@ -110,7 +106,7 @@ class Recorder(SerialPort):
 
   def _check_timeout(self) -> bool:
     """Returns `True` if `err_delay_ms` elapsed since last successful read."""
-    # err_time is the future deadline (epoch seconds) by which we expect a fresh read
+    # err_time is the future deadline by which we expect a fresh read
     if self.err_time and time.time() > self.err_time:
       self.disconnect()
       self.print_error(f"Serial port {self.port} not responding")
@@ -119,25 +115,13 @@ class Recorder(SerialPort):
 
   def _reset_timeout(self):
     """Reset deadline `err_delay_ms` into the future after successful read."""
-    self.err_time = time.time() + self.err_delay_ms / 1000  # ms → s for time.time
+    self.err_time = time.time() + self.err_delay_ms / 1000
 
   def _reset_state(self):
     """Clear rolling buffers. Call on timeout/error/disconnect."""
     self._buffer = ""
     self._print_buf = ""
     self._lines_seen.clear()
-
-  #------------------------------------------------------------------------------------ Control
-
-  def scan(self):
-    """Check connection liveness and drain RX buffer. Call when idle."""
-    if self._check_timeout(): return
-    if not self.connect(): return
-    try:
-      self.clear(self.color)
-      self._reset_timeout()
-    except Exception:
-      if self.debug: raise
 
   #-------------------------------------------------------------------------------- Read engine
 
@@ -195,9 +179,7 @@ class Recorder(SerialPort):
     """
     Read latest numeric value from stream. Uses `self.regex` (defaults to `NUM`).
 
-    Returns:
-      Latest parsed float, or `None` on timeout / no data / no match yet.
-      Cached value if no fresh match this call.
+    Updates `self.value` in place. Returns it for convenience.
     """
     if self._check_timeout():
       self._reset_state()
@@ -220,25 +202,31 @@ class Recorder(SerialPort):
         pass
     return self.value
 
-  #------------------------------------------------------------------------------ Pool contract
+  #---------------------------------------------------------------------------------- Lifecycle
 
-  def update(self) -> dict:
-    """
-    Pool entry point. Reads fresh data and returns row contribution as dict.
-    Override in subclasses for custom shapes. Base: single value at `self.name`.
-    """
+  def _update_cycle(self):
+    """One iteration of the reader loop. Subclasses override for different shapes."""
     self.read_value()
-    self._snapshot = {self.name: self.value}
-    return self._snapshot
 
-  @property
-  def snapshot(self) -> dict:
-    """Last `update()` result. Read by reap thread without triggering IO."""
-    return self._snapshot
+  def _run(self):
+    """Background thread body. Read continuously until stop signal."""
+    self.connect()
+    while not self._stop_event.is_set():
+      self._update_cycle()
+    self.disconnect()
 
-  def has_value(self) -> bool:
-    """True if at least one value in snapshot is non-`None`."""
-    return any(v is not None for v in self._snapshot.values())
+  def start(self):
+    """Spawn reader thread. Non-blocking. Idempotent."""
+    if self._thread and self._thread.is_alive(): return
+    self._stop_event.clear()
+    self._thread = threading.Thread(target=self._run, daemon=True)
+    self._thread.start()
+
+  def stop(self, timeout_ms:int = 2000):
+    """Signal stop and join the reader thread."""
+    self._stop_event.set()
+    if self._thread: self._thread.join(timeout=timeout_ms / 1000)
+    self._thread = None
 
 
 #-------------------------------------------------------------------------------- MultiRecorder
@@ -249,12 +237,11 @@ class MultiRecorder(Recorder):
 
   Suits STM32 / Arduino style emitters like `1.234,5.678,9.012,4.567\\r\\n`.
   Latest complete line is authoritative - if its split count differs from
-  `count`, all columns nullify for that tick (error signal in CSV).
+  `count`, `self.values` is set to `None` (error signal).
 
   Args:
     count: Exact number of values expected per line.
     separator: Char/string between values (regex-escaped internally).
-    columns: Column names for each value. Defaults to `{name}_0`, `{name}_1`,...
     regex: Pattern for each value (defaults to `NUM`).
   """
   def __init__(
@@ -262,7 +249,6 @@ class MultiRecorder(Recorder):
     port:str,
     count:int,
     separator:str = ",",
-    columns:list[str]|None = None,
     baudrate:int = 9600,
     timeout:float = 0.1,
     buffer_size:int = 8192,
@@ -278,20 +264,17 @@ class MultiRecorder(Recorder):
   ):
     self.count = count
     self.separator = separator
-    self.columns = columns or [f"{name}_{i}" for i in range(count)]
     self.values:list[float]|None = None
     super().__init__(port, baudrate, timeout, buffer_size,
       print_console, print_file, time_disp, time_utc, time_format,
       name, regex, color, err_delay_ms)
-    self._snapshot = {col: None for col in self.columns}
 
   def read_values(self) -> list[float]|None:
     """
     Read fixed-count tuple of values from the latest complete line.
 
-    Returns:
-      `list[float]` of length `count` from latest line, or `None` on wrong
-      shape / parse error. Cached values if no new line arrived.
+    Updates `self.values` in place. Returns `None` on wrong shape /
+    parse error. Cached values if no new line arrived.
     """
     if self._check_timeout():
       self._reset_state()
@@ -320,121 +303,6 @@ class MultiRecorder(Recorder):
       self.values = None
       return None
 
-  def update(self) -> dict:
-    """Read and return all columns. Nulls all on wrong-shape line."""
+  def _update_cycle(self):
+    """Override base: read tuple instead of single value."""
     self.read_values()
-    if self.values is None:
-      self._snapshot = {col: None for col in self.columns}
-    else:
-      self._snapshot = dict(zip(self.columns, self.values))
-    return self._snapshot
-
-
-#--------------------------------------------------------------------------------- RecorderPool
-
-class RecorderPool:
-  """
-  Multi-recorder orchestration with threading and CSV logging.
-
-  Spawns one read thread per recorder (each calls `rec.update()` in a tight
-  loop) plus a reap thread that reads `rec.snapshot` at `period_ms` and
-  appends a CSV row. The pool is dumb - all parsing logic lives in the
-  recorders themselves (polymorphism via `update()`).
-
-  Args:
-    recs: Pre-configured `Recorder` / `MultiRecorder` instances.
-    period_ms: CSV append period for reap loop, in milliseconds.
-    csv_path: CSV file for continuous reap loop.
-    capture_path: CSV file for `capture()` one-shot rows.
-    skip_empty: Skip CSV row when no recorder has any non-`None` value.
-    time_format: Format for the `time` column in CSV rows.
-
-  Example:
-    >>> recs = [
-    ...   Recorder("COM7", name="U1", regex=Recorder.SCI_NORM),
-    ...   Recorder("COM8", name="U2", regex=Recorder.SCI_NORM),
-    ...   MultiRecorder("COM9", name="STM", count=4,
-    ...     columns=["U","I","T","RPM"], regex=Recorder.FLOAT),
-    ... ]
-    >>> pool = RecorderPool(recs, csv_path="series.csv")
-    >>> pool.start()
-    >>> try:
-    ...   while True: time.sleep(0.1)
-    ... except KeyboardInterrupt: pass
-    >>> pool.stop()
-  """
-  def __init__(
-    self,
-    recs:list[Recorder],
-    period_ms:int = 1000,
-    csv_path:str = "series.csv",
-    capture_path:str = "capture.csv",
-    skip_empty:bool = True,
-    time_format:str = "%Y-%m-%d %H:%M:%S.%f",
-  ):
-    self.recs = recs
-    self.period_ms = period_ms
-    self.csv_path = csv_path
-    self.capture_path = capture_path
-    self.skip_empty = skip_empty
-    self.time_format = time_format
-    self._stop = False
-    self._threads:list[threading.Thread] = []
-
-  def make_row(self) -> dict:
-    """
-    Build one CSV row from current snapshots. Override to add custom columns
-    (e.g. `step` counter from external controller).
-    """
-    row = {"time": Time().to(self.time_format)}
-    for rec in self.recs: row.update(rec.snapshot)
-    return row
-
-  def _has_value(self) -> bool:
-    """True if at least one recorder has any non-`None` snapshot value."""
-    return any(rec.has_value() for rec in self.recs)
-
-  def _read_loop(self, rec:Recorder):
-    rec.connect()
-    while not self._stop: rec.update()
-    rec.disconnect()
-
-  def _reap_loop(self):
-    period_s = self.period_ms / 1000  # time.sleep takes seconds
-    while not self._stop:
-      watch = Time().to("ts")
-      if not self.skip_empty or self._has_value():
-        CSV.add_row(self.csv_path, self.make_row())
-      # compensate for write latency to keep period_ms rhythm
-      drift = Time().to("ts") - watch
-      time.sleep(max(0, period_s - drift))
-
-  def start(self):
-    """Spawn reader + reap daemon threads. Non-blocking."""
-    self._stop = False
-    for rec in self.recs:
-      t = threading.Thread(target=self._read_loop, args=(rec,))
-      t.daemon = True
-      t.start()
-      self._threads.append(t)
-    t = threading.Thread(target=self._reap_loop)
-    t.daemon = True
-    t.start()
-    self._threads.append(t)
-
-  def stop(self, timeout_ms:int = 2000):
-    """Signal stop and join all threads. `timeout_ms` is per-thread cap."""
-    self._stop = True
-    for t in self._threads: t.join(timeout=timeout_ms / 1000)
-    self._threads.clear()
-
-  def capture(self):
-    """One-shot capture of current snapshots to `capture_path`. Skips if empty."""
-    if self.skip_empty and not self._has_value():
-      print(f"{c.YELLOW}No measurement, capture skipped{c.END}")
-      return
-    row = self.make_row()
-    for rec in self.recs:
-      vals = ", ".join(f"{k}={v}" for k, v in rec.snapshot.items())
-      rec.print(f"{c.LIME}Captured: {vals}")
-    CSV.add_row(self.capture_path, row)
