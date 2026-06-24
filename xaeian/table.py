@@ -1,3 +1,5 @@
+# xaeian/table.py
+
 """
 Lightweight tabular operations on `list[dict]`: pandas-free.
 
@@ -47,7 +49,7 @@ def _all_cols(rows:Rows) -> set[str]:
 
 def _safe_sort_key(v:Any) -> Any:
   """Wrap value so mixed types compare by type name first, then by value."""
-  if isinstance(v, tuple):
+  if isinstance(v, (tuple, list)):
     return tuple(_safe_sort_key(x) for x in v)
   return (type(v).__name__, v)
 
@@ -232,7 +234,7 @@ def aggregate(
       `"first"`, `"last"`, `"sum"`, `"count"`,
       `"min"`, `"max"`, `"mean"`,
       `"join"` or `"join:<sep>"`,
-      or `callable(values_list) -> value`.
+      or `callable(values_list) → value`.
 
   Example:
     >>> aggregate(rows, ["Manufacturer", "Code"], {

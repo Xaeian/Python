@@ -102,9 +102,7 @@ class INI:
   ) -> None:
     """Save a dict to an INI file with optional comments."""
     cfg = get_context()
-    path = ensure_suffix(path, ".ini")
-    path = PATH.resolve(path, read=False)
-    DIR.ensure(path, is_file=True)
+    path = DIR._resolve_write(path, ".ini")
     comment_section = comment_section or {}
     comment_field = comment_field or {}
     def write_comment_lines(f, text:str):

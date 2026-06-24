@@ -5,6 +5,7 @@
 import os, stat, shutil, zipfile
 from typing import Iterator
 from .path import PATH
+from ..xstring import ensure_suffix
 
 #-------------------------------------------------------------------------------- DIR namespace
 
@@ -47,6 +48,14 @@ class DIR:
     if path:
       os.makedirs(path, exist_ok=True)
     return PATH.normalize(path)
+
+  @staticmethod
+  def _resolve_write(path:str, ext:str) -> str:
+    """Resolve a save path: add suffix, make absolute, ensure parent dir."""
+    path = ensure_suffix(path, ext)
+    path = PATH.resolve(path, read=False)
+    DIR.ensure(path, is_file=True)
+    return path
 
   @staticmethod
   def remove(path:str, force:bool=False):

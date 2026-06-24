@@ -173,9 +173,9 @@ class CSV:
     )
 
   @staticmethod
-  async def add_row(path, datarow, delimiter=","):
+  async def add_row(path, datarow, delimiter=",", header=None):
     return await asyncio.to_thread(
-      _CSV.add_row, path, datarow, delimiter,
+      _CSV.add_row, path, datarow, delimiter, header,
     )
 
   @staticmethod
@@ -200,19 +200,22 @@ class JSON:
     return await asyncio.to_thread(_JSON.load, path, otherwise)
 
   @staticmethod
-  async def save(path, content):
-    return await asyncio.to_thread(_JSON.save, path, content)
+  async def save(path, content, ensure_ascii=False):
+    return await asyncio.to_thread(_JSON.save, path, content, ensure_ascii)
 
   @staticmethod
-  async def save_pretty(path, content, indent=2, sort_keys=False):
+  async def save_pretty(path, content, indent=2, sort_keys=False,
+                        ensure_ascii=False):
     return await asyncio.to_thread(
-      _JSON.save_pretty, path, content, indent, sort_keys,
+      _JSON.save_pretty, path, content, indent, sort_keys, ensure_ascii,
     )
 
   @staticmethod
-  async def save_smart(path, content, max_line=100, array_wrap=10):
+  async def save_smart(path, content, max_line=100, array_wrap=10,
+                       compact_dict=True, ensure_ascii=False):
     return await asyncio.to_thread(
       _JSON.save_smart, path, content, max_line, array_wrap,
+      compact_dict, ensure_ascii,
     )
 
 #----------------------------------------------------------------------------------- Async YAML
@@ -220,8 +223,6 @@ class JSON:
 if _YAML is not None:
   class YAML:
     """Async YAML file operations."""
-    loads = staticmethod(_YAML.loads)
-    dumps = staticmethod(_YAML.dumps)
 
     @staticmethod
     async def load(path, otherwise=None):
@@ -263,7 +264,7 @@ class _AsyncBoundNamespace:
     "basename", "dirname", "stem", "ext", "with_suffix",
     "ensure_suffix", "is_under", "join", "match",
     "format", "parse", "_strip_inline_comment", "_cast",
-    "smart", "loads", "dumps",
+    "smart",
   })
 
   def __init__(self, bound_ns:_BoundNamespace):

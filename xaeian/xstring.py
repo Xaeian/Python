@@ -39,7 +39,7 @@ def replace_start(text:str, find:str, replace:str, border:bool=False) -> str:
   """
   if not find: return text
   pattern = rf"(?m)^{re.escape(find)}{r'\b' if border else ''}"
-  return re.sub(pattern, replace, text)
+  return re.sub(pattern, lambda _m: replace, text)
 
 def replace_end(text:str, find:str, replace:str, border:bool=False) -> str:
   """
@@ -60,7 +60,7 @@ def replace_end(text:str, find:str, replace:str, border:bool=False) -> str:
   """
   if not find: return text
   pattern = rf"(?m){r'\b' if border else ''}{re.escape(find)}$"
-  return re.sub(pattern, replace, text)
+  return re.sub(pattern, lambda _m: replace, text)
 
 def replace_map(
   subject: str|list|dict,
@@ -189,9 +189,55 @@ def split_str(string:str, sep:str=" ", quote:str='"', esc:str=None) -> list[str]
   res.append("".join(buf))
   return res
 
+def _normalize_sql(sql:str) -> str:
+  """
+  Collapse whitespace and punctuation spacing OUTSIDE quoted literals.
+
+  String literals (`'...'`, with `''` escaping) are preserved verbatim so their
+  content is never mangled; only the surrounding SQL is normalized.
+  """
+  spans = []          # list of (is_quoted, text)
+  buf = []
+  i, n = 0, len(sql)
+  while i < n:
+    ch = sql[i]
+    if ch == "'":
+      spans.append((False, "".join(buf)))
+      buf = []
+      lit = ["'"]
+      i += 1
+      while i < n:
+        c = sql[i]
+        lit.append(c)
+        if c == "'":
+          if i + 1 < n and sql[i + 1] == "'":  # '' escape: keep both, stay in literal
+            lit.append("'")
+            i += 2
+            continue
+          i += 1
+          break
+        i += 1
+      spans.append((True, "".join(lit)))
+    else:
+      buf.append(ch)
+      i += 1
+  spans.append((False, "".join(buf)))
+  out = []
+  for quoted, text in spans:
+    if quoted:
+      out.append(text)
+    else:
+      text = re.sub(r"\s+", " ", text)
+      text = re.sub(r"\s*([(),=])\s*", r"\1", text)
+      out.append(text)
+  return "".join(out).strip()
+
 def split_sql(sqls:str) -> list[str]:
   """
   Split SQL script into normalized statements.
+
+  Whitespace and punctuation spacing are normalized outside quoted literals;
+  string literals (`'...'`) keep their content intact.
 
   Args:
     sqls: SQL text with one or more statements.
@@ -206,8 +252,7 @@ def split_sql(sqls:str) -> list[str]:
   parts = split_str(sqls, sep=";", quote="'")
   out = []
   for sql in parts:
-    sql = re.sub(r"\s+", " ", sql).strip()
-    sql = re.sub(r"\s*([(),=])\s*", r"\1", sql)
+    sql = _normalize_sql(sql)
     if sql: out.append(sql + ";")
   return out
 

@@ -353,9 +353,10 @@ class Struct:
       align: Struct alignment (1 = no alignment, 4 = 32-bit aligned, etc.)
     """
     if code is not None:
-      if code in Struct._codes:
+      existing = Struct._codes.get(code)
+      if existing is not None and existing != name:
         raise ValueError(
-          f"Code {code} already used by struct '{Struct._codes[code]}', "
+          f"Code {code} already used by struct '{existing}', "
           f"cannot assign to '{name}'"
         )
       if name: Struct._codes[code] = name
@@ -538,6 +539,10 @@ class Struct:
           value, offset = self._decode_field(field, msg, offset, endian)
           union_data[field.name] = value
         data[member.name] = union_data
+    # Skip the alignment padding appended during encode (mirror of _encode_single)
+    if self.align > 1:
+      remainder = offset % self.align
+      if remainder: offset += self.align - remainder
     return data, offset
 
   def encode(self, data_list:list[dict]|dict, endian:Endian|None=None) -> bytes:

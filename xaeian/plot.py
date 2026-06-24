@@ -34,6 +34,7 @@ try:
   import matplotlib
   import matplotlib.pyplot as plt
   import matplotlib.dates as mdates
+  import matplotlib.ticker
   import numpy as np
 except ImportError as e:
   raise ImportError("Install with: pip install xaeian[plot]  (matplotlib + numpy)") from e

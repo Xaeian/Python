@@ -47,11 +47,7 @@ def _is_zip(path:str) -> bool:
   try: return zipfile.is_zipfile(path)
   except Exception: return False
 
-def _fmt_size(b:int) -> str:
-  if b < 1024: return f"{b} B"
-  if b < 1024**2: return f"{b/1024:.1f} kB"
-  if b < 1024**3: return f"{b/1024**2:.1f} MB"
-  return f"{b/1024**3:.1f} GB"
+from ._args import _fmt_size
 
 #------------------------------------------------------------------------------------------ API
 
@@ -123,18 +119,8 @@ examples:
 """
 
 def main():
-  import argparse
-  def fmt(prog):
-    return argparse.RawDescriptionHelpFormatter(prog, max_help_position=34, width=90)
-  class DupesParser(argparse.ArgumentParser):
-    def format_help(self): return "\n" + super().format_help().rstrip() + "\n\n"
-  parser = DupesParser(
-    description="Find duplicate files by content hash",
-    formatter_class=fmt,
-    add_help=False,
-    usage=argparse.SUPPRESS,
-    epilog=EXAMPLES,
-  )
+  from ._args import _make_parser
+  parser = _make_parser("Find duplicate files by content hash", EXAMPLES)
   parser.add_argument("root", help="Directory to scan")
   parser.add_argument("--algo", default="sha256", metavar="ALG",
     choices=["sha256", "md5", "sha1"], help="Hash algorithm (default: sha256)")

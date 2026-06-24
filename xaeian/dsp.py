@@ -17,6 +17,7 @@ Example:
 """
 
 from __future__ import annotations
+import operator
 
 __extras__ = ("dsp", ["scipy", "numpy"])
 
@@ -90,8 +91,8 @@ class Spectrum:
 
   def to_signal(self) -> Signal:
     """Inverse FFT back to time domain."""
-    data = np.fft.irfft(self.complex, n=int(self.fs / (self.freqs[1] - self.freqs[0]))
-      if len(self.freqs) > 1 else 1)
+    n = round(self.fs / (self.freqs[1] - self.freqs[0])) if len(self.freqs) > 1 else 1
+    data = np.fft.irfft(self.complex, n=n)
     return Signal(data, fs=self.fs)
 
   def __repr__(self):
@@ -209,38 +210,33 @@ class Signal:
     if len(self._data) != len(other._data):
       raise ValueError(f"Lengths differ: {len(self._data)} vs {len(other._data)}")
 
-  def __add__(self, other):
+  def _binop(self, op, other) -> Signal:
+    """Shared arithmetic dispatch: Signal-Signal (compat-checked) or array-like."""
     if isinstance(other, Signal):
       self._check_compat(other)
-      return self._new(self._data + other._data)
-    return self._new(self._data + np.asarray(other))
+      return self._new(op(self._data, other._data))
+    return self._new(op(self._data, np.asarray(other)))
+
+  def __add__(self, other):
+    return self._binop(operator.add, other)
 
   def __radd__(self, other):
     return self.__add__(other)
 
   def __sub__(self, other):
-    if isinstance(other, Signal):
-      self._check_compat(other)
-      return self._new(self._data - other._data)
-    return self._new(self._data - np.asarray(other))
+    return self._binop(operator.sub, other)
 
   def __rsub__(self, other):
     return self._new(np.asarray(other) - self._data)
 
   def __mul__(self, other):
-    if isinstance(other, Signal):
-      self._check_compat(other)
-      return self._new(self._data * other._data)
-    return self._new(self._data * np.asarray(other))
+    return self._binop(operator.mul, other)
 
   def __rmul__(self, other):
     return self.__mul__(other)
 
   def __truediv__(self, other):
-    if isinstance(other, Signal):
-      self._check_compat(other)
-      return self._new(self._data / other._data)
-    return self._new(self._data / np.asarray(other))
+    return self._binop(operator.truediv, other)
 
   def __neg__(self):
     return self._new(-self._data)
@@ -270,6 +266,12 @@ class Signal:
 
   #----------------------------------------------------------------------- Filters (SOS)
 
+  def _sos_filter(self, Wn, btype:str, order:int, zero_phase:bool) -> Signal:
+    """Shared Butterworth SOS filter body for the public filter methods."""
+    sos = butter(order, Wn, btype, fs=self._fs, output='sos')
+    filt = sosfiltfilt if zero_phase else sosfilt
+    return self._new(filt(sos, self._data))
+
   def lowpass(self, cutoff_Hz:float, order:int=4, zero_phase:bool=True) -> Signal:
     """Butterworth low-pass filter.
 
@@ -278,29 +280,21 @@ class Signal:
       order: Filter order.
       zero_phase: Use zero-phase filtering (no phase distortion).
     """
-    sos = butter(order, cutoff_Hz, 'low', fs=self._fs, output='sos')
-    filt = sosfiltfilt if zero_phase else sosfilt
-    return self._new(filt(sos, self._data))
+    return self._sos_filter(cutoff_Hz, 'low', order, zero_phase)
 
   def highpass(self, cutoff_Hz:float, order:int=4, zero_phase:bool=True) -> Signal:
     """Butterworth high-pass filter."""
-    sos = butter(order, cutoff_Hz, 'high', fs=self._fs, output='sos')
-    filt = sosfiltfilt if zero_phase else sosfilt
-    return self._new(filt(sos, self._data))
+    return self._sos_filter(cutoff_Hz, 'high', order, zero_phase)
 
   def bandpass(self, low_Hz:float, high_Hz:float, order:int=4,
     zero_phase:bool=True) -> Signal:
     """Butterworth band-pass filter."""
-    sos = butter(order, [low_Hz, high_Hz], 'band', fs=self._fs, output='sos')
-    filt = sosfiltfilt if zero_phase else sosfilt
-    return self._new(filt(sos, self._data))
+    return self._sos_filter([low_Hz, high_Hz], 'band', order, zero_phase)
 
   def bandstop(self, low_Hz:float, high_Hz:float, order:int=4,
     zero_phase:bool=True) -> Signal:
     """Butterworth band-stop (notch) filter."""
-    sos = butter(order, [low_Hz, high_Hz], 'bandstop', fs=self._fs, output='sos')
-    filt = sosfiltfilt if zero_phase else sosfilt
-    return self._new(filt(sos, self._data))
+    return self._sos_filter([low_Hz, high_Hz], 'bandstop', order, zero_phase)
 
   #---------------------------------------------------------------------- Transforms
 

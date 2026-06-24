@@ -109,18 +109,8 @@ examples:
 """
 
 def main():
-  import argparse
-  def fmt(prog):
-    return argparse.RawDescriptionHelpFormatter(prog, max_help_position=34, width=90)
-  class WifiParser(argparse.ArgumentParser):
-    def format_help(self): return "\n" + super().format_help().rstrip() + "\n\n"
-  parser = WifiParser(
-    description="Extract saved Wi-Fi passwords",
-    formatter_class=fmt,
-    add_help=False,
-    usage=argparse.SUPPRESS,
-    epilog=EXAMPLES,
-  )
+  from ._args import _make_parser
+  parser = _make_parser("Extract saved Wi-Fi passwords", EXAMPLES)
   parser.add_argument("-o", "--output", default=None, metavar="PATH",
     help="Save JSON report to file")
   parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")

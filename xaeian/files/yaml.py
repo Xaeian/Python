@@ -61,9 +61,7 @@ class YAML:
   def save(path:str, content:Any, flow:bool=False) -> None:
     """Save data to YAML file (block style by default)."""
     cfg = get_context()
-    path = ensure_suffix(path, ".yaml")
-    path = PATH.resolve(path, read=False)
-    DIR.ensure(path, is_file=True)
+    path = DIR._resolve_write(path, ".yaml")
     with open(path, "w", encoding=cfg.encoding) as file:
       yaml.safe_dump(
         content, file, default_flow_style=flow,
@@ -75,9 +73,7 @@ class YAML:
                   sort_keys:bool=False, flow:bool=False) -> None:
     """Save YAML with explicit formatting options."""
     cfg = get_context()
-    path = ensure_suffix(path, ".yaml")
-    path = PATH.resolve(path, read=False)
-    DIR.ensure(path, is_file=True)
+    path = DIR._resolve_write(path, ".yaml")
     with open(path, "w", encoding=cfg.encoding) as file:
       yaml.safe_dump(
         content, file, indent=indent, sort_keys=sort_keys,
@@ -89,9 +85,7 @@ class YAML:
                flow:bool=False) -> None:
     """Save multiple documents to YAML file (separated by `---`)."""
     cfg = get_context()
-    path = ensure_suffix(path, ".yaml")
-    path = PATH.resolve(path, read=False)
-    DIR.ensure(path, is_file=True)
+    path = DIR._resolve_write(path, ".yaml")
     with open(path, "w", encoding=cfg.encoding) as file:
       yaml.safe_dump_all(
         documents, file, default_flow_style=flow,

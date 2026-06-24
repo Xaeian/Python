@@ -1,4 +1,4 @@
-# xaeian/spice.py
+# xaeian/eda/spice.py
 
 """
 NgSpice simulation runner with template-based netlists.
@@ -10,7 +10,7 @@ and parallel parametric sweeps.
 Requires: `ngspice` binary on PATH (or explicit path).
 
 Example:
-  >>> from xaeian.spice import Simulation
+  >>> from xaeian.eda.spice import Simulation
   >>> sim = Simulation("inverter", lib="C:/Kicad/Spice")
   >>> data = sim.run(RLOAD="2.2k")
   >>> data["V(OUT)"]  # list[float]
@@ -473,7 +473,7 @@ class Simulation:
 #----------------------------------------------------------------------------------------- Demo
 
 if __name__ == "__main__":
-  print("xaeian.spice — NgSpice simulation runner")
+  print("xaeian.eda.spice — NgSpice simulation runner")
   print()
   print("Usage:")
   print('  sim = Simulation("inverter", lib="/opt/spice")')

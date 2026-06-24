@@ -14,21 +14,21 @@ Modules:
   - `xaeian.xtime`: Datetime parsing and arithmetic
   - `xaeian.cstruct`: Binary struct serialization
   - `xaeian.serial`: Serial communication (port, recorders, shell client)
-  - `xaeian.sftp`: SFTP/SSH client for deployment and data collection
+  - `xaeian.net`: SFTP/FTP clients for deployment and data collection
   - `xaeian.plot`: Fluent matplotlib wrapper
   - `xaeian.dsp`: Signal processing (filter, FFT, vibration metrics)
   - `xaeian.db`: Database abstraction (SQLite, MySQL, PostgreSQL)
   - `xaeian.media`: PDF and image compression, conversion, metadata
   - `xaeian.eda`: E-series, KiCad export, NgSpice runner
-  - `xaeian.cli`: Utility scripts (tree, dupes, wifi)
+  - `xaeian.cli`: Utility scripts (tree, dupes, wifi, fonts)
 
 Example:
   >>> from xaeian import logger, JSON, split_sql, Files, Plot
-  >>> from xaeian.serial import Shell, RecorderPool
+  >>> from xaeian.serial import Shell, MultiRecorder
   >>> from xaeian.db import Database
 """
 
-__version__ = "0.7.1"
+__version__ = "0.7.2"
 __repo__ = "Xaeian/Python"
 __python__ = ">=3.12"
 __description__ = "Python utilities for files, strings, time, serial, structs, media, electronics, plotting, and database and more..."

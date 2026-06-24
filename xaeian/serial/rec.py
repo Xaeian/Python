@@ -1,7 +1,5 @@
 # xaeian/serial/rec.py
 
-__extras__ = ("serial", ["pyserial"])
-
 """
 Threaded numeric value recorder.
 
@@ -23,6 +21,8 @@ Example:
   >>> # ... rec.value updates in background ...
   >>> rec.stop()
 """
+
+__extras__ = ("serial", ["pyserial"])
 
 import re, time, threading
 from .port import SerialPort

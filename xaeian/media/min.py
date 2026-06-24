@@ -1,10 +1,10 @@
-# xaeian/mf/min.py
+# xaeian/media/min.py
 
 """
 Compression for PDFs and images.
 
 Example:
-  >>> from xaeian.mf.min import compress
+  >>> from xaeian.media.min import compress
   >>> compress("report.pdf", settings="/ebook")
   >>> compress("photo.jpg", max_px=1280, quality=85)
 """
@@ -79,18 +79,8 @@ examples:
 """
 
 def main():
-  import argparse
-  def fmt(prog):
-    return argparse.RawDescriptionHelpFormatter(prog, max_help_position=34, width=90)
-  class MinParser(argparse.ArgumentParser):
-    def format_help(self): return "\n" + super().format_help().rstrip() + "\n\n"
-  parser = MinParser(
-    description="Compress PDFs and images: auto-detects by extension",
-    formatter_class=fmt,
-    add_help=False,
-    usage=argparse.SUPPRESS,
-    epilog=EXAMPLES,
-  )
+  from ..cli._args import _make_parser
+  parser = _make_parser("Compress PDFs and images: auto-detects by extension", EXAMPLES)
   parser.add_argument("src", help="Input file or directory")
   parser.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
     help="Output path (default: <n>-min.<ext>)")
@@ -128,7 +118,7 @@ def main():
   except FileNotFoundError:
     p.err(f"File {c.ORANGE}{name}{c.END} not found")
     sys.exit(1)
-  except ValueError as e:
+  except ValueError:
     p.err(f"Format {c.BLUE}{ext}{c.END} not supported "
       f"{c.GREY}(PDF, image, or directory expected){c.END}")
     sys.exit(1)

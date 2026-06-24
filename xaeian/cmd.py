@@ -85,6 +85,7 @@ def run(
   capture: bool = True,
   check: bool = False,
   encoding: str = "utf-8",
+  timeout: float|None = None,
 ) -> subprocess.CompletedProcess:
   """
   Run command with sensible defaults.
@@ -96,6 +97,7 @@ def run(
     capture: Capture stdout/stderr.
     check: Raise CalledProcessError on non-zero exit.
     encoding: Output encoding.
+    timeout: Seconds before raising `subprocess.TimeoutExpired` (`None` = no limit).
 
   Returns:
     CompletedProcess instance.
@@ -105,5 +107,5 @@ def run(
   if env: merged_env = {**os.environ, **env}
   return subprocess.run(
     cmd, capture_output=capture, text=True,
-    cwd=cwd, env=merged_env, check=check, encoding=encoding,
+    cwd=cwd, env=merged_env, check=check, encoding=encoding, timeout=timeout,
   )

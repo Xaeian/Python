@@ -123,9 +123,7 @@ class CSV:
     """
     if datarow is None: raise ValueError("datarow must not be None")
     cfg = get_context()
-    path = ensure_suffix(path, ".csv")
-    path = PATH.resolve(path, read=False)
-    DIR.ensure(path, is_file=True)
+    path = DIR._resolve_write(path, ".csv")
     file_exists = os.path.isfile(path) and os.path.getsize(path) > 0
     with open(path, "a", newline="", encoding=cfg.encoding) as csv_file:
       if isinstance(datarow, dict):
@@ -158,9 +156,7 @@ class CSV:
     """Save whole CSV file from list of dicts or list of lists."""
     if not data: return
     cfg = get_context()
-    path = ensure_suffix(path, ".csv")
-    path = PATH.resolve(path, read=False)
-    DIR.ensure(path, is_file=True)
+    path = DIR._resolve_write(path, ".csv")
     with open(path, "w", newline="", encoding=cfg.encoding) as csv_file:
       if all(isinstance(row, dict) for row in data):
         field_names = field_names or list(data[0].keys())
@@ -193,9 +189,7 @@ class CSV:
     if header and len(header) != len(columns):
       raise ValueError("Header length must match number of vectors")
     cfg = get_context()
-    path = ensure_suffix(path, ".csv")
-    path = PATH.resolve(path, read=False)
-    DIR.ensure(path, is_file=True)
+    path = DIR._resolve_write(path, ".csv")
     with open(path, "w", newline="", encoding=cfg.encoding) as file:
       writer = csv.writer(file, delimiter=delimiter)
       if header: writer.writerow(header)

@@ -29,11 +29,10 @@ DEFAULT_IGNORE = {
   ".DS_Store", "Thumbs.db",
 }
 
+from ._args import _fmt_size as _fmt_size_raw
+
 def _fmt_size(b:int) -> str:
-  if b < 1024: return f"{b} B"
-  if b < 1024**2: return f"{b/1024:.1f}k"
-  if b < 1024**3: return f"{b/1024**2:.1f}M"
-  return f"{b/1024**3:.1f}G"
+  return _fmt_size_raw(b, (" B", "k", "M", "G"))
 
 def _match_exts(name:str, exts:list[str]|None) -> bool:
   if not exts: return True
@@ -134,18 +133,8 @@ examples:
 """
 
 def main():
-  import argparse
-  def fmt(prog):
-    return argparse.RawDescriptionHelpFormatter(prog, max_help_position=34, width=90)
-  class TreeParser(argparse.ArgumentParser):
-    def format_help(self): return "\n" + super().format_help().rstrip() + "\n\n"
-  parser = TreeParser(
-    description="Draw directory tree with filtering",
-    formatter_class=fmt,
-    add_help=False,
-    usage=argparse.SUPPRESS,
-    epilog=EXAMPLES,
-  )
+  from ._args import _make_parser
+  parser = _make_parser("Draw directory tree with filtering", EXAMPLES)
   parser.add_argument("root", nargs="?", default=".", help="Root directory (default: .)")
   parser.add_argument("-e", "--exts", nargs="+", default=None, metavar="EXT",
     help="Filter by extensions (e.g. .py .c .h)")

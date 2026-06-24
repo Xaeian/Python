@@ -30,9 +30,7 @@ class JSON:
   def save(path:str, content:Any, ensure_ascii:bool=False) -> None:
     """Save JSON to file in compact form."""
     cfg = get_context()
-    path = ensure_suffix(path, ".json")
-    path = PATH.resolve(path, read=False)
-    DIR.ensure(path, is_file=True)
+    path = DIR._resolve_write(path, ".json")
     with open(path, "w", encoding=cfg.encoding) as file:
       json.dump(content, file, separators=(",", ":"), ensure_ascii=ensure_ascii)
 
@@ -41,9 +39,7 @@ class JSON:
                   sort_keys:bool=False, ensure_ascii:bool=False) -> None:
     """Save JSON in pretty-printed form."""
     cfg = get_context()
-    path = ensure_suffix(path, ".json")
-    path = PATH.resolve(path, read=False)
-    DIR.ensure(path, is_file=True)
+    path = DIR._resolve_write(path, ".json")
     with open(path, "w", encoding=cfg.encoding, newline="\n") as file:
       json.dump(content, file, indent=indent, ensure_ascii=ensure_ascii,
                 sort_keys=sort_keys)
@@ -169,9 +165,7 @@ class JSON:
   ) -> None:
     """Save JSON with smart formatting."""
     cfg = get_context()
-    path = ensure_suffix(path, ".json")
-    path = PATH.resolve(path, read=False)
-    DIR.ensure(path, is_file=True)
+    path = DIR._resolve_write(path, ".json")
     with open(path, "w", encoding=cfg.encoding) as file:
       file.write(JSON.smart(
         content, max_line=max_line,

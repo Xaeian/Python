@@ -1,12 +1,5 @@
 # xaeian/db/__init__.py
 
-from __future__ import annotations
-
-__extras__ = {
-  "db": ["pymysql", "psycopg2-binary"],
-  "db-async": ["aiomysql", "asyncpg", "aiosqlite"],
-}
-
 """
 Lightweight database abstraction layer.
 
@@ -32,6 +25,13 @@ Async:
   >>> async with db.transaction():
   ...   await db.insert("users", {"name": "Jan"})
 """
+
+from __future__ import annotations
+
+__extras__ = {
+  "db": ["pymysql", "psycopg2-binary"],
+  "db-async": ["aiomysql", "asyncpg", "aiosqlite"],
+}
 
 import importlib
 from enum import Enum

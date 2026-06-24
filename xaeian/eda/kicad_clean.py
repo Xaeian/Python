@@ -1,3 +1,17 @@
+# xaeian/eda/kicad_clean.py
+
+"""
+KiCad output cleanup for footprints and 3D models.
+
+`clean_footprint` rounds coordinate floats and optionally restyles line widths
+in `.kicad_mod` files; `clean_step` tidies redundant naming in `.step` models.
+
+Example:
+  >>> from xaeian.eda import clean_footprint, clean_step
+  >>> clean_footprint("R0402.kicad_mod")
+  >>> clean_step("R0402.step")
+"""
+
 import re
 from ..xstring import strip_comments
 from ..files import FILE, PATH
@@ -10,9 +24,7 @@ def _round_coords(text:str) -> str:
   def _round_match(m):
     full = m.group(0)
     if "-" in full and len(full) > 38: return full  # UUID
-    v = round(float(full), 2)
-    if v == int(v): return str(int(v))
-    return f"{v:g}"
+    return fmt_number(round(float(full), 2))
   return re.sub(r"-?\d+\.\d{3,}", _round_match, text)
 
 def _compact_block(text:str) -> str:

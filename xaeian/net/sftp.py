@@ -175,7 +175,9 @@ class SFTP:
     self._sftp.get(remote, local, callback=cb)
     if preserve_mtime:
       rstat = self._sftp.stat(remote)
-      os.utime(local, (rstat.st_atime or rstat.st_mtime, rstat.st_mtime))
+      if rstat.st_mtime is not None:
+        atime = rstat.st_atime if rstat.st_atime is not None else rstat.st_mtime
+        os.utime(local, (atime, rstat.st_mtime))
     if self.log: self.log.item(f"{c.GREY}{remote}{c.END} → {c.GREY}{local}{c.END}")
 
   def remove(self, remote: str):
@@ -305,7 +307,9 @@ class SFTP:
       if filter and not filter(rel): continue
       ls = lpath.stat()
       rs = remote_idx.get(rel)
-      if rs and int(rs.st_mtime) == int(ls.st_mtime) and rs.st_size == ls.st_size:
+      if rs and rs.st_size == ls.st_size and (
+        rs.st_mtime is None or int(rs.st_mtime) == int(ls.st_mtime)
+      ):
         actions.append(("skip", rel)); continue
       actions.append(("put", rel))
       if not dry_run:
@@ -356,7 +360,9 @@ class SFTP:
       lpath = root / rel
       if lpath.exists():
         ls = lpath.stat()
-        if int(rs.st_mtime) == int(ls.st_mtime) and rs.st_size == ls.st_size:
+        if rs.st_size == ls.st_size and (
+          rs.st_mtime is None or int(rs.st_mtime) == int(ls.st_mtime)
+        ):
           actions.append(("skip", rel)); continue
       actions.append(("get", rel))
       if not dry_run:

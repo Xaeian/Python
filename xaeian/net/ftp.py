@@ -154,7 +154,7 @@ class FTP:
       ).strftime("%Y%m%d%H%M%S")
       try: self._ftp.sendcmd(f"MFMT {ts} {remote}")
       except Exception: pass
-    if self.log: self.log.item(f"{c.GREY}{local}{c.END} -> {c.GREY}{remote}{c.END}")
+    if self.log: self.log.item(f"{c.GREY}{local}{c.END} → {c.GREY}{remote}{c.END}")
 
   def get(
     self,
@@ -192,7 +192,7 @@ class FTP:
         mtime = _parse_mtime(resp[4:])
         if mtime: os.utime(local, (mtime, mtime))
       except Exception: pass
-    if self.log: self.log.item(f"{c.GREY}{remote}{c.END} -> {c.GREY}{local}{c.END}")
+    if self.log: self.log.item(f"{c.GREY}{remote}{c.END} → {c.GREY}{local}{c.END}")
 
   def remove(self, remote: str):
     """Delete remote file. Silent if not found."""
@@ -269,14 +269,14 @@ class FTP:
     Args:
       local: Local source directory.
       remote: Remote destination directory.
-      filter: `(rel_path) -> bool`: return `False` to skip.
+      filter: `(rel_path) → bool`: return `False` to skip.
       atomic: Atomic upload per file.
       callback: Per-file progress hook.
     """
     self._require_connected()
     root = Path(local)
     files = [f for f in root.rglob("*") if f.is_file()]
-    if self.log: self.log.inf(f"put_dir {c.CYAN}{len(files)}{c.END} files -> {c.SKY}{remote}{c.END}")
+    if self.log: self.log.inf(f"put_dir {c.CYAN}{len(files)}{c.END} files → {c.SKY}{remote}{c.END}")
     for f in files:
       rel = f.relative_to(root).as_posix()
       if filter and not filter(rel): continue
@@ -296,7 +296,7 @@ class FTP:
     Args:
       remote: Remote source directory.
       local: Local destination directory.
-      filter: `(rel_path) -> bool`: return `False` to skip.
+      filter: `(rel_path) → bool`: return `False` to skip.
       callback: Per-file progress hook.
     """
     self._require_connected()
@@ -315,7 +315,7 @@ class FTP:
     callback: Progress|None = None,
   ) -> list[Action]:
     """
-    Push local -> remote, skipping unchanged files.
+    Push local → remote, skipping unchanged files.
 
     Skip strategy: mtime+size if MLSD available, size-only otherwise.
 
@@ -324,7 +324,7 @@ class FTP:
       remote: Remote destination directory.
       delete: Remove remote files absent locally.
       dry_run: Plan actions without executing.
-      filter: `(rel_path) -> bool`: return `False` to skip.
+      filter: `(rel_path) → bool`: return `False` to skip.
       callback: Per-file progress hook.
 
     Returns:
@@ -367,7 +367,7 @@ class FTP:
     callback: Progress|None = None,
   ) -> list[Action]:
     """
-    Pull remote -> local, skipping unchanged files.
+    Pull remote → local, skipping unchanged files.
 
     Skip strategy: mtime+size if MLSD available, size-only otherwise.
 
@@ -376,7 +376,7 @@ class FTP:
       local: Local destination directory.
       delete: Remove local files absent remotely.
       dry_run: Plan actions without executing.
-      filter: `(rel_path) -> bool`: return `False` to skip.
+      filter: `(rel_path) → bool`: return `False` to skip.
       callback: Per-file progress hook.
 
     Returns:

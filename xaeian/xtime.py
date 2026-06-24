@@ -1,7 +1,5 @@
 # xaeian/xtime.py
 
-from __future__ import annotations
-
 """
 Extended datetime with human-friendly interface.
 
@@ -22,6 +20,8 @@ Example:
   >>> t.to("iso")             # ISO 8601 string
   >>> t.round("h")            # round to hour
 """
+
+from __future__ import annotations
 
 __extras__ = ("time", ["pytz", "tzlocal"])
 
@@ -267,7 +267,7 @@ class Time(datetime):
 
   #---------------------------------------------------------------------------------- Interval parsing
 
-  INTERVAL_PATTERN = r"[+\-]?[0-9]*\.?[0-9]+(?:y|mo|w|d|h|m|s|ms|µs|us)"
+  INTERVAL_PATTERN = r"[+\-]?[0-9]*\.?[0-9]+(?:mo|ms|µs|us|y|w|d|h|m|s)"
   INTERVAL_RE = re.compile(INTERVAL_PATTERN)
   INTERVALS_RE = re.compile(rf"^(?:{INTERVAL_PATTERN}\s*)+$")
 
@@ -369,7 +369,7 @@ class Time(datetime):
     raise ValueError(f"Cannot parse time: '{v}'")
 
 def time_to(v:TimeInput|None, fmt:str) -> str|int|float|Time|None:
-  """None/empty -> None, else Time(v).to(fmt)."""
+  """None/empty → None, else Time(v).to(fmt)."""
   if v is None: return None
   if isinstance(v, str) and not v.strip(): return None
   return Time(v).to(fmt)

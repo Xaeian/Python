@@ -9,7 +9,7 @@ Includes predefined instances for common standards (Modbus, ISO, etc.).
 Example:
   >>> from xaeian.crc import crc16_modbus, crc32_iso
   >>> crc16_modbus.checksum(b"hello")
-  19342
+  63028
   >>> encoded = crc16_modbus.encode(b"hello")
   >>> crc16_modbus.decode(encoded)
   b'hello'
@@ -56,7 +56,7 @@ class CRC:
   Example:
     >>> crc = CRC(16, 0x8005, 0xFFFF, True, True, 0x0000, False)
     >>> crc.checksum(b"123456789")
-    47933
+    19255
   """
   def __init__(
     self,
@@ -103,7 +103,7 @@ class CRC:
 
     Example:
       >>> crc16_modbus.checksum(b"hello")
-      19342
+      63028
     """
     remainder = self.initial
     ref = self._ref_byte
@@ -166,7 +166,7 @@ class CRC:
 
     Example:
       >>> crc16_modbus.encode(b"hello")
-      b'hello\\x8eK'
+      b'hello\\xf64'
     """
     crc = self.checksum(msg)
     return msg + self.to_bytes(crc)
@@ -213,6 +213,6 @@ if __name__ == "__main__":
   print()
   data = b"Hello!"
   encoded = crc16_modbus.encode(data)
-  print("encode:", data, "->", encoded.hex(" "))
+  print("encode:", data, "→", encoded.hex(" "))
   print("decode:", crc16_modbus.decode(encoded))
   print("decode corrupted:", crc16_modbus.decode(encoded[:-1] + b"\x00"))

@@ -1,7 +1,5 @@
 # xaeian/serial/sh.py
 
-__extras__ = ("serial", ["pyserial"])
-
 """
 Python client for embedded Shell (`lib/sh` C firmware).
 
@@ -29,6 +27,8 @@ Example:
   ...     sh.mbb_select("config")
   ...     data = sh.mbb_load_str()
 """
+
+__extras__ = ("serial", ["pyserial"])
 
 import re, time
 from datetime import datetime, timezone
@@ -124,7 +124,7 @@ class Shell(SerialPort):
       timeout_ms: One-shot read timeout override in milliseconds.
       retries: Retry count on validator failure or exception.
       retry_delay_ms: Delay between retries.
-      validator: `Callable(response) -> bool`. `False` triggers retry.
+      validator: `Callable(response) → bool`. `False` triggers retry.
 
     Returns:
       Response string (echo stripped, whitespace trimmed) or `None` on failure.

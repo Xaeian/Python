@@ -195,6 +195,48 @@ def renum_ph(where:str, offset:int) -> str:
     return PH_RE.sub(lambda m: f"${int(m.group(1)) + offset}", where)
   return where
 
+#--------------------------------------------------------------------------------- SQL Builders
+
+# Shared by the sync/async bases; each returns (sql, params).
+
+def _insert_sql(table:str, data:dict, style:str) -> tuple[str, tuple]:
+  """Build `INSERT INTO ... VALUES (...)` and its params (no RETURNING)."""
+  d = serialize_dict(data)
+  t = ident(table)
+  cols = ", ".join(ident(k) for k in d.keys())
+  return f"INSERT INTO {t} ({cols}) VALUES {ph(len(d), style)}", tuple(d.values())
+
+def _insert_many_sql(table:str, rows:list[dict], style:str) -> tuple[str, list[tuple]]:
+  """Build INSERT and per-row param tuples for a non-empty row list."""
+  rows2 = [serialize_dict(r) for r in rows]
+  t = ident(table)
+  cols = ", ".join(ident(k) for k in rows2[0].keys())
+  sql = f"INSERT INTO {t} ({cols}) VALUES {ph(len(rows2[0]), style)}"
+  return sql, [tuple(r.values()) for r in rows2]
+
+def _update_sql(table:str, data:dict, where:str, params:Any, style:str) -> tuple[str, tuple]:
+  """Build `UPDATE ... SET ... WHERE ...` with renumbered placeholders."""
+  d = serialize_dict(data)
+  t, n = ident(table), len(d)
+  phs = ph_list(n, style)
+  sets = ", ".join(f"{ident(k)} = {phs[i]}" for i, k in enumerate(d.keys()))
+  p = tuple(d.values()) + serialize_params(params)
+  return f"UPDATE {t} SET {sets} WHERE {renum_ph(where, n)}", p
+
+def _find_sql(table:str, order:str|None, limit:int|None, style:str, where:dict) -> tuple[str, tuple]:
+  """Build `SELECT * FROM ...` with kwargs WHERE / ORDER BY / LIMIT."""
+  t = ident(table)
+  sql = f"SELECT * FROM {t}"
+  params = ()
+  if where:
+    phs = ph_list(len(where), style)
+    conds = " AND ".join(f"{ident(k)} = {phs[i]}" for i, k in enumerate(where.keys()))
+    sql += f" WHERE {conds}"
+    params = tuple(serialize_dict(where).values())
+  if order: sql += f" ORDER BY {order}"
+  if limit: sql += f" LIMIT {limit}"
+  return sql, params
+
 #--------------------------------------------------------------------------------- JSON Parsing
 
 def parse_json(val:Any) -> Any:

@@ -1,5 +1,10 @@
 # Changes `xaeian`
 
+## `0.7.2` Fixes
+
+- Bug fixes across `files_async`, `xstring`, `xtime`, `cstruct`, `eda`, `dsp`, `net`
+- Internal refactor, **no public API changes**
+
 ## `0.7.1` Fix
 
 - `serial`: `mbb_load` fix, recorders own their threads

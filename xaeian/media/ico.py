@@ -108,7 +108,7 @@ def img_to_ico(
 
 EXAMPLES = """
 examples:
-  xn ico logo.png                   Auto sizes -> logo.ico
+  xn ico logo.png                   Auto sizes → logo.ico
   xn ico logo.png -o favicon.ico    Custom output
   xn ico photo.jpg --fit crop       Center-crop to square
   xn ico logo.png --sizes 16,32,48  Specific sizes
@@ -116,18 +116,8 @@ examples:
 """
 
 def main():
-  import argparse
-  def fmt(prog):
-    return argparse.RawDescriptionHelpFormatter(prog, max_help_position=34, width=90)
-  class IcoParser(argparse.ArgumentParser):
-    def format_help(self): return "\n" + super().format_help().rstrip() + "\n\n"
-  parser = IcoParser(
-    description="Convert image to multi-size .ico (auto-picks sizes from source)",
-    formatter_class=fmt,
-    add_help=False,
-    usage=argparse.SUPPRESS,
-    epilog=EXAMPLES,
-  )
+  from ..cli._args import _make_parser
+  parser = _make_parser("Convert image to multi-size .ico (auto-picks sizes from source)", EXAMPLES)
   parser.add_argument("src", help="Input image path")
   parser.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
     help="Output .ico path (default: <n>.ico)")

@@ -42,7 +42,7 @@ RENDER_COLORS = {
   "green":  ("#205F3ACC", "White"),
   "red":    ("#7E2424D9", "White"),
   "blue":   ("#1E4778D9", "White"),
-  "yellow": ("#C49A24CC", "#000000"),
+  "yellow": ("#C49A24CC", "White"),
   "white":  ("#E8DFD0E6", "#000000"),
   "black":  ("#181818E6", "White"),
   "purple": ("#43236ED9", "White"),
@@ -200,6 +200,7 @@ class KiCad:
     self.has_pcb = bool(pcb_files)
     self.has_sch = bool(sch_files)
     self.rows:list[dict] = []
+    self.pdf_pages:list[str] = []
     if self.has_sch:
       self._load_bom()
 
@@ -392,7 +393,7 @@ class KiCad:
     perspective:bool = False,
     floor:bool = False,
   ):
-    """Render 3D raytraced image of PCB. `color=None` -> original PCB untouched."""
+    """Render 3D raytraced image of PCB. `color=None` → original PCB untouched."""
     if not self.has_pcb:
       p.wrn("No PCB file: skipping 3D render")
       return

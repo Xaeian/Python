@@ -11,6 +11,7 @@ from .errors import DatabaseError
 from .utils import (
   ident, ph, ph_list, renum_ph, serialize_params,
   serialize_dict, parse_json, parse_row,
+  _insert_sql, _insert_many_sql, _update_sql, _find_sql,
 )
 
 class AbstractAsyncDatabase(ABC):
@@ -155,12 +156,9 @@ class AbstractAsyncDatabase(ABC):
 
   async def insert(self, table:str, data:dict, returning:str|None=None) -> int|Any:
     """Insert single row. Returns row count or returned column value."""
-    d = serialize_dict(data)
-    t = ident(table)
-    cols = ", ".join(ident(k) for k in d.keys())
-    vals = ph(len(d), self.ph)
     if returning: return await self._insert_returning(table, data, returning)
-    return await self.exec(f"INSERT INTO {t} ({cols}) VALUES {vals}", tuple(d.values()))
+    sql, params = _insert_sql(table, data, self.ph)
+    return await self.exec(sql, params)
 
   @abstractmethod
   async def _insert_returning(self, table:str, data:dict, ret:str) -> Any:
@@ -169,23 +167,13 @@ class AbstractAsyncDatabase(ABC):
   async def insert_many(self, table:str, rows:list[dict]) -> int:
     """Insert multiple rows. Returns affected row count."""
     if not rows: return 0
-    rows2 = [serialize_dict(r) for r in rows]
-    t = ident(table)
-    cols = ", ".join(ident(k) for k in rows2[0].keys())
-    vals = ph(len(rows2[0]), self.ph)
-    return await self.exec_many(
-      f"INSERT INTO {t} ({cols}) VALUES {vals}",
-      [tuple(r.values()) for r in rows2],
-    )
+    sql, params_list = _insert_many_sql(table, rows, self.ph)
+    return await self.exec_many(sql, params_list)
 
   async def update(self, table:str, data:dict, where:str, params=None) -> int:
     """Update rows matching WHERE clause. Returns affected row count."""
-    d = serialize_dict(data)
-    t, n = ident(table), len(d)
-    phs = ph_list(n, self.ph)
-    sets = ", ".join(f"{ident(k)} = {phs[i]}" for i, k in enumerate(d.keys()))
-    p = tuple(d.values()) + serialize_params(params)
-    return await self.exec(f"UPDATE {t} SET {sets} WHERE {renum_ph(where, n)}", p)
+    sql, p = _update_sql(table, data, where, params, self.ph)
+    return await self.exec(sql, p)
 
   async def delete(self, table:str, where:str, params=None) -> int:
     """Delete rows matching WHERE clause. Returns affected row count."""
@@ -203,16 +191,7 @@ class AbstractAsyncDatabase(ABC):
 
   async def find(self, table:str, order:str|None=None, limit:int|None=None, json:list[str]|None=None, **where) -> list[dict]:
     """Simple query builder with kwargs."""
-    t = ident(table)
-    sql = f"SELECT * FROM {t}"
-    params = ()
-    if where:
-      phs = ph_list(len(where), self.ph)
-      conds = " AND ".join(f"{ident(k)} = {phs[i]}" for i, k in enumerate(where.keys()))
-      sql += f" WHERE {conds}"
-      params = tuple(serialize_dict(where).values())
-    if order: sql += f" ORDER BY {order}"
-    if limit: sql += f" LIMIT {limit}"
+    sql, params = _find_sql(table, order, limit, self.ph, where)
     return await self.get_dicts(sql, params, json=json)
 
   async def find_one(self, table:str, json:list[str]|None=None, **where) -> dict|None:

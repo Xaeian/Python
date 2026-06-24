@@ -1,7 +1,5 @@
 # xaeian/serial/port.py
 
-__extras__ = ("serial", ["pyserial"])
-
 """
 Serial port communication with colored console output.
 
@@ -23,6 +21,8 @@ Example:
   ...   sp.send("AT\\r\\n")
   ...   response = sp.read()
 """
+
+__extras__ = ("serial", ["pyserial"])
 
 import re
 from datetime import datetime, timezone

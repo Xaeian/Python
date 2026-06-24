@@ -1,4 +1,4 @@
-# xaeian/mf/pdf.py
+# xaeian/media/pdf.py
 
 """
 PDF manipulation: compress, merge, split, extract, metadata, text overlay.
@@ -6,7 +6,7 @@ PDF manipulation: compress, merge, split, extract, metadata, text overlay.
 Uses Ghostscript for compression, pypdf for structure, PyMuPDF (fitz) for text.
 
 Example:
-  >>> from xaeian.mf.pdf import pdf_compress, pdf_merge, pdf_extract
+  >>> from xaeian.media.pdf import pdf_compress, pdf_merge, pdf_extract
   >>> pdf_compress("report.pdf", settings="/ebook")
   >>> pdf_merge(["p1.pdf", "p2.pdf"], "combined.pdf")
   >>> pdf_extract("report.pdf", "pages.pdf", "1,3,5-7")

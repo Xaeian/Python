@@ -21,7 +21,7 @@ import uuid
 from dataclasses import dataclass
 from ..files import FILE
 
-def _uid() -> str:
+def uid() -> str:
   return str(uuid.uuid4())
 
 def fmt_number(v:float) -> str:
@@ -103,7 +103,7 @@ class Footprint:
     for name in ("Datasheet", "Description"):
       self._add(
         f'\t(property "{name}" "" (at 0 0 0) (layer "F.Fab") (hide yes)'
-        f' (uuid "{_uid()}")'
+        f' (uuid "{uid()}")'
         f' (effects (font (size 1.27 1.27) (thickness 0.15))))'
       )
 
@@ -116,7 +116,7 @@ class Footprint:
       f'\t(property "{name}" "{value}"'
       f' (at {fmt_number(x)} {fmt_number(y)} {fmt_number(angle)})'
       f' (layer "{layer}")'
-      f' (uuid "{_uid()}")'
+      f' (uuid "{uid()}")'
       f' (effects (font (size {fmt_number(s1)} {fmt_number(s2)}) (thickness {fmt_number(th)}))))'
     )
 
@@ -133,7 +133,7 @@ class Footprint:
     self._add(
       f'\t(fp_line (start {fmt_number(x1)} {fmt_number(y1)}) (end {fmt_number(x2)} {fmt_number(y2)})'
       f' (stroke (width {fmt_number(width)}) (type solid))'
-      f' (layer "{layer}") (uuid "{_uid()}"))'
+      f' (layer "{layer}") (uuid "{uid()}"))'
     )
 
   def rect(self, x1:float, y1:float, x2:float, y2:float,
@@ -152,7 +152,7 @@ class Footprint:
     self._add(
       f'\t(fp_rect (start {fmt_number(x1)} {fmt_number(y1)}) (end {fmt_number(x2)} {fmt_number(y2)})'
       f' (stroke (width {fmt_number(width)}) (type solid))'
-      f' (fill yes) (layer "{layer}") (uuid "{_uid()}"))'
+      f' (fill yes) (layer "{layer}") (uuid "{uid()}"))'
     )
 
   def circle(self, cx:float, cy:float, radius:float,
@@ -163,7 +163,7 @@ class Footprint:
       f'\t(fp_circle (center {fmt_number(cx)} {fmt_number(cy)})'
       f' (end {fmt_number(cx + radius)} {fmt_number(cy)})'
       f' (stroke (width {fmt_number(width)}) (type solid))'
-      f' (layer "{layer}") (uuid "{_uid()}"))'
+      f' (layer "{layer}") (uuid "{uid()}"))'
     )
 
   def arc(self, sx:float, sy:float, mx:float, my:float,
@@ -175,7 +175,7 @@ class Footprint:
       f' (mid {fmt_number(mx)} {fmt_number(my)})'
       f' (end {fmt_number(ex)} {fmt_number(ey)})'
       f' (stroke (width {fmt_number(width)}) (type solid))'
-      f' (layer "{layer}") (uuid "{_uid()}"))'
+      f' (layer "{layer}") (uuid "{uid()}"))'
     )
 
   def text(self, txt:str, x:float, y:float, layer:str,
@@ -184,7 +184,7 @@ class Footprint:
     """Add `fp_text`."""
     self._add(
       f'\t(fp_text user "{txt}" (at {fmt_number(x)} {fmt_number(y)} {fmt_number(angle)})'
-      f' (layer "{layer}") (uuid "{_uid()}")'
+      f' (layer "{layer}") (uuid "{uid()}")'
       f' (effects (font (size {fmt_number(size)} {fmt_number(size)})'
       f' (thickness {fmt_number(thickness)}))))'
     )
@@ -207,7 +207,7 @@ class Footprint:
       f'\t(pad "{num}" thru_hole {shape} (at {fmt_number(x)} {fmt_number(y)})'
       f' (size {fmt_number(w)} {fmt_number(h)}) {dr}'
       f' (layers "*.Cu" "*.Mask") (remove_unused_layers no)'
-      f'{rr} (uuid "{_uid()}"))'
+      f'{rr} (uuid "{uid()}"))'
     )
 
   def pad_smd(self, num:int|str, x:float, y:float,
@@ -222,7 +222,7 @@ class Footprint:
     self._add(
       f'\t(pad "{num}" smd {shape} (at {fmt_number(x)} {fmt_number(y)})'
       f' (size {fmt_number(w)} {fmt_number(h)}) (layers {ly})'
-      f'{rr} (uuid "{_uid()}"))'
+      f'{rr} (uuid "{uid()}"))'
     )
 
   def pad_npth(self, x:float, y:float, drill:float):
@@ -230,7 +230,7 @@ class Footprint:
     self._add(
       f'\t(pad "" np_thru_hole circle (at {fmt_number(x)} {fmt_number(y)})'
       f' (size {fmt_number(drill)} {fmt_number(drill)}) (drill {fmt_number(drill)})'
-      f' (layers "*.Cu" "*.Mask") (uuid "{_uid()}"))'
+      f' (layers "*.Cu" "*.Mask") (uuid "{uid()}"))'
     )
 
   #------------------------------------------------------------------------------------- 3D model

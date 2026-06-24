@@ -45,18 +45,8 @@ examples:
 """
 
 def main():
-  import argparse
-  def fmt(prog):
-    return argparse.RawDescriptionHelpFormatter(prog, max_help_position=34, width=90)
-  class MetaParser(argparse.ArgumentParser):
-    def format_help(self): return "\n" + super().format_help().rstrip() + "\n\n"
-  parser = MetaParser(
-    description="Remove metadata from PDFs and images (auto-detects by extension)",
-    formatter_class=fmt,
-    add_help=False,
-    usage=argparse.SUPPRESS,
-    epilog=EXAMPLES,
-  )
+  from ..cli._args import _make_parser
+  parser = _make_parser("Remove metadata from PDFs and images (auto-detects by extension)", EXAMPLES)
   parser.add_argument("src", help="Input file path")
   parser.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
     help="Output path (default: <n>-nometa.<ext>)")
@@ -70,7 +60,7 @@ def main():
   except FileNotFoundError:
     p.err(f"File {c.ORANGE}{name}{c.END} not found")
     sys.exit(1)
-  except ValueError as e:
+  except ValueError:
     p.err(f"Format {c.BLUE}{ext}{c.END} not supported {c.GREY}(PDF or image expected){c.END}")
     sys.exit(1)
   except Exception as e:

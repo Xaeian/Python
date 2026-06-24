@@ -485,18 +485,8 @@ examples:
 """
 
 def main():
-  import argparse
-  def fmt(prog):
-    return argparse.RawDescriptionHelpFormatter(prog, max_help_position=34, width=90)
-  class FontsParser(argparse.ArgumentParser):
-    def format_help(self): return "\n" + super().format_help().rstrip() + "\n\n"
-  parser = FontsParser(
-    description="Rename font files to xaeian convention (web or system layout)",
-    formatter_class=fmt,
-    add_help=False,
-    usage=argparse.SUPPRESS,
-    epilog=EXAMPLES,
-  )
+  from ._args import _make_parser
+  parser = _make_parser("Rename font files to xaeian convention (web or system layout)", EXAMPLES)
   parser.add_argument("root", help="Directory with font files")
   parser.add_argument("--mode", choices=["web", "system"], default="web",
     help="Layout: web (slug-weight + CSS) or system (PascalCase, reportlab/PIL)")

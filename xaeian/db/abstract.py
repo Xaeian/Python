@@ -11,7 +11,8 @@ from typing import NoReturn, Iterator, Any
 from .errors import DatabaseError
 from .utils import (
   listify, to_dicts, ident, ph, ph_list, renum_ph,
-  serialize_params, serialize_dict, split_sql, parse_json, parse_row
+  serialize_params, serialize_dict, split_sql, parse_json, parse_row,
+  _insert_sql, _insert_many_sql, _update_sql, _find_sql,
 )
 
 class AbstractDatabase(ABC):
@@ -280,41 +281,28 @@ class AbstractDatabase(ABC):
     Returns:
       Row count, or returned column value if `returning` specified.
     """
-    d = serialize_dict(data)
-    t = ident(table)
-    cols = ", ".join(ident(k) for k in d.keys())
-    vals = ph(len(d), self.ph)
+    sql, params = _insert_sql(table, data, self.ph)
     if returning:
-      sql = f"INSERT INTO {t} ({cols}) VALUES {vals} RETURNING {ident(returning)}"
+      sql = f"{sql} RETURNING {ident(returning)}"
       try:
         with self._scope(commit=True) as (_, cur, __):
-          cur.execute(sql, tuple(d.values()))
+          cur.execute(sql, params)
           row = cur.fetchone()
           return row[0] if row else None
       except Exception as e:
-        self._err("insert", e, sql, tuple(d.values()))
-    return self.exec(f"INSERT INTO {t} ({cols}) VALUES {vals}", tuple(d.values()))
+        self._err("insert", e, sql, params)
+    return self.exec(sql, params)
 
   def insert_many(self, table:str, rows:list[dict]) -> int:
     """Insert multiple rows. Returns affected row count."""
     if not rows: return 0
-    rows2 = [serialize_dict(r) for r in rows]
-    t = ident(table)
-    cols = ", ".join(ident(k) for k in rows2[0].keys())
-    vals = ph(len(rows2[0]), self.ph)
-    return self.exec_many(
-      f"INSERT INTO {t} ({cols}) VALUES {vals}",
-      [tuple(r.values()) for r in rows2],
-    )
+    sql, params_list = _insert_many_sql(table, rows, self.ph)
+    return self.exec_many(sql, params_list)
 
   def update(self, table:str, data:dict, where:str, params=None) -> int:
     """Update rows matching WHERE clause. Returns affected row count."""
-    d = serialize_dict(data)
-    t, n = ident(table), len(d)
-    phs = ph_list(n, self.ph)
-    sets = ", ".join(f"{ident(k)} = {phs[i]}" for i, k in enumerate(d.keys()))
-    p = tuple(d.values()) + serialize_params(params)
-    return self.exec(f"UPDATE {t} SET {sets} WHERE {renum_ph(where, n)}", p)
+    sql, p = _update_sql(table, data, where, params, self.ph)
+    return self.exec(sql, p)
 
   def delete(self, table:str, where:str, params=None) -> int:
     """Delete rows matching WHERE clause. Returns affected row count."""
@@ -348,16 +336,7 @@ class AbstractDatabase(ABC):
       >>> db.find("users", active=True, role="admin")
       >>> db.find("users", order="created DESC", limit=10)
     """
-    t = ident(table)
-    sql = f"SELECT * FROM {t}"
-    params = ()
-    if where:
-      phs = ph_list(len(where), self.ph)
-      conds = " AND ".join(f"{ident(k)} = {phs[i]}" for i, k in enumerate(where.keys()))
-      sql += f" WHERE {conds}"
-      params = tuple(serialize_dict(where).values())
-    if order: sql += f" ORDER BY {order}"
-    if limit: sql += f" LIMIT {limit}"
+    sql, params = _find_sql(table, order, limit, self.ph, where)
     return self.get_dicts(sql, params, json=json)
 
   def find_one(self, table:str, json:list[str]|None=None, **where) -> dict|None:

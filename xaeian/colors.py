@@ -1,7 +1,5 @@
 # xaeian/colors.py
 
-import builtins
-
 """
 ANSI color codes for terminal output.
 

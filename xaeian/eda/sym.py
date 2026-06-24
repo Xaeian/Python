@@ -7,7 +7,7 @@ Provides `Symbol` builder and `SymbolLib` container for generating
 Compact single-line S-expressions for minimal file size.
 
 Presets: `S`, `M`, `L` font tiers.
-Ref designators: `REF["connector"]` -> `"J"`.
+Ref designators: `REF["connector"]` → `"J"`.
 
 Example:
   >>> from xaeian.eda.sym import Symbol, SymbolLib, REF, M
@@ -27,21 +27,19 @@ Example:
 
 from dataclasses import dataclass
 from ..files import FILE
+from .fp import fmt_number
 
 #----------------------------------------------------------------------------------------- Mil
 
 MIL = 0.0254  # 1mil in mm
 
 def _n(v:float) -> str:
-  """Convert mil to mm, format: `100` -> `2.54`, `50` -> `1.27`."""
-  mm = round(v * MIL, 4)
-  if mm == int(mm): return str(int(mm))
-  return f"{mm:g}"
+  """Convert mil to mm, format: `100` → `2.54`, `50` → `1.27`."""
+  return fmt_number(round(v * MIL, 4))
 
 def _a(v:float) -> str:
   """Format angle in degrees (no unit conversion)."""
-  if v == int(v): return str(int(v))
-  return f"{v:g}"
+  return fmt_number(v)
 
 #-------------------------------------------------------------------------------------- Presets
 

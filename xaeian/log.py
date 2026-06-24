@@ -28,19 +28,21 @@ from logging.handlers import RotatingFileHandler
 from .colors import Color, Ico
 
 PANIC = 60
-logging.addLevelName(PANIC, "PNC")
+logging.addLevelName(PANIC, "PANIC")
 
 LevelName = Literal["DBG", "INF", "WRN", "ERR", "CRT", "PNC"]
 Level = LevelName | int
 
-_LEVELS = {
-  "DBG": logging.DEBUG,
-  "INF": logging.INFO,
-  "WRN": logging.WARNING,
-  "ERR": logging.ERROR,
-  "CRT": logging.CRITICAL,
-  "PNC": PANIC,
-}
+# (short, name, numeric, color)
+_LEVEL_TABLE = [
+  ("DBG", "DEBUG", logging.DEBUG, Color.GREEN),
+  ("INF", "INFO", logging.INFO, Color.BLUE),
+  ("WRN", "WARNING", logging.WARNING, Color.YELLOW),
+  ("ERR", "ERROR", logging.ERROR, Color.RED),
+  ("CRT", "CRITICAL", logging.CRITICAL, Color.MAGNTA),
+  ("PNC", "PANIC", PANIC, Color.GOLD),
+]
+_LEVELS = {short: num for short, _name, num, _color in _LEVEL_TABLE}
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
@@ -65,10 +67,7 @@ def _fmt(date:bool, time:bool) -> str:
 
 class LogFormatter(logging.Formatter):
   """Plain formatter with 3-char level abbreviations for file output."""
-  LEVELS = {
-    "DEBUG": "DBG", "INFO": "INF", "WARNING": "WRN",
-    "ERROR": "ERR", "CRITICAL": "CRT", "PNC": "PNC",
-  }
+  LEVELS = {name: short for short, name, _num, _color in _LEVEL_TABLE}
   def format(self, record:logging.LogRecord) -> str:
     record.levelname = self.LEVELS.get(record.levelname, record.levelname)
     record.msg = _strip_ansi(str(record.msg))
@@ -77,10 +76,7 @@ class LogFormatter(logging.Formatter):
 class ColorFormatter(LogFormatter):
   """Colored formatter for terminal: `DBG` green, `INF` blue, `WRN` yellow,
   `ERR` red, `CRT` magenta, `PNC` gold."""
-  COLORS = {
-    "DBG": Color.GREEN, "INF": Color.BLUE,   "WRN": Color.YELLOW,
-    "ERR": Color.RED,   "CRT": Color.MAGNTA,  "PNC": Color.GOLD,
-  }
+  COLORS = {short: color for short, _name, _num, color in _LEVEL_TABLE}
   def __init__(self, date:bool=True, time:bool=True):
     super().__init__(fmt=_fmt(date, time), datefmt=_datefmt(date, time))
 
@@ -113,7 +109,7 @@ class Print:
     >>> p.dot("retry 1/3") # inherits ERR, printed
       • retry 1/3
   """
-  def __init__(self, file=None, level:Literal["DBG","INF","WRN","ERR","CRT","PNC"]|int="DBG"):
+  def __init__(self, file=None, level:Level="DBG"):
     self._file = file
     self._level = _level(level)
     self._last_level = logging.DEBUG
@@ -227,7 +223,7 @@ class Logger(logging.Logger):
   def set_file(
     self,
     file: str|bool|None = None,
-    level: Literal["DBG","INF","WRN","ERR","CRT","PNC"]|int = logging.INFO,
+    level: Level = logging.INFO,
     date: bool = True,
     time: bool = True,
     max_bytes: int = 5_000_000,
@@ -276,7 +272,7 @@ class Logger(logging.Logger):
   def set_stream(
     self,
     enable: bool = True,
-    level: Literal["DBG","INF","WRN","ERR","CRT","PNC"]|int = logging.INFO,
+    level: Level = logging.INFO,
     color: bool = True,
     date: bool = True,
     time: bool = True,
@@ -313,8 +309,8 @@ def logger(
   name: str = "app",
   file: str|bool|None = True,
   stream: bool = True,
-  stream_lvl: Literal["DBG","INF","WRN","ERR","CRT","PNC"]|int = logging.INFO,
-  file_lvl: Literal["DBG","INF","WRN","ERR","CRT","PNC"]|int = logging.INFO,
+  stream_lvl: Level = logging.INFO,
+  file_lvl: Level = logging.INFO,
   color: bool = True,
   date_stream: bool = True,
   time_stream: bool = True,
