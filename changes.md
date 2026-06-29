@@ -39,7 +39,7 @@
 - `cli/fonts`: Script for converting fonts for web use
 - `files`: Added `DIR.unzip` as counterpart to `DIR.zip`
 - Bug fixes, immutability hardening, and dependency declarations across existing modules
-- 
+
 ## `0.5.3` YAML
 
 - `files`: split into subpackage, added YAML namespace
