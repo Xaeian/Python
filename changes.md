@@ -1,5 +1,10 @@
 # Changes `xaeian`
 
+## `0.7.3` SFTP, tests
+
+- `net`: `SFTP.exec` `check` flag, `filter` prunes remote dirs
+- Added test suite
+
 ## `0.7.2` Fixes
 
 - Bug fixes across `files_async`, `xstring`, `xtime`, `cstruct`, `eda`, `dsp`, `net`

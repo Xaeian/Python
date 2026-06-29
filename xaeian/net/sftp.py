@@ -93,7 +93,7 @@ class SFTP:
     try:
       self._ssh.connect(**kw)
       self._sftp = self._ssh.open_sftp()
-      if self.log: self.log.inf(f"connected {c.TURQUS}{self.host}{c.END} user:{c.CYAN}{self.user}{c.END}")
+      if self.log: self.log.inf(f"connected {c.TURQUS}{self.host}{c.END} user:{c.VIOLET}{self.user}{c.END}")
     except Exception as e:
       if self.log: self.log.err(f"connect failed {c.TURQUS}{self.host}{c.END} | {e}")
       raise ConnectionError(f"SFTP connect failed host:{self.host} | {e}") from e
@@ -301,7 +301,7 @@ class SFTP:
       f.relative_to(root).as_posix(): f
       for f in root.rglob("*") if f.is_file()
     }
-    remote_idx = self._index_remote(remote)
+    remote_idx = self._index_remote(remote, filter=filter)
     actions: list[Action] = []
     for rel, lpath in local_files.items():
       if filter and not filter(rel): continue
@@ -353,7 +353,7 @@ class SFTP:
       {f.relative_to(root).as_posix(): f for f in root.rglob("*") if f.is_file()}
       if root.exists() else {}
     )
-    remote_idx = self._index_remote(remote)
+    remote_idx = self._index_remote(remote, filter=filter)
     actions: list[Action] = []
     for rel, rs in remote_idx.items():
       if filter and not filter(rel): continue
@@ -378,9 +378,13 @@ class SFTP:
 
   #---------------------------------------------------------------------------------------- Exec
 
-  def exec(self, cmd: str) -> tuple[str, str]:
+  def exec(self, cmd: str, *, check: bool = False) -> tuple[str, str]:
     """
     Run command on remote host.
+
+    Args:
+      cmd: Command to run.
+      check: Raise `RuntimeError` on non-zero exit status.
 
     Returns:
       `(stdout, stderr)` as stripped strings.
@@ -390,9 +394,12 @@ class SFTP:
     _, stdout, stderr = self._ssh.exec_command(cmd)
     out = stdout.read().decode().strip()
     err = stderr.read().decode().strip()
+    rc = stdout.channel.recv_exit_status()
     if self.log:
       for line in out.splitlines(): self.log.gap(f"{c.GREY}{line}{c.END}")
       for line in err.splitlines(): self.log.wrn(line)
+    if check and rc != 0:
+      raise RuntimeError(f"remote command failed (rc={rc}): {cmd}" + (f"\n{err}" if err else ""))
     return out, err
 
   #------------------------------------------------------------------------------------- Helpers
@@ -405,17 +412,21 @@ class SFTP:
       self._sftp.rename(src, dst)
 
   def _index_remote(
-    self, remote: str, _rel: str = ""
+    self, remote: str, _rel: str = "", filter: Filter|None = None
   ) -> dict[str, "paramiko.SFTPAttributes"]:
-    """Recursively build `{rel_path: SFTPAttributes}` for remote dir."""
+    """Recursively build `{rel_path: SFTPAttributes}` for remote dir, pruning filtered paths."""
     idx: dict = {}
     try: entries = self._sftp.listdir_attr(remote)
     except FileNotFoundError: return idx
     for attr in entries:
       rel = f"{_rel}/{attr.filename}" if _rel else attr.filename
       path = f"{remote}/{attr.filename}"
-      if _is_dir(attr): idx.update(self._index_remote(path, rel))
-      else: idx[rel] = attr
+      if _is_dir(attr):
+        if filter and not (filter(rel) and filter(f"{rel}/")): continue  # prune excluded dir (e.g. .venv/)
+        idx.update(self._index_remote(path, rel, filter))
+      else:
+        if filter and not filter(rel): continue
+        idx[rel] = attr
     return idx
 
   def _get_dir_rec(
@@ -439,7 +450,8 @@ class SFTP:
   def _log_sync(self, op: str, actions: list[Action], dry_run: bool):
     if not self.log: return
     counts = {k: sum(1 for a, _ in actions if a == k) for k in ("put", "get", "skip", "delete")}
-    parts = [f"{k}:{c.CYAN}{v}{c.END}" for k, v in counts.items() if v]
+    hue = {"put": c.LIME, "skip": c.MAGNTA}
+    parts = [f"{k}:{hue.get(k, c.CYAN)}{v}{c.END}" for k, v in counts.items() if v]
     suffix = f" {c.GREY}(dry){c.END}" if dry_run else ""
     self.log.inf(f"{op} {' '.join(parts)}{suffix}")
 
