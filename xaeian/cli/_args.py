@@ -5,7 +5,7 @@ size formatter, kept identical across all CLI mains."""
 
 import argparse
 
-#-------------------------------------------------------------------------------------- Parser
+#--------------------------------------------------------------------------------------- Parser
 
 def _fmt(prog:str) -> argparse.RawDescriptionHelpFormatter:
   return argparse.RawDescriptionHelpFormatter(prog, max_help_position=34, width=90)
@@ -15,7 +15,7 @@ class _Parser(argparse.ArgumentParser):
   def format_help(self): return "\n" + super().format_help().rstrip() + "\n\n"
 
 def _make_parser(description:str, epilog:str) -> _Parser:
-  """Standard `xn` subcommand parser; caller adds its args and `-h` last."""
+  """Standard `xn` subcommand parser; caller adds its args and `_add_help` last."""
   return _Parser(
     description=description,
     formatter_class=_fmt,
@@ -24,7 +24,11 @@ def _make_parser(description:str, epilog:str) -> _Parser:
     epilog=epilog,
   )
 
-#---------------------------------------------------------------------------------------- Size
+def _add_help(parser:argparse.ArgumentParser) -> None:
+  """Standard `-h`, added last so it lands at the bottom of the options list."""
+  parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
+
+#----------------------------------------------------------------------------------------- Size
 
 def _fmt_size(b:int, units:tuple[str, str, str, str]=(" B", " kB", " MB", " GB")) -> str:
   """Human-readable byte size; `units` are full suffixes (incl. any leading space)."""

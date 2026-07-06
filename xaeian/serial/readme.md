@@ -1,6 +1,6 @@
 # `xaeian.serial`
 
-Serial communication: low-level port, continuous numeric recorders with CSV logging, embedded shell client. Requires `pip install xaeian[serial]`.
+Serial communication: low-level port, threaded value recorders, embedded shell client. Requires `pip install xaeian[serial]`.
 
 ## `SerialPort`
 
@@ -65,41 +65,38 @@ For instruments emitting N values per line (separator-delimited), like STM32/Ard
 from xaeian.serial import MultiRecorder
 
 mr = MultiRecorder("COM9", count=4, separator=",",
-  columns=["U", "I", "T", "RPM"], name="STM",
-  regex=Recorder.FLOAT)
+  name="STM", regex=Recorder.FLOAT)
 
 mr.connect()
 vals = mr.read_values() # [12.5, 0.34, 25.0, 1500] or None
 ```
 
-## `RecorderPool`
+## Recording pattern
 
-Orchestrates N recorders with threading and CSV logging. One reader thread per recorder, one reap thread that snapshots to CSV at `period_ms`. Override `make_row()` for custom columns.
+Recorders are pure data sources: `start()` spawns a reader thread that keeps `.value` / `.values` fresh. Output (CSV, DB, MQTT, plot) is application code - run a reap loop that snapshots values at a fixed period. See `rec_app.py` for a complete multimeter logger with hotkey capture.
 
 ```py
-from xaeian.serial import Recorder, MultiRecorder, RecorderPool
+import threading
+from xaeian import CSV, Time
+from xaeian.serial import Recorder
 
 recs = [
   Recorder("COM7", name="U1", regex=Recorder.SCI_NORM),
   Recorder("COM8", name="I1", regex=Recorder.SCI_NORM),
-  MultiRecorder("COM9", count=4, name="STM",
-    columns=["U", "I", "T", "RPM"], regex=Recorder.FLOAT),
 ]
+stop = threading.Event()
 
-pool = RecorderPool(recs, period_ms=1000,
-  csv_path="series.csv", capture_path="capture.csv",
-  skip_empty=True) # skip rows where all recorders are None
+def reap():
+  while not stop.wait(1.0):
+    row = {"time": Time().to("%Y-%m-%d %H:%M:%S.%f")}
+    for r in recs: row[r.name] = r.value
+    CSV.add_row("series.csv", row)
 
-pool.start()       # spawns daemon read + reap threads
-pool.capture()     # one-shot snapshot to capture_path
-pool.stop()        # signal + join (timeout_ms=2000 per thread)
-
-# Custom row with extra column
-class MyPool(RecorderPool):
-  def make_row(self):
-    row = super().make_row()
-    row["step"] = ctrl.step
-    return row
+for r in recs: r.start()
+threading.Thread(target=reap, daemon=True).start()
+# ... later
+stop.set()
+for r in recs: r.stop()
 ```
 
 ## `Shell`

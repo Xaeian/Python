@@ -31,7 +31,7 @@ try:
 except ImportError as e:
   raise ImportError("Install with: pip install xaeian[dsp]  (scipy + numpy)") from e
 
-#--------------------------------------------------------------------------------- Spectrum
+#------------------------------------------------------------------------------------- Spectrum
 
 class Spectrum:
   """FFT result container with frequency axis.
@@ -46,7 +46,7 @@ class Spectrum:
     >>> sp.peak_freq           # dominant frequency
     >>> sp.magnitudes           # amplitude spectrum
   """
-  __slots__ = ('freqs', 'complex', 'fs')
+  __slots__ = ("freqs", "complex", "fs")
 
   def __init__(self, freqs:np.ndarray, complex:np.ndarray, fs:float):
     self.freqs = freqs
@@ -99,7 +99,7 @@ class Spectrum:
     return (f"Spectrum(bins={len(self.freqs)}, "
       f"range=0-{self.freqs[-1]:.0f}Hz, peak={self.peak_freq:.1f}Hz)")
 
-#------------------------------------------------------------------------------------ Signal
+#--------------------------------------------------------------------------------------- Signal
 
 class Signal:
   """Immutable signal container with sample rate and fluent DSP methods.
@@ -120,7 +120,7 @@ class Signal:
     1.732
     >>> sig * 0.001  # scale to mV → still a Signal
   """
-  __slots__ = ('_data', '_fs', '_units', '_label')
+  __slots__ = ("_data", "_fs", "_units", "_label")
 
   def __init__(self, data, fs:float=1000, units:str="", label:str=""):
     self._data = np.array(data, dtype=np.float64, copy=True).flatten()
@@ -138,7 +138,7 @@ class Signal:
       label=label if label is not None else self._label,
     )
 
-  #----------------------------------------------------------------------------- Properties
+  #--------------------------------------------------------------------------------- Properties
 
   @property
   def data(self) -> np.ndarray:
@@ -178,7 +178,7 @@ class Signal:
     """Time axis array in seconds."""
     return np.arange(len(self._data)) / self._fs
 
-  #---------------------------------------------------------------------- Vibration metrics
+  #-------------------------------------------------------------------------- Vibration metrics
 
   @property
   def rms(self) -> float:
@@ -201,7 +201,7 @@ class Signal:
     r = self.rms
     return float(self.peak / r) if r > 0 else 0.0
 
-  #----------------------------------------------------------------------------- Operators
+  #---------------------------------------------------------------------------------- Operators
 
   def _check_compat(self, other:Signal):
     """Verify fs and length match for Signal-Signal operations."""
@@ -247,7 +247,7 @@ class Signal:
   def __pow__(self, exp):
     return self._new(self._data ** exp)
 
-  #----------------------------------------------------------------------- Indexing / numpy
+  #--------------------------------------------------------------------------- Indexing / numpy
 
   def __len__(self):
     return len(self._data)
@@ -264,11 +264,11 @@ class Signal:
   def __iter__(self):
     return iter(self._data)
 
-  #----------------------------------------------------------------------- Filters (SOS)
+  #------------------------------------------------------------------------------ Filters (SOS)
 
   def _sos_filter(self, Wn, btype:str, order:int, zero_phase:bool) -> Signal:
     """Shared Butterworth SOS filter body for the public filter methods."""
-    sos = butter(order, Wn, btype, fs=self._fs, output='sos')
+    sos = butter(order, Wn, btype, fs=self._fs, output="sos")
     filt = sosfiltfilt if zero_phase else sosfilt
     return self._new(filt(sos, self._data))
 
@@ -280,23 +280,23 @@ class Signal:
       order: Filter order.
       zero_phase: Use zero-phase filtering (no phase distortion).
     """
-    return self._sos_filter(cutoff_Hz, 'low', order, zero_phase)
+    return self._sos_filter(cutoff_Hz, "low", order, zero_phase)
 
   def highpass(self, cutoff_Hz:float, order:int=4, zero_phase:bool=True) -> Signal:
     """Butterworth high-pass filter."""
-    return self._sos_filter(cutoff_Hz, 'high', order, zero_phase)
+    return self._sos_filter(cutoff_Hz, "high", order, zero_phase)
 
   def bandpass(self, low_Hz:float, high_Hz:float, order:int=4,
     zero_phase:bool=True) -> Signal:
     """Butterworth band-pass filter."""
-    return self._sos_filter([low_Hz, high_Hz], 'band', order, zero_phase)
+    return self._sos_filter([low_Hz, high_Hz], "band", order, zero_phase)
 
   def bandstop(self, low_Hz:float, high_Hz:float, order:int=4,
     zero_phase:bool=True) -> Signal:
     """Butterworth band-stop (notch) filter."""
-    return self._sos_filter([low_Hz, high_Hz], 'bandstop', order, zero_phase)
+    return self._sos_filter([low_Hz, high_Hz], "bandstop", order, zero_phase)
 
-  #---------------------------------------------------------------------- Transforms
+  #--------------------------------------------------------------------------------- Transforms
 
   def detrend(self, type:str="constant") -> Signal:
     """Remove trend. type: "constant" (DC offset) or "linear"."""
@@ -335,10 +335,10 @@ class Signal:
     """
     data = self._data - np.mean(self._data)
     data *= windows.tukey(len(data), alpha=0.05)
-    sos = butter(4, highpass_Hz, 'high', fs=self._fs, output='sos')
+    sos = butter(4, highpass_Hz, "high", fs=self._fs, output="sos")
     data = sosfiltfilt(sos, data)
     result = cumulative_trapezoid(data, dx=1 / self._fs, initial=0)
-    result = _detrend(result, type='linear')
+    result = _detrend(result, type="linear")
     return self._new(result, units=units)
 
   def derivative(self) -> Signal:
@@ -350,7 +350,7 @@ class Signal:
     analytic = hilbert(self._data)
     return self._new(np.abs(analytic))
 
-  #----------------------------------------------------------------------- Spectral
+  #----------------------------------------------------------------------------------- Spectral
 
   def fft(self, window:str|None=None) -> Spectrum:
     """Compute one-sided FFT.
@@ -396,7 +396,7 @@ class Signal:
     """Median frequency from FFT power spectrum."""
     return self.fft().median_freq
 
-  #------------------------------------------------------------------------ Filter response
+  #---------------------------------------------------------------------------- Filter response
 
   def freq_response(self, cutoff_Hz:float|list, btype:str="low",
     order:int=4, n:int=2000) -> tuple[np.ndarray, np.ndarray]:
@@ -411,11 +411,11 @@ class Signal:
     Returns:
       (frequencies_Hz, magnitude) arrays.
     """
-    sos = butter(order, cutoff_Hz, btype, fs=self._fs, output='sos')
+    sos = butter(order, cutoff_Hz, btype, fs=self._fs, output="sos")
     w, h = sosfreqz(sos, worN=n, fs=self._fs)
     return w, np.abs(h)
 
-  #-------------------------------------------------------------------------- Factories
+  #---------------------------------------------------------------------------------- Factories
 
   @classmethod
   def from_adc(cls, raw, fs:float, bits:int=12, vref:float=3.3, offset:int|None=None,
@@ -490,14 +490,14 @@ class Signal:
     n = int(fs * duration)
     return cls(amplitude * np.random.randn(n), fs=fs)
 
-  #---------------------------------------------------------------------------- Special
+  #------------------------------------------------------------------------------------ Special
 
   def __repr__(self):
     parts = [f"n={self.samples}", f"fs={self._fs:.0f}Hz",
       f"duration={self.duration:.3f}s", f"rms={self.rms:.4g}"]
     if self._units: parts.append(f"units='{self._units}'")
     if self._label: parts.append(f"label='{self._label}'")
-    return f"Signal({', '.join(parts)})"
+    return f"Signal({", ".join(parts)})"
 
   def __str__(self):
     return self.__repr__()

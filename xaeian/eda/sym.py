@@ -27,9 +27,9 @@ Example:
 
 from dataclasses import dataclass
 from ..files import FILE
-from .fp import fmt_number
+from .fp import fmt_number, GENERATOR_VERSION
 
-#----------------------------------------------------------------------------------------- Mil
+#------------------------------------------------------------------------------------------ Mil
 
 MIL = 0.0254  # 1mil in mm
 
@@ -50,13 +50,13 @@ class Style:
   thick: float  # font stroke thickness
 
 # Tier is per component series, not per individual symbol
-S  = Style(font=30, thick=6)  # passive (R, C, L, D)
-M  = Style(font=40, thick=6)  # connectors, small IC
-L  = Style(font=50, thick=6)  # IC, complex components
+S = Style(font=30, thick=6)  # passive (R, C, L, D)
+M = Style(font=40, thick=6)  # connectors, small IC
+L = Style(font=50, thick=6)  # IC, complex components
 
-PROP_FONT = 30   # hidden property font (mil)
-PROP_THICK = 6   # hidden property thickness (mil)
-DETAIL_THICK = 4 # detail/decoration thickness (mil)
+PROP_FONT = 30  # hidden property font (mil)
+PROP_THICK = 6  # hidden property thickness (mil)
+DETAIL_THICK = 4  # detail/decoration thickness (mil)
 
 # Reference designators (IEEE 315)
 REF = {
@@ -89,7 +89,7 @@ REF = {
   "power_supply": "PS",
 }
 
-#-------------------------------------------------------------------------------------- Symbol
+#--------------------------------------------------------------------------------------- Symbol
 
 class Symbol:
   """KiCad symbol builder. All coordinates in mil."""
@@ -112,7 +112,7 @@ class Symbol:
     """Switch active unit for subsequent `pin()` calls."""
     self._unit = n
 
-  #---------------------------------------------------------------------------------- Properties
+  #--------------------------------------------------------------------------------- Properties
 
   def _font_str(self, size:float, thick:float,
     bold:bool=False, italic:bool=False,
@@ -155,7 +155,7 @@ class Symbol:
       f' (at {_n(x)} {_n(y)} 0) (effects {hfont}{hide_s}))'
     )
 
-  #---------------------------------------------------------------------------- Drawing primitives
+  #------------------------------------------------------------------------- Drawing primitives
 
   def rect(self, x1:float, y1:float, x2:float, y2:float,
     fill:str="background", width:float=0,
@@ -210,7 +210,7 @@ class Symbol:
       f' (effects {self._font_str(sz, th)}))'
     )
 
-  #---------------------------------------------------------------------------------------- Pins
+  #--------------------------------------------------------------------------------------- Pins
 
   def pin(self, number:int|str, x:float, y:float,
     angle:float=0, length:float=100,
@@ -228,7 +228,7 @@ class Symbol:
       f' (number "{number}" (effects {pfont})))'
     )
 
-  #----------------------------------------------------------------------------------------- Raw
+  #---------------------------------------------------------------------------------------- Raw
 
   def raw_gfx(self, text:str):
     """Add raw S-expression to shared graphics."""
@@ -270,7 +270,7 @@ class Symbol:
     lines.append(f'\t)')
     return "\n".join(lines)
 
-#----------------------------------------------------------------------------------- SymbolLib
+#------------------------------------------------------------------------------------ SymbolLib
 
 class SymbolLib:
   """KiCad symbol library container (.kicad_sym)."""
@@ -288,7 +288,7 @@ class SymbolLib:
       f'(kicad_symbol_lib',
       f'\t(version 20241209)',
       f'\t(generator "kicad_symbol_editor")',
-      f'\t(generator_version "9.0")',
+      f'\t(generator_version "{GENERATOR_VERSION}")',
     ]
     for sym in self._symbols:
       lines.append(sym.build())

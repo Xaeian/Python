@@ -10,8 +10,7 @@ from typing import NoReturn, Iterator, Any
 
 from .errors import DatabaseError
 from .utils import (
-  listify, to_dicts, ident, ph, ph_list, renum_ph,
-  serialize_params, serialize_dict, split_sql, parse_json, parse_row,
+  listify, to_dicts, ident, serialize_params, split_sql, parse_json, parse_row,
   _insert_sql, _insert_many_sql, _update_sql, _find_sql,
 )
 

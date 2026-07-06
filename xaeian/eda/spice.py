@@ -67,7 +67,7 @@ def _parse_wrdata(text:str) -> dict[str, list[float]]:
   """Parse wrdata format: `x  y` per line, blocks separated by blanks.
 
   First column (x/sweep var) captured from first block.
-  Y-values keyed as `col0`, `col1`, ... — remapped by `Simulation`.
+  Y-values keyed as `col0`, `col1`, ... - remapped by `Simulation`.
   """
   lines = text.strip().splitlines()
   blocks: list[list[str]] = []
@@ -175,7 +175,7 @@ def _load_template(name:str, path:str, lib:str) -> str:
     cir += "\n" + FILE.load(sp_file)
   return cir
 
-#------------------------------------------------------------------------------ Simulation class
+#----------------------------------------------------------------------------- Simulation class
 
 class Simulation:
   """NgSpice simulation runner with template substitution and caching.
@@ -205,16 +205,16 @@ class Simulation:
 
   def __init__(
     self,
-    name: str|None = None,
-    path: str = "./",
-    lib: str = "",
-    params: dict[str, str]|None = None,
-    ngspice: str|None = None,
-    work_dir: str|None = None,
-    rename: dict[str, str]|None = None,
-    scale: dict[str, float]|None = None,
-    timeout: int = 300,
-    verbose: bool = True,
+    name:str|None = None,
+    path:str = "./",
+    lib:str = "",
+    params:dict[str, str]|None = None,
+    ngspice:str|None = None,
+    work_dir:str|None = None,
+    rename:dict[str, str]|None = None,
+    scale:dict[str, float]|None = None,
+    timeout:int = 300,
+    verbose:bool = True,
   ):
     self.path = path
     self.lib = lib
@@ -240,7 +240,7 @@ class Simulation:
     # Load and prepare template
     self._template = _load_template(name, path, lib)
 
-  #----------------------------------------------------------------------------- Internal methods
+  #--------------------------------------------------------------------------- Internal methods
 
   def _render(self, run_id:str, **overrides) -> str:
     """Render netlist with placeholder substitution.
@@ -311,7 +311,7 @@ class Simulation:
         data[col] = [v * factor for v in data[col]]
     return data
 
-  #---------------------------------------------------------------------------------- Public API
+  #--------------------------------------------------------------------------------- Public API
 
   def run(self, cache:bool=False, **overrides) -> dict[str, list[float]]:
     """Run single simulation with given parameter overrides.
@@ -366,7 +366,7 @@ class Simulation:
     )
     if result.returncode != 0:
       stderr = (result.stderr or "").strip()
-      # Don't fail on warnings — ngspice returns non-zero for warnings too
+      # Don't fail on warnings - ngspice returns non-zero for warnings too
       if not os.path.exists(out_path):
         FILE.remove(cir_path)
         raise RuntimeError(f"ngspice failed (exit {result.returncode}):\n{stderr}")
@@ -398,9 +398,9 @@ class Simulation:
 
   def sweep(
     self,
-    cache: bool = True,
-    parallel: bool = True,
-    max_workers: int|None = None,
+    cache:bool = True,
+    parallel:bool = True,
+    max_workers:int|None = None,
     **param_lists,
   ) -> dict[str, dict[str, list[float]]]:
     """Run parametric sweep over one or more parameters.
@@ -473,7 +473,7 @@ class Simulation:
 #----------------------------------------------------------------------------------------- Demo
 
 if __name__ == "__main__":
-  print("xaeian.eda.spice — NgSpice simulation runner")
+  print("xaeian.eda.spice - NgSpice simulation runner")
   print()
   print("Usage:")
   print('  sim = Simulation("inverter", lib="/opt/spice")')

@@ -15,7 +15,7 @@ def _root_context(tmp_path):
   with file_context(root_path=str(tmp_path)):
     yield
 
-#------------------------------------------------------------------------------------------ PATH
+#----------------------------------------------------------------------------------------- PATH
 
 @pytest.mark.parametrize("method, expected", [
   ("basename", "c.txt"),
@@ -70,7 +70,7 @@ def path_exists_is_file_is_dir():
   assert PATH.is_dir("d") and not PATH.is_file("d")
   assert not PATH.exists("nope.txt")
 
-#------------------------------------------------------------------------------------------ FILE
+#----------------------------------------------------------------------------------------- FILE
 
 def file_text_roundtrip():
   FILE.save("a.txt", "Hello!")
@@ -109,7 +109,7 @@ def file_hash_and_size():
   assert FILE.hash("h.txt") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" # sha256
   assert FILE.size("h.txt") == 3 and FILE.mtime("h.txt") > 0
 
-#------------------------------------------------------------------------------------------- DIR
+#------------------------------------------------------------------------------------------ DIR
 
 def dir_ensure_creates_dirs(tmp_path):
   DIR.ensure("a/b/c/")
@@ -173,6 +173,18 @@ def ini_save_writes_inline_comment():
 def ini_parse_hex_and_load_missing_empty():
   assert INI.parse("0x10") == 16
   assert INI.load("none") == {}
+
+@pytest.mark.parametrize("name", ["app.conf", "app.cfg", "APP.CONF"])
+def ini_accepts_official_extensions(name):
+  data = {"main": {"k": "v", "n": 7}}
+  INI.save(name, data)
+  assert FILE.exists(name) # saved as-is, no .ini appended
+  assert INI.load(name) == data
+
+def ini_appends_ini_for_other_extensions():
+  INI.save("app.v2", {"k": 1})
+  assert FILE.exists("app.v2.ini")
+  assert INI.load("app.v2") == {"k": 1}
 
 @pytest.mark.parametrize("value, text", [(None, ""), (True, "true"), (False, "false"), (42, "42")])
 def ini_format_matches(value, text):
@@ -241,7 +253,13 @@ def yaml_pretty_multi_doc_and_missing():
   YAML.save_all("m", [{"id": 1}, {"id": 2}]); assert YAML.load_all("m") == [{"id": 1}, {"id": 2}]
   assert YAML.load("none", otherwise=[]) == []
 
-#------------------------------------------------------------------------------------ Modes
+def yaml_yml_extension_roundtrip():
+  YAML.save("app.yml", {"k": 1})
+  assert FILE.exists("app.yml") # saved as-is, no .yaml appended
+  assert YAML.load("app.yml") == {"k": 1}
+  assert YAML.load("app") == {"k": 1} # bare name still finds .yml
+
+#---------------------------------------------------------------------------------------- Modes
 
 def file_context_restores_previous_root(tmp_path):
   a, b = tmp_path / "A", tmp_path / "B"

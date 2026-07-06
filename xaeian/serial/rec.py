@@ -22,7 +22,6 @@ Example:
   >>> rec.stop()
 """
 
-__extras__ = ("serial", ["pyserial"])
 
 import re, time, threading
 from .port import SerialPort
@@ -110,6 +109,7 @@ class Recorder(SerialPort):
     if self.err_time and time.time() > self.err_time:
       self.disconnect()
       self.print_error(f"Serial port {self.port} not responding")
+      self.err_time = 0  # fire once, next cycle falls through to connect()
       return True
     return False
 
@@ -188,6 +188,7 @@ class Recorder(SerialPort):
     if not self.connect():
       self._reset_state()
       self.value = None
+      time.sleep(self.timeout)  # pace reconnect attempts while port is absent
       return None
     self._read_and_print()
     pattern = self._strip_anchors(self.regex or self.NUM)
@@ -283,6 +284,7 @@ class MultiRecorder(Recorder):
     if not self.connect():
       self._reset_state()
       self.values = None
+      time.sleep(self.timeout)  # pace reconnect attempts while port is absent
       return None
     new_lines = self._read_and_print()
     if not new_lines: return self.values  # no fresh line, cached OK

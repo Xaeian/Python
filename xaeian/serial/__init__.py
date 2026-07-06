@@ -2,6 +2,8 @@
 
 """Serial communication: port, recorders, shell client."""
 
+__extras__ = ("serial", ["pyserial"])
+
 from .port import SerialPort, serial_scan
 from .rec import Recorder, MultiRecorder
 from .sh import Shell, convert_value

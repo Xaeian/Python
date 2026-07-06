@@ -11,7 +11,7 @@ from ..log import Logger, Print
 from .abstract_async import AbstractAsyncDatabase
 from .utils import (
   listify, to_dicts, ident, ph, serialize_params,
-  serialize_dict, split_sql, parse_row,
+  serialize_dict, split_sql, parse_row, _upsert_sql,
 )
 
 class MysqlAsyncDatabase(AbstractAsyncDatabase):
@@ -19,7 +19,7 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
   MySQL async database (aiomysql) with connection pooling.
 
   Pool is created lazily on first query or explicitly via `start()`.
-  Pool uses `autocommit=True` — each statement commits immediately.
+  Pool uses `autocommit=True` - each statement commits immediately.
   Transactions use explicit `begin()`/`commit()`.
 
   Args:
@@ -75,7 +75,7 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
     conn.close()
     await conn.wait_closed()
 
-  #--------------------------------------------------------------------------------- Lifecycle
+  #---------------------------------------------------------------------------------- Lifecycle
 
   async def _ensure_pool(self):
     if self._pool is not None:
@@ -134,8 +134,6 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
       self._conn = None
       pool.release(conn)
 
-  def _rowcount(self, cur) -> int:
-    return max(0, cur.rowcount) if cur.rowcount is not None else 0
 
   #------------------------------------------------------------------------------------ Execute
 
@@ -316,15 +314,9 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
   #------------------------------------------------------------------------------------- Upsert
 
   async def upsert(self, table:str, data:dict, on:str|list[str], update:list[str]|None=None) -> int:
-    """INSERT ON DUPLICATE KEY UPDATE. `on` param ignored — uses table's unique keys."""
-    d = serialize_dict(data)
-    t = ident(table)
-    cols = ", ".join(ident(k) for k in d.keys())
-    vals = ph(len(d), self.ph)
-    upd_cols = update or [k for k in d.keys() if k not in (on if isinstance(on, list) else [on])]
-    sets = ", ".join(f"{ident(k)} = VALUES({ident(k)})" for k in upd_cols)
-    sql = f"INSERT INTO {t} ({cols}) VALUES {vals} ON DUPLICATE KEY UPDATE {sets}"
-    return await self.exec(sql, tuple(d.values()))
+    """INSERT ON DUPLICATE KEY UPDATE. `on` param ignored - uses table's unique keys."""
+    sql, params = _upsert_sql(table, data, on, update, self.ph, None)
+    return await self.exec(sql, params)
 
   #------------------------------------------------------------------------ Database Management
 

@@ -1,6 +1,6 @@
 # xaeian/eda/__init__.py
 
-"""Electronics — E-series, voltage converters, KiCad tooling, NgSpice runner."""
+"""Electronics - E-series, voltage converters, KiCad tooling, NgSpice runner."""
 
 from .ee import E6, E12, E24, expand_series, VConv
 from .spice import Simulation, parse_output
@@ -11,7 +11,7 @@ __extras__ = ("eda", ["sexpdata", "pypdf", "PyMuPDF"])
 __all__ = [
   "E6", "E12", "E24", "expand_series", "VConv",
   "Simulation", "parse_output",
-  "clean_step", "clean_footprint"
+  "clean_step", "clean_footprint",
 ]
 
 try:

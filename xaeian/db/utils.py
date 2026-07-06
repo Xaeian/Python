@@ -138,7 +138,7 @@ def ph(n:int, style:str="?", offset:int=0) -> str:
 
   Args:
     n: Number of placeholders.
-    style: `"?"` for SQLite/MySQL, `"%s"` for MySQL, `"$"` for PostgreSQL.
+    style: `"?"` for SQLite, `"%s"` for MySQL and sync PostgreSQL, `"$"` for async PostgreSQL.
     offset: Starting number for `$N` style.
 
   Returns:
@@ -236,6 +236,31 @@ def _find_sql(table:str, order:str|None, limit:int|None, style:str, where:dict) 
   if order: sql += f" ORDER BY {order}"
   if limit: sql += f" LIMIT {limit}"
   return sql, params
+
+def _upsert_sql(
+  table:str, data:dict, on:str|list[str],
+  update:list[str]|None, style:str, excluded:str|None,
+) -> tuple[str, tuple]:
+  """
+  Build dialect-aware upsert and its params.
+
+  Args:
+    excluded: Conflict-row alias (`"excluded"`/`"EXCLUDED"`) for `ON CONFLICT ... DO UPDATE`,
+      or `None` for MySQL `ON DUPLICATE KEY UPDATE`.
+  """
+  d = serialize_dict(data)
+  t = ident(table)
+  cols = ", ".join(ident(k) for k in d.keys())
+  vals = ph(len(d), style)
+  upd = update or [k for k in d.keys() if k not in (on if isinstance(on, list) else [on])]
+  if excluded is None:
+    sets = ", ".join(f"{ident(k)} = VALUES({ident(k)})" for k in upd)
+    sql = f"INSERT INTO {t} ({cols}) VALUES {vals} ON DUPLICATE KEY UPDATE {sets}"
+  else:
+    conf = ident(on) if isinstance(on, str) else ", ".join(ident(x) for x in on)
+    sets = ", ".join(f"{ident(k)} = {excluded}.{ident(k)}" for k in upd)
+    sql = f"INSERT INTO {t} ({cols}) VALUES {vals} ON CONFLICT ({conf}) DO UPDATE SET {sets}"
+  return sql, tuple(d.values())
 
 #--------------------------------------------------------------------------------- JSON Parsing
 

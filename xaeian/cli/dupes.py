@@ -119,7 +119,7 @@ examples:
 """
 
 def main():
-  from ._args import _make_parser
+  from ._args import _make_parser, _add_help
   parser = _make_parser("Find duplicate files by content hash", EXAMPLES)
   parser.add_argument("root", help="Directory to scan")
   parser.add_argument("--algo", default="sha256", metavar="ALG",
@@ -130,7 +130,7 @@ def main():
   parser.add_argument("--follow-symlinks", action="store_true", help="Follow symbolic links")
   parser.add_argument("-o", "--output", default=None, metavar="PATH",
     help="Save JSON report to file")
-  parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
+  _add_help(parser)
   args = parser.parse_args()
   root = os.path.abspath(args.root)
   if not os.path.isdir(root):

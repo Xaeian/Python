@@ -11,7 +11,7 @@ from ..log import Logger, Print
 from .abstract_async import AbstractAsyncDatabase
 from .utils import (
   listify, to_dicts, ident, ph, serialize_params,
-  serialize_dict, split_sql, parse_row,
+  serialize_dict, split_sql, parse_row, _upsert_sql,
 )
 
 class SqliteAsyncDatabase(AbstractAsyncDatabase):
@@ -31,7 +31,7 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
     >>> await db.insert("users", {"name": "Jan"})
     >>> await db.close()
   """
-  def __init__(self, db_name:str, log:Logger|None=None):
+  def __init__(self, db_name:str, log:Logger|Print|None=None):
     super().__init__()
     self.db_name = db_name
     self.log = log
@@ -42,11 +42,11 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
     import aiosqlite
     return await aiosqlite.connect(self.db_name)
 
-  #--------------------------------------------------------------------------------- Lifecycle
+  #---------------------------------------------------------------------------------- Lifecycle
 
   @asynccontextmanager
   async def _connect(self):
-    """Get connection — persistent or new (fallback)."""
+    """Get connection - persistent or new (fallback)."""
     if self._persistent:
       try:
         yield self._persistent
@@ -97,8 +97,6 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
         await self._conn.close()
       self._conn = None
 
-  def _rowcount(self, cur) -> int:
-    return max(0, cur.rowcount) if cur.rowcount is not None else 0
 
   #------------------------------------------------------------------------------------ Execute
 
@@ -272,15 +270,8 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
 
   async def upsert(self, table:str, data:dict, on:str|list[str], update:list[str]|None=None) -> int:
     """INSERT ON CONFLICT (SQLite 3.24+)."""
-    d = serialize_dict(data)
-    t = ident(table)
-    cols = ", ".join(ident(k) for k in d.keys())
-    vals = ph(len(d), self.ph)
-    conf = ident(on) if isinstance(on, str) else ", ".join(ident(x) for x in on)
-    upd_cols = update or [k for k in d.keys() if k not in (on if isinstance(on, list) else [on])]
-    sets = ", ".join(f"{ident(k)} = excluded.{ident(k)}" for k in upd_cols)
-    sql = f"INSERT INTO {t} ({cols}) VALUES {vals} ON CONFLICT ({conf}) DO UPDATE SET {sets}"
-    return await self.exec(sql, tuple(d.values()))
+    sql, params = _upsert_sql(table, data, on, update, self.ph, "excluded")
+    return await self.exec(sql, params)
 
   #------------------------------------------------------------------------ Database Management
 

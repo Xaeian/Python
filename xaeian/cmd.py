@@ -28,7 +28,7 @@ def version(cmd:str, args:Sequence[str]=("--version",)) -> str|None:
   match = re.search(r"\bv?\d+(?:\.\d+){1,3}(?:[-_\w]*)?\b", output)
   return match.group(0) if match else None
 
-#-------------------------------------------------------------------------------------- Lookup
+#--------------------------------------------------------------------------------------- Lookup
 
 def exists(cmd:str) -> bool:
   """Check if command is available on PATH."""
@@ -49,7 +49,7 @@ def which(*cmds:str) -> str|None:
     if path: return path
   return None
 
-#------------------------------------------------------------------------------------- Execute
+#-------------------------------------------------------------------------------------- Execute
 
 def _split(cmd:str) -> list[str]:
   """Split command string respecting quotes and escapes."""

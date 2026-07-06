@@ -133,7 +133,7 @@ examples:
 """
 
 def main():
-  from ._args import _make_parser
+  from ._args import _make_parser, _add_help
   parser = _make_parser("Draw directory tree with filtering", EXAMPLES)
   parser.add_argument("root", nargs="?", default=".", help="Root directory (default: .)")
   parser.add_argument("-e", "--exts", nargs="+", default=None, metavar="EXT",
@@ -148,7 +148,7 @@ def main():
   parser.add_argument("--no-color", action="store_true", help="Disable ANSI colors")
   parser.add_argument("-o", "--output", default=None, metavar="PATH",
     help="Save stats to JSON file")
-  parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
+  _add_help(parser)
   args = parser.parse_args()
   root = os.path.abspath(args.root)
   if not os.path.isdir(root):

@@ -43,12 +43,19 @@ def adds_interval_keeps_wall_clock():
   assert base + "90m" == Time("2025-03-01 13:30:00")
 
 def interval_1h2ms_adds_hour_and_millis():
-  # regression: "ms" must beat "m" — 1h2ms is +1h +2ms, not +1h +2min
+  # regression: "ms" must beat "m" - 1h2ms is +1h +2ms, not +1h +2min
   assert (Time("2025-03-01 12:00:00") + "1h2ms").to("%H:%M:%S.%f") == "13:00:00.002000"
 
 def multi_token_interval_with_spaces():
   assert Time("2025-03-01 12:00") + "1d 2h" == Time("2025-03-02 14:00")
   assert Time("2025-03-01 12:00") + "-6h 30m" == Time("2025-03-01 06:30")
+
+@pytest.mark.parametrize("bad", ["garbage", "5x"])
+def rejects_invalid_interval_string(bad):
+  with pytest.raises(ValueError):
+    Time("2025-03-01 12:00") + bad
+  with pytest.raises(ValueError):
+    Time("2025-03-01 12:00") - bad
 
 def fractional_time_intervals():
   base = Time("2025-03-01 12:00:00")
@@ -56,7 +63,7 @@ def fractional_time_intervals():
   assert base + "0.5d" == Time("2025-03-02 00:00:00")
 
 def fractional_calendar_units_truncate():
-  # months/years step by whole units — the fractional part is dropped
+  # months/years step by whole units - the fractional part is dropped
   assert Time("2025-03-01 12:00") + "2.5mo" == Time("2025-05-01 12:00") # +2 months, not +2.5
   assert Time("2025-03-01 12:00") + "0.5y" == Time("2025-09-01 12:00") # int(0.5*12) = 6 months
 

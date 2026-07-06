@@ -1,13 +1,18 @@
 # xaeian/__main__.py
+"""`xn` CLI dispatcher - routes subcommands to xaeian.cli/media modules.
+
+Example:
+  xn tree src
+"""
 
 COMMANDS = {
-  "wifi":  "xaeian.cli.wifi",
+  "wifi": "xaeian.cli.wifi",
   "dupes": "xaeian.cli.dupes",
-  "tree":  "xaeian.cli.tree",
+  "tree": "xaeian.cli.tree",
   "fonts": "xaeian.cli.fonts",
-  "min":   "xaeian.media.min",
-  "meta":  "xaeian.media.meta",
-  "ico":   "xaeian.media.ico"
+  "min": "xaeian.media.min",
+  "meta": "xaeian.media.meta",
+  "ico": "xaeian.media.ico",
 }
 
 def main():

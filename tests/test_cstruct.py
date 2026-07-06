@@ -38,6 +38,23 @@ def string_and_bytes():
   data = {"name": "xaeian", "data": b"\x01\x02\x03"}
   assert s.decode(s.encode(data)) == data
 
+def string_utf8_roundtrip():
+  s = Struct(name="txt").add(Field(Type.string, "t"))
+  data = {"t": "żółw → OK"}
+  assert s.decode(s.encode(data)) == data
+
+def crc_frame_roundtrip_single_and_multi():
+  s = Struct(name="cf", crc_frame=crc32_iso).add(Field(Type.uint16, "x"))
+  assert s.decode(s.encode({"x": 7})) == {"x": 7}
+  assert s.decode(s.encode([{"x": 1}, {"x": 2}])) == [{"x": 1}, {"x": 2}]
+
+def crc_frame_rejects_corruption():
+  s = Struct(name="cfbad", crc_frame=crc32_iso).add(Field(Type.uint16, "x"))
+  bad = bytearray(s.encode({"x": 7}))
+  bad[-1] ^= 0xFF
+  with pytest.raises(ValueError):
+    s.decode(bytes(bad))
+
 def bitfield():
   s = Struct(name="flags").add(Bitfield("st", [("on", 1), ("err", 1), ("mode", 6)]))
   data = {"st": {"on": 1, "err": 0, "mode": 42}}

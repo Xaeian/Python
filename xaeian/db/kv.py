@@ -9,8 +9,9 @@ from .kv_common import (
   JsonValue, KvEntry, check_key, check_table, dumps, loads, now_ms,
   sql_create, sql_get_value, sql_get_meta, sql_read_all, sql_read_all_meta, where_key,
 )
+from .utils import ph_list
 
-#--------------------------------------------------------------------------------- KeyValue
+#------------------------------------------------------------------------------------- KeyValue
 
 class KeyValue:
   """JSON-canonical sync key-value store backed by database table.
@@ -57,7 +58,7 @@ class KeyValue:
     self.table = table
     self._ready = False
     self._lock = threading.Lock()
-    ph = db.ph
+    ph = ph_list(1, db.ph)[0]
     self._sql_get = sql_get_value(table, ph)
     self._sql_meta = sql_get_meta(table, ph)
     self._sql_all = sql_read_all(table)
@@ -71,7 +72,7 @@ class KeyValue:
       self.db.exec(sql_create(self.table))
       self._ready = True
 
-  #------------------------------------------------------------------------------ Read
+  #--------------------------------------------------------------------------------------- Read
 
   def has(self, key:str) -> bool:
     """Check if key exists. Distinct from `get(key) is None`."""
@@ -115,7 +116,7 @@ class KeyValue:
       for r in rows
     }
 
-  #----------------------------------------------------------------------------- Write
+  #-------------------------------------------------------------------------------------- Write
 
   def set(self, key:str, value:JsonValue) -> int:
     """Upsert value. Returns the write timestamp (epoch milliseconds).

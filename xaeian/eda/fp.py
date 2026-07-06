@@ -21,6 +21,8 @@ import uuid
 from dataclasses import dataclass
 from ..files import FILE
 
+GENERATOR_VERSION = "9.0"
+
 def uid() -> str:
   return str(uuid.uuid4())
 
@@ -43,11 +45,11 @@ class Style:
 
 # Size tiers: XXS (<1.5mm) → XS (1.5-3mm) → S (3-6mm) → M (6-15mm) → L (15-30mm) → XL (>30mm)
 XXS = Style(silk=0.08, silk_detail=0.05, crtyd=0.05, fab=0.06, font_size=0.4, font_thick=0.06)
-XS  = Style(silk=0.1,  silk_detail=0.06, crtyd=0.05, fab=0.08, font_size=0.6, font_thick=0.08)
-S   = Style(silk=0.12, silk_detail=0.08, crtyd=0.05, fab=0.1,  font_size=0.8, font_thick=0.1)
-M   = Style(silk=0.15, silk_detail=0.1,  crtyd=0.05, fab=0.12, font_size=1.0, font_thick=0.12)
-L   = Style(silk=0.2,  silk_detail=0.12, crtyd=0.05, fab=0.15, font_size=1.2, font_thick=0.14)
-XL  = Style(silk=0.25, silk_detail=0.15, crtyd=0.05, fab=0.2,  font_size=1.5, font_thick=0.16)
+XS = Style(silk=0.1, silk_detail=0.06, crtyd=0.05, fab=0.08, font_size=0.6, font_thick=0.08)
+S = Style(silk=0.12, silk_detail=0.08, crtyd=0.05, fab=0.1, font_size=0.8, font_thick=0.1)
+M = Style(silk=0.15, silk_detail=0.1, crtyd=0.05, fab=0.12, font_size=1.0, font_thick=0.12)
+L = Style(silk=0.2, silk_detail=0.12, crtyd=0.05, fab=0.15, font_size=1.2, font_thick=0.14)
+XL = Style(silk=0.25, silk_detail=0.15, crtyd=0.05, fab=0.2, font_size=1.5, font_thick=0.16)
 
 # Reference designators
 REF = {
@@ -67,7 +69,7 @@ REF = {
   "motor": "M**",
 }
 
-#------------------------------------------------------------------------------------- Footprint
+#------------------------------------------------------------------------------------ Footprint
 
 class Footprint:
   """KiCad `.kicad_mod` footprint builder."""
@@ -84,7 +86,7 @@ class Footprint:
   def _add(self, line:str):
     self._lines.append(line)
 
-  #---------------------------------------------------------------------------------- Properties
+  #--------------------------------------------------------------------------------- Properties
 
   def properties(self,
     ref_at:tuple = (0, 0, 0),
@@ -124,7 +126,7 @@ class Footprint:
     """Set footprint attribute."""
     self._add(f'\t(attr {kind})')
 
-  #---------------------------------------------------------------------------- Drawing primitives
+  #------------------------------------------------------------------------- Drawing primitives
 
   def line(self, x1:float, y1:float, x2:float, y2:float,
     width:float, layer:str,
@@ -189,7 +191,7 @@ class Footprint:
       f' (thickness {fmt_number(thickness)}))))'
     )
 
-  #---------------------------------------------------------------------------------------- Pads
+  #--------------------------------------------------------------------------------------- Pads
 
   def pad_tht(self, num:int|str, x:float, y:float,
     w:float, h:float, drill:float,
@@ -233,7 +235,7 @@ class Footprint:
       f' (layers "*.Cu" "*.Mask") (uuid "{uid()}"))'
     )
 
-  #------------------------------------------------------------------------------------- 3D model
+  #----------------------------------------------------------------------------------- 3D model
 
   def model(self, path:str,
     offset:tuple = (0, 0, 0),
@@ -251,7 +253,7 @@ class Footprint:
       f' (rotate (xyz {fmt_number(rx)} {fmt_number(ry)} {fmt_number(rz)})))'
     )
 
-  #-------------------------------------------------------------------------------------- Output
+  #------------------------------------------------------------------------------------- Output
 
   def raw(self, text:str):
     """Add raw S-expression line."""
@@ -263,7 +265,7 @@ class Footprint:
       f'(footprint "{self.name}"',
       f'\t(version 20241229)',
       f'\t(generator "pcbnew")',
-      f'\t(generator_version "9.0")',
+      f'\t(generator_version "{GENERATOR_VERSION}")',
       f'\t(layer "{self.layer}")',
     ]
     footer = [

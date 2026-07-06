@@ -28,10 +28,13 @@ Example:
   >>> from xaeian.db import Database
 """
 
-__version__ = "0.7.3"
+__version__ = "0.7.4"
 __repo__ = "Xaeian/Python"
 __python__ = ">=3.12"
-__description__ = "Python utilities for files, strings, time, serial, structs, media, electronics, plotting, and database and more..."
+__description__ = (
+  "Python utilities for files, strings, time, serial, structs, "
+  "media, electronics, plotting, and database and more..."
+)
 __author__ = "Xaeian"
 __keywords__ = [
   "utilities", "files", "database", "serial", "crc", "struct",

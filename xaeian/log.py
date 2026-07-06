@@ -70,8 +70,7 @@ class LogFormatter(logging.Formatter):
   LEVELS = {name: short for short, name, _num, _color in _LEVEL_TABLE}
   def format(self, record:logging.LogRecord) -> str:
     record.levelname = self.LEVELS.get(record.levelname, record.levelname)
-    record.msg = _strip_ansi(str(record.msg))
-    return super().format(record)
+    return _strip_ansi(super().format(record))
 
 class ColorFormatter(LogFormatter):
   """Colored formatter for terminal: `DBG` green, `INF` blue, `WRN` yellow,
@@ -126,19 +125,19 @@ class Print:
   def _emit_sub(self, ico:str, *args, **kwargs):
     if self._last_level >= self._level: self(ico, *args, **kwargs)
 
-  def dbg(self, *a, **kw): self._emit(logging.DEBUG,    Ico.DBG, *a, **kw)
-  def inf(self, *a, **kw): self._emit(logging.INFO,     Ico.INF, *a, **kw)
-  def wrn(self, *a, **kw): self._emit(logging.WARNING,  Ico.WRN, *a, **kw)
-  def err(self, *a, **kw): self._emit(logging.ERROR,    Ico.ERR, *a, **kw)
-  def crt(self, *a, **kw): self._emit(logging.CRITICAL, Ico.ERR, *a, **kw)
-  def pnc(self, *a, **kw): self._emit(PANIC,            Ico.ERR, *a, **kw)
-  def tip(self, *a, **kw): self._emit(logging.INFO,     Ico.TIP, *a, **kw)
-  def run(self, *a, **kw): self._emit(logging.INFO,     Ico.RUN, *a, **kw)
+  def dbg(self, *a, **kw): self._emit(logging.DEBUG, Ico.DBG, *a, **kw)
+  def inf(self, *a, **kw): self._emit(logging.INFO, Ico.INF, *a, **kw)
+  def wrn(self, *a, **kw): self._emit(logging.WARNING, Ico.WRN, *a, **kw)
+  def err(self, *a, **kw): self._emit(logging.ERROR, Ico.ERR, *a, **kw)
+  def crt(self, *a, **kw): self._emit(logging.CRITICAL, Ico.CRT, *a, **kw)
+  def pnc(self, *a, **kw): self._emit(PANIC, Ico.PNC, *a, **kw)
+  def tip(self, *a, **kw): self._emit(logging.INFO, Ico.TIP, *a, **kw)
+  def run(self, *a, **kw): self._emit(logging.INFO, Ico.RUN, *a, **kw)
 
-  def gap(self, *a, **kw):   self._emit_sub(Ico.GAP, *a, **kw)
-  def dot(self, *a, **kw):   self._emit_sub(Ico.DOT, *a, **kw)
-  def space(self, *a, **kw): self.gap(*a, **kw)   # Logger compat
-  def item(self, *a, **kw):  self.dot(*a, **kw)   # Logger compat
+  def gap(self, *a, **kw): self._emit_sub(Ico.GAP, *a, **kw)
+  def dot(self, *a, **kw): self._emit_sub(Ico.DOT, *a, **kw)
+  def space(self, *a, **kw): self.gap(*a, **kw) # Logger compat
+  def item(self, *a, **kw): self.dot(*a, **kw) # Logger compat
 
   def ok(self, *args, **kwargs):
     """Append ` OK` badge to last arg, print at INF level."""
@@ -153,7 +152,7 @@ class Print:
   def error(self, *a, **kw):    self.err(*a, **kw)
   def critical(self, *a, **kw): self.crt(*a, **kw)
   def panic(self, *a, **kw):    self.pnc(*a, **kw)
-  
+
   @property
   def level(self) -> int:
     return self._level
@@ -202,6 +201,7 @@ class Logger(logging.Logger):
   def err(self, *a, **kw): self.error(*a, **kw)
   def crt(self, *a, **kw): self.critical(*a, **kw)
   def pnc(self, *a, **kw): self.panic(*a, **kw)
+  def run(self, *a, **kw): self.info(*a, **kw)
 
   # sub-entries: inherit _last_level
   def space(self, msg="", *a, **kw): self.log(self._last_level, f"    {msg}", *a, **kw)

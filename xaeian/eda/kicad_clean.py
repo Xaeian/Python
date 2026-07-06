@@ -17,13 +17,12 @@ from ..xstring import strip_comments
 from ..files import FILE, PATH
 from .fp import Style, L, fmt_number
 
-#----------------------------------------------------------------------------- Footprint cleanup
+#---------------------------------------------------------------------------- Footprint cleanup
 
 def _round_coords(text:str) -> str:
-  """Round coordinate floats to 2 decimal places, skip UUIDs."""
+  """Round coordinate floats to 2 decimal places."""
   def _round_match(m):
     full = m.group(0)
-    if "-" in full and len(full) > 38: return full  # UUID
     return fmt_number(round(float(full), 2))
   return re.sub(r"-?\d+\.\d{3,}", _round_match, text)
 
@@ -135,6 +134,13 @@ def _compact_pad(m) -> str:
   parts.append(f'(uuid "{uid}"))')
   return " ".join(parts)
 
+def _width_pat(layer:str) -> str:
+  """Regex for a stroke width + type solid + optional fill + layer block."""
+  return (
+    r'\(width\s+(\d+\.?\d*)\)\s*\(type\s+solid\)\s*\)\s*'
+    rf'(?:\(fill\s+(?:yes|no)\)\s*)?\(layer\s+"{layer}"\)'
+  )
+
 def clean_footprint(filepath:str, style:Style=L, restyle:bool=True, dry:bool=False,
 ) -> tuple[int, int]:
   """Clean and compact a hand-drawn `.kicad_mod` footprint.
@@ -189,9 +195,7 @@ def clean_footprint(filepath:str, style:Style=L, restyle:bool=True, dry:bool=Fal
     )
     # Fab width
     text = re.sub(
-      r'\(width\s+\d+\.?\d*\)\s*\(type\s+solid\)\s*\)\s*'
-      r'(?:\(fill\s+(?:yes|no)\)\s*)?'
-      r'\(layer\s+"F\.Fab"\)',
+      _width_pat(r"F\.Fab"),
       lambda m: re.sub(
         r'\(width\s+\d+\.?\d*', f'(width {fmt_number(s.fab)}', m.group(0), count=1,
       ),
@@ -200,9 +204,7 @@ def clean_footprint(filepath:str, style:Style=L, restyle:bool=True, dry:bool=Fal
     # Silk width remap: max → s.silk, rest → s.silk_detail
     silk_widths = set()
     for m in re.finditer(
-      r'\(width\s+(\d+\.?\d*)\)\s*\(type\s+solid\)\s*\)\s*'
-      r'(?:\(fill\s+(?:yes|no)\)\s*)?'
-      r'\(layer\s+"F\.SilkS"\)',
+      _width_pat(r"F\.SilkS"),
       text, flags=re.DOTALL,
     ):
       silk_widths.add(m.group(1))
@@ -216,17 +218,13 @@ def clean_footprint(filepath:str, style:Style=L, restyle:bool=True, dry:bool=Fal
           f'(width {target}', m.group(0), count=1,
         )
       text = re.sub(
-        r'\(width\s+(\d+\.?\d*)\)\s*\(type\s+solid\)\s*\)\s*'
-        r'(?:\(fill\s+(?:yes|no)\)\s*)?'
-        r'\(layer\s+"F\.SilkS"\)',
+        _width_pat(r"F\.SilkS"),
         _remap_silk,
         text, flags=re.DOTALL,
       )
     # CrtYd width
     text = re.sub(
-      r'\(width\s+\d+\.?\d*\)\s*\(type\s+solid\)\s*\)\s*'
-      r'(?:\(fill\s+(?:yes|no)\)\s*)?'
-      r'\(layer\s+"F\.CrtYd"\)',
+      _width_pat(r"F\.CrtYd"),
       lambda m: re.sub(
         r'\(width\s+\d+\.?\d*', f'(width {fmt_number(s.crtyd)}', m.group(0), count=1,
       ),
@@ -292,7 +290,7 @@ def clean_step(filepath:str, dry:bool=False) -> tuple[int, int]:
   )
   new_size = len(text)
   if "ENDSEC;" not in text or "END-ISO-10303-21;" not in text:
-    raise ValueError(f"Sanity check failed: {filepath} — missing ENDSEC or END marker")
+    raise ValueError(f"Sanity check failed: {filepath} - missing ENDSEC or END marker")
   if not dry:
     FILE.save(filepath, text)
   return orig_size, new_size

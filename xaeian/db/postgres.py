@@ -6,7 +6,7 @@ from __future__ import annotations
 from ..log import Logger, Print
 
 from .abstract import AbstractDatabase
-from .utils import serialize_dict, ident, ph
+from .utils import _upsert_sql
 
 class PostgresDatabase(AbstractDatabase):
   """
@@ -78,15 +78,8 @@ class PostgresDatabase(AbstractDatabase):
 
   def upsert(self, table:str, data:dict, on:str|list[str], update:list[str]|None=None) -> int:
     """INSERT ON CONFLICT (PostgreSQL 9.5+)."""
-    d = serialize_dict(data)
-    t = ident(table)
-    cols = ", ".join(ident(k) for k in d.keys())
-    vals = ph(len(d), self.ph)
-    conf = ident(on) if isinstance(on, str) else ", ".join(ident(x) for x in on)
-    upd_cols = update or [k for k in d.keys() if k not in (on if isinstance(on, list) else [on])]
-    sets = ", ".join(f"{ident(k)} = EXCLUDED.{ident(k)}" for k in upd_cols)
-    sql = f"INSERT INTO {t} ({cols}) VALUES {vals} ON CONFLICT ({conf}) DO UPDATE SET {sets}"
-    return self.exec(sql, tuple(d.values()))
+    sql, params = _upsert_sql(table, data, on, update, self.ph, "EXCLUDED")
+    return self.exec(sql, params)
 
   #------------------------------------------------------------------------ Database Management
 

@@ -85,6 +85,10 @@ def strip_comments_removes_comments(strip, code, clean):
 def strip_comments_keeps_markers_inside_strings():
   assert strip_comments_c('s = "// not"; // real') == 's = "// not"; '
 
+def strip_comments_c_honors_backslash_escaped_quotes():
+  code = 'char *s = "a\\"b // not"; int y = 2; // real'
+  assert strip_comments_c(code) == 'char *s = "a\\"b // not"; int y = 2; '
+
 def strip_comments_respects_marker_precedence():
   assert strip_comments_c("a // /* b */ c") == "a "  # line comment swallows the block
   assert strip_comments_c("a /* // */ b") == "a  b"  # block swallows the slashes

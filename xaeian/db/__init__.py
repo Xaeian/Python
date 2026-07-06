@@ -72,7 +72,7 @@ def Database(
   type: str|DatabaseType,
   db_name: str|None = None,
   host: str = "localhost",
-  user: str = "root",
+  user: str|None = None,
   password: str = "",
   port: int|None = None,
   log: Logger|Print|None = None,
@@ -100,14 +100,15 @@ def Database(
   t = _norm(type)
   if t not in _SYNC: raise ValueError(f"Unknown database type: {type!r}")
   cls = _load(_SYNC, t)
-  if t == "sqlite": return cls(db_name or ":memory:")
+  if t == "sqlite": return cls(db_name or ":memory:", log=log)
+  user = user or ("postgres" if t == "postgres" else "root")
   return cls(db_name, host, user, password, port or _PORTS[t], log=log)
 
 def AsyncDatabase(
   type: str|DatabaseType,
   db_name: str|None = None,
   host: str = "localhost",
-  user: str = "root",
+  user: str|None = None,
   password: str = "",
   port: int|None = None,
   log: Logger|Print|None = None,
@@ -134,7 +135,8 @@ def AsyncDatabase(
   t = _norm(type)
   if t not in _ASYNC: raise ValueError(f"Unknown database type: {type!r}")
   cls = _load(_ASYNC, t)
-  if t == "sqlite": return cls(db_name or ":memory:")
+  if t == "sqlite": return cls(db_name or ":memory:", log=log)
+  user = user or ("postgres" if t == "postgres" else "root")
   return cls(db_name, host, user, password, port or _PORTS[t], log=log)
 
 #-------------------------------------------------------------------------------------- Exports

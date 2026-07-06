@@ -438,13 +438,11 @@ class Struct:
   def _decode_field(self, field:Field, msg:bytes, offset:int, endian:Endian) -> tuple[Any, int]:
     """Decode a single field from bytes. Returns (value, new_offset)."""
     if field.type == Type.string:
-      chars = []
+      start = offset
       while offset < len(msg) and msg[offset] != 0:
-        chars.append(chr(msg[offset]))
         offset += 1
       if offset >= len(msg): raise ValueError(f"Unterminated string in field '{field.name}'")
-      offset += 1  # skip null terminator
-      return "".join(chars), offset
+      return msg[start:offset].decode("utf-8"), offset + 1
     if field.type == Type.bytes:
       if offset + 2 > len(msg):
         raise ValueError(f"Incomplete length prefix for field '{field.name}'")
@@ -512,9 +510,6 @@ class Struct:
   def _decode_single(self, msg:bytes, endian:Endian|None=None) -> tuple[dict, int]:
     """Decode a single record (without outer CRC layers). Returns (data, bytes_consumed)."""
     endian = self._get_endian(endian)
-    if self.crc_frame:
-      msg = self.crc_frame.decode(msg)
-      if msg is None: raise ValueError(f"CRC frame check failed for struct '{self.name}'")
     data = {}
     offset = 0
     for member in self._members:
@@ -543,6 +538,12 @@ class Struct:
     if self.align > 1:
       remainder = offset % self.align
       if remainder: offset += self.align - remainder
+    if self.crc_frame:
+      n = self.crc_frame.width // 8
+      crc = msg[offset:offset + n]
+      if len(crc) < n or self.crc_frame.to_int(crc) != self.crc_frame.checksum(msg[:offset]):
+        raise ValueError(f"CRC frame check failed for struct '{self.name}'")
+      offset += n
     return data, offset
 
   def encode(self, data_list:list[dict]|dict, endian:Endian|None=None) -> bytes:

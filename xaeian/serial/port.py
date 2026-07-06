@@ -22,7 +22,6 @@ Example:
   ...   response = sp.read()
 """
 
-__extras__ = ("serial", ["pyserial"])
 
 import re
 from datetime import datetime, timezone
@@ -292,8 +291,11 @@ class SerialPort:
     if remove_ansi and resp: resp = _remove_ansi(resp)
     return resp
 
-  def read_lines(self, color=c.WHITE, conv2str:bool=True) -> list[str]|None:
-    """Read available bytes, split into lines. Returns `list[str]` or `None` on empty."""
+  def read_lines(self, color=c.WHITE, conv2str:bool=True) -> list[str|bytes|None]|None:
+    """
+    Read available bytes, split into lines. Entries are `str` when `conv2str=True`
+    (`None` entry on utf-8 decode failure), raw `bytes` otherwise. `None` on empty.
+    """
     try:
       resp = self.serial.read(self.buffer_size)
     except Exception as e:

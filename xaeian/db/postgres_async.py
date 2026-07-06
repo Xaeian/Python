@@ -9,7 +9,10 @@ from typing import Any
 from ..log import Logger, Print
 
 from .abstract_async import AbstractAsyncDatabase
-from .utils import ident, serialize_params, serialize_dict, split_sql, parse_json, parse_row
+from .utils import (
+  ident, serialize_params, serialize_dict,
+  split_sql, parse_json, parse_row, _upsert_sql,
+)
 
 class PostgresAsyncDatabase(AbstractAsyncDatabase):
   """
@@ -62,19 +65,29 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
     self._max_pool = max_pool
 
   def _pg(self, sql:str) -> str:
-    """Convert `?` or `%s` placeholders to `$1`, `$2`, ..."""
+    """Convert `?` or `%s` placeholders to `$1`, `$2`, ... (quoted literals untouched)."""
     result, idx, i = [], 1, 0
     n = len(sql)
+    quoted = False
     while i < n:
-      if sql[i] == "?":
+      ch = sql[i]
+      if quoted:
+        if ch == "'" and i + 1 < n and sql[i+1] == "'":
+          result.append("''"); i += 2; continue
+        if ch == "'": quoted = False
+        result.append(ch)
+      elif ch == "'":
+        quoted = True
+        result.append(ch)
+      elif ch == "?":
         result.append(f"${idx}")
         idx += 1
-      elif i + 1 < n and sql[i:i+2] == "%s":
+      elif ch == "%" and i + 1 < n and sql[i+1] == "s":
         result.append(f"${idx}")
         idx += 1
         i += 1
       else:
-        result.append(sql[i])
+        result.append(ch)
       i += 1
     return "".join(result)
 
@@ -87,7 +100,7 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
       database=self.db_name
     )
 
-  #--------------------------------------------------------------------------------- Lifecycle
+  #---------------------------------------------------------------------------------- Lifecycle
 
   async def _ensure_pool(self):
     if self._pool is not None:
@@ -319,15 +332,8 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
 
   async def upsert(self, table:str, data:dict, on:str|list[str], update:list[str]|None=None) -> int:
     """INSERT ON CONFLICT (PostgreSQL 9.5+)."""
-    d = serialize_dict(data)
-    t = ident(table)
-    cols = ", ".join(ident(k) for k in d.keys())
-    vals = ", ".join(f"${i+1}" for i in range(len(d)))
-    conf = ident(on) if isinstance(on, str) else ", ".join(ident(x) for x in on)
-    upd_cols = update or [k for k in d.keys() if k not in (on if isinstance(on, list) else [on])]
-    sets = ", ".join(f"{ident(k)} = EXCLUDED.{ident(k)}" for k in upd_cols)
-    sql = f"INSERT INTO {t} ({cols}) VALUES ({vals}) ON CONFLICT ({conf}) DO UPDATE SET {sets}"
-    return await self.exec(sql, tuple(d.values()))
+    sql, params = _upsert_sql(table, data, on, update, self.ph, "EXCLUDED")
+    return await self.exec(sql, params)
 
   #------------------------------------------------------------------------ Database Management
 

@@ -9,19 +9,22 @@ from typing import Callable
 from ..log import Logger, Print
 from ..colors import Color as c
 
-Filter   = Callable[[str], bool]
-Progress = Callable[[str, int, int], None]
-Action   = tuple[str, str]
+#---------------------------------------------------------------------------------------- Types
 
-#------------------------------------------------------------------------------------------ Types
+# (rel_path) → include?
+Filter = Callable[[str], bool]
+# (path, done, total): rel for sync/dir, remote for single
+Progress = Callable[[str, int, int], None]
+# ("put"|"get"|"skip"|"delete", rel_path)
+Action = tuple[str, str]
 
 @dataclass
 class Attrs:
   """Remote file attributes (mirrors paramiko.SFTPAttributes for sync compatibility)."""
-  st_size:  int        = 0
+  st_size: int = 0
   st_mtime: float|None = None  # UTC epoch; None if server lacks MLSD/MDTM
-  filename: str        = ""
-  is_dir:   bool       = False
+  filename: str = ""
+  is_dir: bool = False
 
 def _parse_mtime(s: str) -> float|None:
   """Parse MLSD/MDTM timestamp `YYYYMMDDHHmmss` → UTC epoch."""
@@ -30,7 +33,7 @@ def _parse_mtime(s: str) -> float|None:
     return dt.replace(tzinfo=datetime.timezone.utc).timestamp()
   except Exception: return None
 
-#-------------------------------------------------------------------------------------------- FTP
+#------------------------------------------------------------------------------------------ FTP
 
 class FTP:
   """
@@ -65,7 +68,7 @@ class FTP:
   def __enter__(self): self.connect(); return self
   def __exit__(self, *_): self.disconnect()
 
-  #----------------------------------------------------------------------------------- Connection
+  #--------------------------------------------------------------------------------- Connection
 
   def connect(self):
     """Open FTP session and detect server capabilities (MLSD, MFMT)."""
@@ -95,7 +98,7 @@ class FTP:
   def _require_connected(self):
     if not self._ftp: raise RuntimeError("FTP not connected: call connect() first")
 
-  #---------------------------------------------------------------------------------- Single file
+  #-------------------------------------------------------------------------------- Single file
 
   def stat(self, remote: str) -> Attrs|None:
     """Remote file attributes, or `None` if not found."""
@@ -205,7 +208,7 @@ class FTP:
     self._require_connected()
     self._ftp.rename(src, dst)
 
-  #--------------------------------------------------------------------------------- Directories
+  #-------------------------------------------------------------------------------- Directories
 
   def mkdir(self, remote: str):
     """Create remote directory recursively, idempotent."""
@@ -252,7 +255,7 @@ class FTP:
       else: self.remove(path)
     self._ftp.rmd(remote)
 
-  #------------------------------------------------------------------------------ Batch transfer
+  #----------------------------------------------------------------------------- Batch transfer
 
   def put_dir(
     self,
@@ -302,7 +305,7 @@ class FTP:
     self._require_connected()
     self._get_dir_rec(remote, remote, Path(local), filter, callback)
 
-  #---------------------------------------------------------------------------------------- Sync
+  #--------------------------------------------------------------------------------------- Sync
 
   def sync_push(
     self,
@@ -336,7 +339,7 @@ class FTP:
       f.relative_to(root).as_posix(): f
       for f in root.rglob("*") if f.is_file()
     }
-    remote_idx = self._index_remote(remote)
+    remote_idx = self._index_remote(remote, filter=filter)
     actions: list[Action] = []
     for rel, lpath in local_files.items():
       if filter and not filter(rel): continue
@@ -388,7 +391,7 @@ class FTP:
       {f.relative_to(root).as_posix(): f for f in root.rglob("*") if f.is_file()}
       if root.exists() else {}
     )
-    remote_idx = self._index_remote(remote)
+    remote_idx = self._index_remote(remote, filter=filter)
     actions: list[Action] = []
     for rel, rs in remote_idx.items():
       if filter and not filter(rel): continue
@@ -409,10 +412,12 @@ class FTP:
     self._log_sync("sync_pull", actions, dry_run)
     return actions
 
-  #------------------------------------------------------------------------------------- Helpers
+  #------------------------------------------------------------------------------------ Helpers
 
-  def _index_remote(self, remote: str, _rel: str = "") -> dict[str, Attrs]:
-    """Recursively build `{rel_path: Attrs}` for remote dir."""
+  def _index_remote(
+    self, remote: str, _rel: str = "", filter: Filter|None = None
+  ) -> dict[str, Attrs]:
+    """Recursively build `{rel_path: Attrs}` for remote dir, pruning filtered paths."""
     idx: dict = {}
     if self._has_mlsd:
       try: entries = list(self._ftp.mlsd(remote, facts=["size", "modify", "type"]))
@@ -421,8 +426,10 @@ class FTP:
         if name in (".", ".."): continue
         rel = f"{_rel}/{name}" if _rel else name
         if facts.get("type", "file") in ("dir", "cdir", "pdir"):
-          idx.update(self._index_remote(f"{remote}/{name}", rel))
+          if filter and not (filter(rel) and filter(f"{rel}/")): continue  # prune excluded dir
+          idx.update(self._index_remote(f"{remote}/{name}", rel, filter))
         else:
+          if filter and not filter(rel): continue
           idx[rel] = Attrs(
             st_size=int(facts.get("size", 0)),
             st_mtime=_parse_mtime(facts["modify"]) if "modify" in facts else None,
@@ -436,10 +443,15 @@ class FTP:
         rel = f"{_rel}/{name}" if _rel else name
         try:
           size = self._ftp.size(path)
-          if size is not None: idx[rel] = Attrs(st_size=size, st_mtime=None, filename=name)
-          else: idx.update(self._index_remote(path, rel))
+          if size is not None:
+            if filter and not filter(rel): continue
+            idx[rel] = Attrs(st_size=size, st_mtime=None, filename=name)
+          else:
+            if filter and not (filter(rel) and filter(f"{rel}/")): continue
+            idx.update(self._index_remote(path, rel, filter))
         except ftplib.error_perm:
-          idx.update(self._index_remote(path, rel))
+          if filter and not (filter(rel) and filter(f"{rel}/")): continue
+          idx.update(self._index_remote(path, rel, filter))
     return idx
 
   def _get_dir_rec(
@@ -466,7 +478,7 @@ class FTP:
     suffix = f" {c.GREY}(dry){c.END}" if dry_run else ""
     self.log.inf(f"{op} {' '.join(parts)}{suffix}")
 
-#---------------------------------------------------------------------------------------- Helpers
+#-------------------------------------------------------------------------------------- Helpers
 
 def _unchanged(rs: Attrs, lmtime: float, lsize: int) -> bool:
   """Skip check: mtime+size if available, size-only otherwise."""

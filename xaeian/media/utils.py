@@ -24,7 +24,7 @@ def require_file(path:str, label:str="File") -> str:
   return path
 
 def resolve_dst(src:str, dst:str|None, inplace:bool, suffix:str) -> str:
-  """Resolve output path — common 3-way pattern.
+  """Resolve output path - common 3-way pattern.
 
   Priority: explicit `dst` > `inplace` (overwrite) > auto-suffix.
 

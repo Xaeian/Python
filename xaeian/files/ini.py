@@ -7,12 +7,19 @@ from typing import Any
 from .config import get_context
 from .path import PATH
 from .dir import DIR
-from ..xstring import ensure_suffix
 
 #-------------------------------------------------------------------------------- INI namespace
 
 class INI:
-  """INI configuration file operations."""
+  """INI configuration file operations. Auto `.ini` extension, `.conf`/`.cfg` accepted."""
+  EXTS = (".ini", ".conf", ".cfg")
+
+  @staticmethod
+  def _ensure_ext(path:str) -> str:
+    """Keep official INI-family extension (`EXTS`), else append `.ini`."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in INI.EXTS: return path
+    return path + ".ini"
 
   @staticmethod
   def format(value:Any) -> str:
@@ -66,9 +73,9 @@ class INI:
   def load(path:str) -> dict:
     """Load an INI file into a nested dict."""
     cfg = get_context()
-    path = ensure_suffix(path, ".ini")
+    path = INI._ensure_ext(path)
     path = PATH.resolve(path, read=True)
-    if not os.path.exists(path): return {}
+    if not os.path.isfile(path): return {}
     with open(path, "r", encoding=cfg.encoding) as file:
       lines = file.readlines()
     ini: dict[str, Any] = {}
@@ -102,7 +109,7 @@ class INI:
   ) -> None:
     """Save a dict to an INI file with optional comments."""
     cfg = get_context()
-    path = DIR._resolve_write(path, ".ini")
+    path = DIR._resolve_write(INI._ensure_ext(path), "")
     comment_section = comment_section or {}
     comment_field = comment_field or {}
     def write_comment_lines(f, text:str):

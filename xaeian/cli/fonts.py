@@ -7,7 +7,7 @@ Rename font files. Two layouts:
 - `system`: flat dir, PascalCase naming for reportlab/PIL/fontconfig.
   Convention: `Inter-Regular.ttf`, `JetBrainsMono-BoldItalic.ttf`.
 
-Both modes parse filenames only — no font file inspection. Optional `--meta`
+Both modes parse filenames only - no font file inspection. Optional `--meta`
 flag rewrites TTF name table to match new file name (requires `fonttools`).
 
 Convention details:
@@ -113,7 +113,7 @@ JUNK_TOKENS = {
   "vietnamese", "arabic", "hebrew", "devanagari", "thai",
 }
 
-#--------------------------------------------------------------------------- Family name helpers
+#-------------------------------------------------------------------------- Family name helpers
 def _slug_to_family(slug:str) -> str:
   """Reverse slug to family name: `jetbrains-mono` → `JetBrains Mono`."""
   key = slug.replace("-", "")
@@ -142,12 +142,12 @@ def _family_to_pascal(family:str) -> str:
   """`JetBrains Mono` → `JetBrainsMono`, `Inter Display` → `InterDisplay`"""
   return "".join(w for w in re.split(r"\s+", family.strip()) if w)
 
-#--------------------------------------------------------------------------- Style/weight parsing
+#------------------------------------------------------------------------- Style/weight parsing
 def _extract_weight_italic(style:str) -> tuple[int|str, bool]:
   """Extract weight and italic flag from style string like `BoldItalic`,
   `700italic`, `semibold`, `300`, `regular`, `Oblique`, `BoldOblique`.
 
-  `Oblique` is normalized to italic — they're visually equivalent and the
+  `Oblique` is normalized to italic - they're visually equivalent and the
   distinction matters only for typographic purists. xaeian convention uses
   `Italic` for both.
   """
@@ -249,7 +249,7 @@ def _parse_filename(stem:str) -> tuple[str, int|str, bool]|None:
   slug = "-".join(parts)
   return (_slug_to_family(slug), weight, italic) if slug else None
 
-#--------------------------------------------------------------------------- Target naming
+#-------------------------------------------------------------------------------- Target naming
 def _weight_to_mode(weight:int|str, italic:bool) -> str:
   """Convert (weight, italic) to PascalCase mode name for system layout.
 
@@ -287,7 +287,7 @@ def _rewrite_metadata(path:str, family:str, weight:int|str, italic:bool):
   plus OS/2 weight class and fsSelection italic bit. Variable fonts get
   `weight=400` written (the static instance the file currently represents).
 
-  Requires `fonttools` — raises ImportError if missing.
+  Requires `fonttools` - raises ImportError if missing.
   """
   from fontTools.ttLib import TTFont
   font = TTFont(path)
@@ -298,13 +298,13 @@ def _rewrite_metadata(path:str, family:str, weight:int|str, italic:bool):
   subfamily = _weight_to_mode(weight_int, italic)
   full_name = f"{family} {subfamily}".strip()
   postscript = full_name.replace(" ", "").replace("-", "")
-  # Name records — both Mac (platform 1) and Windows (platform 3) variants.
+  # Name records - both Mac (platform 1) and Windows (platform 3) variants.
   # nameID: 1=family, 2=subfamily, 4=full name, 6=postscript name,
   # 16=preferred family, 17=preferred subfamily.
   records = {
     1: family,
     2: subfamily,
-    3: f"{postscript};1.000;XAEIAN",   # unique ID — vendor "XAEIAN" + version
+    3: f"{postscript};1.000;XAEIAN",   # unique ID - vendor "XAEIAN" + version
     4: full_name,
     6: postscript,
     16: family,
@@ -316,7 +316,7 @@ def _rewrite_metadata(path:str, family:str, weight:int|str, italic:bool):
   # Drop nameID 18-25 (legacy / variations) so they don't override the new ones
   name_table.names = [
     n for n in name_table.names
-    if n.nameID < 18 or n.nameID not in {18, 19, 20, 21, 22, 23, 24, 25}
+    if n.nameID not in {18, 19, 20, 21, 22, 23, 24, 25}
   ]
   if os2 is not None:
     os2.usWeightClass = weight_int
@@ -328,12 +328,12 @@ def _rewrite_metadata(path:str, family:str, weight:int|str, italic:bool):
       if weight_int == 400:
         os2.fsSelection |= 0x40
   if head is not None:
-    head.macStyle |= 2 if italic else 0
-    head.macStyle |= 1 if weight_int >= 700 else 0
+    head.macStyle &= ~0x3  # clear stale bold/italic bits
+    head.macStyle |= (1 if weight_int >= 700 else 0) | (2 if italic else 0)
   font.save(path)
   font.close()
 
-#---------------------------------------------------------------------------------------- API
+#------------------------------------------------------------------------------------------ API
 def rename_fonts(
   root: str,
   css: str|None = None,
@@ -474,7 +474,7 @@ def _generate_css(font_dir:str, css_path:str, results:list[dict], dry_run:bool):
     FILE.save(css_path, content)
     p.ok(f"CSS → {c.TEAL}{css_path}{c.END} {c.GREY}({len(blocks)} faces){c.END}")
 
-#---------------------------------------------------------------------------------------- CLI
+#------------------------------------------------------------------------------------------ CLI
 EXAMPLES = """
 examples:
   xn fonts web/fonts/                              Web flat (slug-weight)
@@ -485,7 +485,7 @@ examples:
 """
 
 def main():
-  from ._args import _make_parser
+  from ._args import _make_parser, _add_help
   parser = _make_parser("Rename font files to xaeian convention (web or system layout)", EXAMPLES)
   parser.add_argument("root", help="Directory with font files")
   parser.add_argument("--mode", choices=["web", "system"], default="web",
@@ -496,8 +496,7 @@ def main():
     help="Rewrite TTF/OTF name table to match new files (needs fontTools)")
   parser.add_argument("--dry-run", action="store_true",
     help="Preview without renaming or writing files")
-  parser.add_argument("-h", "--help", action="help",
-    help="Show this help message and exit")
+  _add_help(parser)
   args = parser.parse_args()
   root = os.path.abspath(args.root)
   if not PATH.is_dir(root):

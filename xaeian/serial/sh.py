@@ -28,7 +28,6 @@ Example:
   ...     data = sh.mbb_load_str()
 """
 
-__extras__ = ("serial", ["pyserial"])
 
 import re, time
 from datetime import datetime, timezone
@@ -55,7 +54,7 @@ def convert_value(value:str|None):
     try: return float(value)
     except ValueError: return value
 
-#------------------------------------------------------------------------------------------- Shell
+#---------------------------------------------------------------------------------------- Shell
 
 class Shell(SerialPort):
   """
@@ -116,13 +115,14 @@ class Shell(SerialPort):
     """
     Send command, read response, return as stripped string.
 
-    Retries on validator failure or exception. Per-call `timeout_ms` overrides
-    the port's default read timeout for this exec only (restored after).
+    Retries on empty response, validator failure, or exception. Per-call
+    `timeout_ms` overrides the port's default read timeout for this exec only
+    (restored after).
 
     Args:
       command: Command string. `\\n` auto-appended in `console_mode`.
       timeout_ms: One-shot read timeout override in milliseconds.
-      retries: Retry count on validator failure or exception.
+      retries: Retry count on empty response, validator failure, or exception.
       retry_delay_ms: Delay between retries.
       validator: `Callable(response) → bool`. `False` triggers retry.
 
@@ -148,7 +148,7 @@ class Shell(SerialPort):
         continue
       if timeout_ms is not None and self.serial:
         self.serial.timeout = original_timeout
-      if validator and resp is not None and not validator(resp):
+      if resp is None or (validator and not validator(resp)):
         if not attempts: return None
         time.sleep(retry_delay_ms / 1000)
         continue
@@ -245,7 +245,7 @@ class Shell(SerialPort):
   def mbb_clear(self) -> bool:
     """Clear active MBB content. Returns `True` on success."""
     resp = self.exec("mbb clear")
-    return bool(resp and "ok" in resp.lower() or "clear" in (resp or "").lower())
+    return bool(resp and ("ok" in resp.lower() or "clear" in resp.lower()))
 
   def mbb_print(self) -> str|None:
     """Print active MBB metadata via device (name, size/limit, flash, mutex)."""

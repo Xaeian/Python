@@ -19,10 +19,6 @@ except ImportError:
 
 #------------------------------------------------------------------------ Files (bound context)
 
-_NAMESPACE_CLASSES = (PATH, DIR, FILE, INI, CSV, JSON)
-if YAML is not None:
-  _NAMESPACE_CLASSES = _NAMESPACE_CLASSES + (YAML,)
-
 class _BoundNamespace:
   """Proxy that runs namespace methods under a specific `Config`."""
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xaeian"
-version = "0.7.3"
+version = "0.7.4"
 description = "Python utilities for files, strings, time, serial, structs, media, electronics, plotting, and database and more..."
 readme = "readme.md"
 license = {text = "MIT"}
@@ -20,8 +20,11 @@ dsp = ["numpy", "scipy"]
 eda = ["PyMuPDF", "pypdf", "sexpdata"]
 media = ["Pillow", "PyMuPDF", "pypdf"]
 plot = ["matplotlib", "numpy"]
+serial = ["pyserial"]
+sftp = ["paramiko"]
 time = ["pytz", "tzlocal"]
-all = ["Pillow", "PyMuPDF", "aiomysql", "aiosqlite", "asyncpg", "matplotlib", "numpy", "psycopg2-binary", "pymysql", "pypdf", "pytz", "scipy", "sexpdata", "tzlocal"]
+yaml = ["pyyaml"]
+all = ["Pillow", "PyMuPDF", "aiomysql", "aiosqlite", "asyncpg", "matplotlib", "numpy", "paramiko", "psycopg2-binary", "pymysql", "pypdf", "pyserial", "pytz", "pyyaml", "scipy", "sexpdata", "tzlocal"]
 
 [project.scripts]
 xn = "xaeian.__main__:main"
@@ -31,3 +34,7 @@ Repository = "https://github.com/Xaeian/Python"
 
 [tool.setuptools.packages.find]
 include = ["xaeian*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_functions = ["*"]

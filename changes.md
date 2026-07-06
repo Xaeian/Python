@@ -1,5 +1,12 @@
 # Changes `xaeian`
 
+## `0.7.4` Refactor
+
+- `files`: `INI` accepts `.conf`/`.cfg`, `YAML.save` keeps `.yml`
+- Fixed extras: `[serial]`, `[sftp]`, `[yaml]` install their deps again
+- Bug fixes across `cstruct`, `db`, `table`, `log`, `xtime`, `media`, `serial`
+- Full style pass, dead code removed
+
 ## `0.7.3` SFTP, tests
 
 - `net`: `SFTP.exec` `check` flag, `filter` prunes remote dirs

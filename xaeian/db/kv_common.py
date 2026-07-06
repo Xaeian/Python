@@ -8,7 +8,7 @@ import time
 from typing import Any, TypeAlias, TypedDict, Union
 from .utils import ident
 
-#---------------------------------------------------------------------------------- Types
+#---------------------------------------------------------------------------------------- Types
 
 JsonValue: TypeAlias = Union[
   None, bool, int, float, str,
@@ -27,7 +27,7 @@ class KvEntry(TypedDict):
   value: JsonValue
   updated_at: int
 
-#-------------------------------------------------------------------------------- Constants
+#------------------------------------------------------------------------------------ Constants
 
 KEY_MAX = 256
 VALUE_MAX_BYTES = 1_000_000  # library-level cap on canonical JSON utf-8 size
@@ -37,7 +37,7 @@ VALUE_MAX_BYTES = 1_000_000  # library-level cap on canonical JSON utf-8 size
 # DDL via ident(), unlike keys which go through bound parameters.
 _TABLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-#-------------------------------------------------------------------------------- Validators
+#----------------------------------------------------------------------------------- Validators
 
 def check_key(key:Any):
   """Minimal sanity check for key. Library leaves naming policy to caller.
@@ -75,7 +75,7 @@ def check_table(table:Any):
       f"(SQL identifier rules)"
     )
 
-#---------------------------------------------------------------------------------- JSON
+#----------------------------------------------------------------------------------------- JSON
 
 def dumps(value:JsonValue) -> str:
   """Canonical JSON: sorted keys, no whitespace, unicode preserved.
@@ -105,13 +105,13 @@ def loads(raw:Any, key:str) -> JsonValue:
   except json.JSONDecodeError as e:
     raise ValueError(f"corrupted JSON for key {key!r}: {e}") from e
 
-#---------------------------------------------------------------------------------- Time
+#----------------------------------------------------------------------------------------- Time
 
 def now_ms() -> int:
   """Current time as epoch milliseconds."""
   return time.time_ns() // 1_000_000
 
-#---------------------------------------------------------------------------- SQL builders
+#--------------------------------------------------------------------------------- SQL builders
 # Note: assumes mainstream SQL dialect (sqlite, mysql, postgres).
 # Exotic backends may need overrides at AbstractDatabase level.
 

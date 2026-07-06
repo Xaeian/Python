@@ -21,10 +21,12 @@ Example:
 """
 
 import sys, re, os, shutil
+_HINT = "Install with: pip install xaeian[eda]"
+
 try:
   from sexpdata import loads
 except ImportError:
-  raise ImportError("Install with: pip install xaeian[eda]")
+  raise ImportError(_HINT)
 
 from typing import Literal
 from ..files import FILE, DIR, CSV, PATH
@@ -39,17 +41,17 @@ from ..table import (
 p = Print()
 
 RENDER_COLORS = {
-  "green":  ("#205F3ACC", "White"),
-  "red":    ("#7E2424D9", "White"),
-  "blue":   ("#1E4778D9", "White"),
+  "green": ("#205F3ACC", "White"),
+  "red": ("#7E2424D9", "White"),
+  "blue": ("#1E4778D9", "White"),
   "yellow": ("#C49A24CC", "White"),
-  "white":  ("#E8DFD0E6", "#000000"),
-  "black":  ("#181818E6", "White"),
+  "white": ("#E8DFD0E6", "#000000"),
+  "black": ("#181818E6", "White"),
   "purple": ("#43236ED9", "White"),
 }
 RenderColor = Literal["green","red","blue","yellow","white","black","purple"]
 
-#----------------------------------------------------------------------------- KiCad class
+#---------------------------------------------------------------------------------- KiCad class
 
 class KiCad:
   """KiCad production file generator."""
@@ -142,9 +144,9 @@ class KiCad:
       "(layerselection 0x00000000_00000000_55555555_5755f5ff)", c, count=1,
     )
     layers = [
-      ("F.Mask",  "Top Solder Mask",    mask),
-      ("B.Mask",  "Bottom Solder Mask", mask),
-      ("F.SilkS", "Top Silk Screen",    silk),
+      ("F.Mask", "Top Solder Mask", mask),
+      ("B.Mask", "Bottom Solder Mask", mask),
+      ("F.SilkS", "Top Silk Screen", silk),
       ("B.SilkS", "Bottom Silk Screen", silk),
     ]
     if "(stackup" in c:
@@ -337,7 +339,7 @@ class KiCad:
       try:
         from ..media.pdf import pdf_add_text
       except ImportError:
-        raise ImportError("Install with: pip install xaeian[eda]")
+        raise ImportError(_HINT)
       pdf_add_text(
         pdf_name, pdf_name, desc,
         (33, 20), "cobo", 10, desc_color, inplace=True,
@@ -377,7 +379,7 @@ class KiCad:
     try:
       from ..media.pdf import pdf_merge
     except ImportError:
-      raise ImportError("Install with: pip install xaeian[eda]")
+      raise ImportError(_HINT)
     pdf_merge(self.pdf_pages, pdf_name)
     FILE.remove(self.pdf_pages)
 

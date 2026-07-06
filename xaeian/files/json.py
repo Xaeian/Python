@@ -166,7 +166,7 @@ class JSON:
     """Save JSON with smart formatting."""
     cfg = get_context()
     path = DIR._resolve_write(path, ".json")
-    with open(path, "w", encoding=cfg.encoding) as file:
+    with open(path, "w", encoding=cfg.encoding, newline="\n") as file:
       file.write(JSON.smart(
         content, max_line=max_line,
         array_wrap=array_wrap, compact_dict=compact_dict,

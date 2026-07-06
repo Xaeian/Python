@@ -64,6 +64,8 @@ class Ico:
   INF = f"{Color.BLUE}INF{Color.END}"
   ERR = f"{Color.RED}ERR{Color.END}"
   WRN = f"{Color.YELLOW}WRN{Color.END}"
+  CRT = f"{Color.MAGNTA}CRT{Color.END}"
+  PNC = f"{Color.GOLD}PNC{Color.END}"
   OK =  f"{Color.GREEN}OK{Color.END}"
   TIP = f"{Color.VIOLET}TIP{Color.END}"
   RUN = f"{Color.ORANGE}RUN{Color.END}"

@@ -45,13 +45,13 @@ examples:
 """
 
 def main():
-  from ..cli._args import _make_parser
+  from ..cli._args import _make_parser, _add_help
   parser = _make_parser("Remove metadata from PDFs and images (auto-detects by extension)", EXAMPLES)
   parser.add_argument("src", help="Input file path")
   parser.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
     help="Output path (default: <n>-nometa.<ext>)")
   parser.add_argument("-i", "--inplace", action="store_true", help="Overwrite source file")
-  parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
+  _add_help(parser)
   args = parser.parse_args()
   name = os.path.basename(args.src)
   ext = os.path.splitext(name)[1].lower()

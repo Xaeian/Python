@@ -33,7 +33,7 @@ class CSV:
     cfg = get_context()
     path = ensure_suffix(path, ".csv")
     path = PATH.resolve(path, read=True)
-    if not os.path.exists(path): return []
+    if not os.path.isfile(path): return []
     rows: list[dict[str, Any]] = []
     with open(path, "r", encoding=cfg.encoding, newline="") as file:
       reader = csv.DictReader(file, delimiter=delimiter)
@@ -56,7 +56,7 @@ class CSV:
     cfg = get_context()
     path = ensure_suffix(path, ".csv")
     path = PATH.resolve(path, read=True)
-    if not os.path.exists(path): return []
+    if not os.path.isfile(path): return []
     with open(path, "r", encoding=cfg.encoding, newline="") as file:
       reader = csv.reader(file, delimiter=delimiter)
       rows: list[list[Any]] = [r for r in reader]

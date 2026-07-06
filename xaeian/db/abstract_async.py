@@ -9,9 +9,7 @@ from typing import NoReturn, Any
 
 from .errors import DatabaseError
 from .utils import (
-  ident, ph, ph_list, renum_ph, serialize_params,
-  serialize_dict, parse_json, parse_row,
-  _insert_sql, _insert_many_sql, _update_sql, _find_sql,
+  ident, parse_json, _insert_sql, _insert_many_sql, _update_sql, _find_sql,
 )
 
 class AbstractAsyncDatabase(ABC):
@@ -53,6 +51,9 @@ class AbstractAsyncDatabase(ABC):
     s = " ".join(sql.split())[:100]
     print(f"[{self.db_name or 'db'}] {op}: {s} {params if params else ''}")
 
+  def _rowcount(self, cur) -> int:
+    return max(0, cur.rowcount) if cur.rowcount is not None else 0
+
   def _err(self, op:str, exc:Exception, sql:str|None=None, params:tuple|None=None) -> NoReturn:
     err = DatabaseError(op, exc, sql=sql, params=params)
     if self.log: self.log.error(f"[{self.db_name or 'db'}] {err}")
@@ -68,7 +69,7 @@ class AbstractAsyncDatabase(ABC):
     """Transaction context manager."""
     raise NotImplementedError
 
-  #--------------------------------------------------------------------------------- Lifecycle
+  #---------------------------------------------------------------------------------- Lifecycle
 
   @property
   def pool(self):

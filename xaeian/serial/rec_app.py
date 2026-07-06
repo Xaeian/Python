@@ -1,3 +1,5 @@
+# xaeian/serial/rec_app.py
+
 """Multimeter recorder: continuous CSV log + space/enter capture, all-in-one."""
 
 import threading, time
@@ -31,7 +33,7 @@ def capture():
   if not any(r.value is not None for r in recs):
     print(f"{Color.YELLOW}No measurement, capture skipped{Color.END}")
     return
-  for r in recs: r.print(f"{Color.LIME}Captured: {r.value}")
+  for r in recs: r.print(f"{Color.LIME}Captured: {r.value}{Color.END}")
   CSV.add_row(f"capture-{DATE}.csv", make_row())
 
 if __name__ == "__main__":

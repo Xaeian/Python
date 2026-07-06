@@ -172,14 +172,14 @@ def img_scrub_metadata(src:str, dst:str|None=None, inplace:bool=False) -> str:
   if ext == ".png":
     clean.save(out_path, optimize=True, compress_level=9)
   elif ext in (".jpg", ".jpeg"):
-    clean.save(out_path, quality="keep", optimize=True, progressive=True, subsampling="keep")
+    clean.save(out_path, quality=95, optimize=True, progressive=True)
   elif ext == ".webp":
     clean.save(out_path, method=6)
   else:
     clean.save(out_path)
   return out_path
 
-#-------------------------------------------------------------------------------------- Resize
+#--------------------------------------------------------------------------------------- Resize
 
 def img_resize(
   src: str,
@@ -220,7 +220,7 @@ def img_resize(
   resized.save(out_path)
   return out_path
 
-#------------------------------------------------------------------------------------- Convert
+#-------------------------------------------------------------------------------------- Convert
 
 def img_convert(src:str, dst:str, quality:int=90) -> str:
   """Convert image to different format (detected from `dst` extension).
@@ -252,7 +252,7 @@ def img_convert(src:str, dst:str, quality:int=90) -> str:
     image.save(dst)
   return dst
 
-#------------------------------------------------------------------------------------ Compress
+#------------------------------------------------------------------------------------- Compress
 
 def img_compress(
   src: str,
@@ -340,7 +340,10 @@ def img_compress(
     if data is None: continue
     stem = os.path.splitext(os.path.basename(filepath))[0]
     if is_single and out_path is not None:
-      final = os.path.join(os.path.dirname(filepath), f"{stem}{ext}") if inplace else out_path
+      if dst is not None:  # explicit dst wins over inplace
+        final = out_path
+      else:
+        final = os.path.join(os.path.dirname(filepath), f"{stem}{ext}")
     elif is_single:
       final = os.path.join(os.path.dirname(filepath), f"{stem}-min{ext}")
     else:
@@ -349,7 +352,7 @@ def img_compress(
     DIR.ensure(final)
     with open(final, "wb") as f:
       f.write(data)
-    if inplace and final != filepath and os.path.isfile(filepath):
+    if inplace and dst is None and final != filepath and os.path.isfile(filepath):
       os.remove(filepath)
     results.append({
       "src": filepath,

@@ -13,8 +13,8 @@ Classes:
   `VConv`: voltage converter resistor divider formulas and finder
 
 Example:
-  >>> from xaeian.eda.ee import E24, VConv, expand_series
-  >>> results = VConv.find(3.3, VConv.AOZ1282)
+  >>> from xaeian.eda.ee import AOZ1282
+  >>> results = AOZ1282.find(3.3)
   >>> for R1, R2, vout in results:
   ...   print(f"R1={R1}kΩ R2={R2}kΩ → {vout:.4f}V")
 """
@@ -44,14 +44,14 @@ def expand_series(
 
   Example:
     >>> expand_series(E6, decades=(1, 10, 100))
-    [1.0, 1.5, 2.2, ..., 68.0]
+    [1.0, 1.5, 2.2, ..., 680.0]
   """
   return sorted(set(round(x * m, 2) for m in decades for x in series))
 
 #---------------------------------------------------------------------------------- VConv class
 
 class VConv:
-  """Voltage converter resistor divider — callable with `.find()`."""
+  """Voltage converter resistor divider - callable with `.find()`."""
 
   def __init__(self, formula, vref:float, doc:str=""):
     self._formula = formula
@@ -77,7 +77,7 @@ class VConv:
       List of `(R1_kΩ, R2_kΩ, Vout)` tuples, best match first.
     """
     if rseries is None:
-      rseries = expand_series(sorted(set(E6 + E12 + E24)))
+      rseries = expand_series(E24)
     ref = vref if vref is not None else self.vref
     results = []
     for R1 in rseries:

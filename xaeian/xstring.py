@@ -196,7 +196,7 @@ def _normalize_sql(sql:str) -> str:
   String literals (`'...'`, with `''` escaping) are preserved verbatim so their
   content is never mangled; only the surrounding SQL is normalized.
   """
-  spans = []          # list of (is_quoted, text)
+  spans = [] # list of (is_quoted, text)
   buf = []
   i, n = 0, len(sql)
   while i < n:
@@ -256,7 +256,13 @@ def split_sql(sqls:str) -> list[str]:
     if sql: out.append(sql + ";")
   return out
 
-def strip_comments(string:str, line:str="//", block:tuple=("/*", "*/"), quotes:str='"') -> str:
+def strip_comments(
+  string:str,
+  line:str = "//",
+  block:tuple = ("/*", "*/"),
+  quotes:str = '"',
+  esc:str|None = None,
+) -> str:
   """
   Remove comments while preserving quoted strings.
 
@@ -265,6 +271,7 @@ def strip_comments(string:str, line:str="//", block:tuple=("/*", "*/"), quotes:s
     line: Line comment marker (e.g., `"//"`, `"#"`). `None` to disable.
     block: Block comment markers as `(open, close)` tuple. `None` to disable.
     quotes: Quote character(s) protecting content.
+    esc: Escape character. When `None`, doubled quotes escape (`""`).
 
   Returns:
     Text with comments removed.
@@ -280,7 +287,11 @@ def strip_comments(string:str, line:str="//", block:tuple=("/*", "*/"), quotes:s
     ch = string[i]
     if quote_char:
       result.append(ch)
-      if ch == quote_char and i + 1 < len(string) and string[i + 1] == quote_char:
+      if esc and ch == esc and i + 1 < len(string):
+        result.append(string[i + 1])
+        i += 2
+        continue
+      if not esc and ch == quote_char and i + 1 < len(string) and string[i + 1] == quote_char:
         result.append(string[i + 1])
         i += 2
         continue
@@ -304,7 +315,7 @@ def strip_comments(string:str, line:str="//", block:tuple=("/*", "*/"), quotes:s
 
 def strip_comments_c(string:str) -> str:
   """Strip C/C++/Java/JavaScript comments (`//` and `/* */`)."""
-  return strip_comments(string, line="//", block=("/*", "*/"), quotes='"')
+  return strip_comments(string, line="//", block=("/*", "*/"), quotes='"', esc="\\")
 
 def strip_comments_sql(string:str) -> str:
   """Strip SQL comments (`--` and `/* */`)."""

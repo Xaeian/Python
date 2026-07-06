@@ -19,12 +19,12 @@ from ..files import DIR
 from ..cmd import which
 from .utils import require_file, resolve_dst
 
-#--------------------------------------------------------------------------------------- Types
+#---------------------------------------------------------------------------------------- Types
 
 PdfCompatLevel = Literal["1.2", "1.3", "1.4", "1.5", "1.6", "1.7"]
 PdfSettings = Literal["/screen", "/ebook", "/printer", "/prepress", "/default"]
 
-#----------------------------------------------------------------------------------- Compress
+#------------------------------------------------------------------------------------- Compress
 
 def pdf_compress(
   src: str,
@@ -98,7 +98,7 @@ def pdf_scrub_metadata(src:str, dst:str|None=None, inplace:bool=False) -> str:
     writer.write(f)
   return out_path
 
-#------------------------------------------------------------------------------------- Structure
+#------------------------------------------------------------------------------------ Structure
 
 def pdf_merge(paths:Sequence[str], dst:str) -> str:
   """Merge multiple PDFs into one.
@@ -148,7 +148,7 @@ def pdf_split(src:str, dst_dir:str, prefix:str="page") -> list[str]:
     created.append(out_path)
   return created
 
-#--------------------------------------------------------------------------------------- Pages
+#---------------------------------------------------------------------------------------- Pages
 
 def parse_pages(spec:str|int|Sequence[str|int], total:int) -> list[int]:
   """Parse page specification into 0-based indices.
@@ -207,7 +207,7 @@ def pdf_extract(src:str, dst:str, pages:str|int|Sequence[str|int]) -> str:
     writer.write(f)
   return dst
 
-#---------------------------------------------------------------------------------------- Text
+#----------------------------------------------------------------------------------------- Text
 
 FitzFontname = Literal[
   "helv", "hebo", "heit", "hebi",

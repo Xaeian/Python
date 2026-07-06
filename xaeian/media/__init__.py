@@ -13,4 +13,4 @@ Submodules:
 Requires: `Pillow`, `pypdf`, `PyMuPDF`
 """
 
-__extras__ = {"media": ["Pillow", "pypdf", "PyMuPDF"]}
+__extras__ = ("media", ["Pillow", "pypdf", "PyMuPDF"])

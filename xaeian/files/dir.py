@@ -273,7 +273,7 @@ class DIR:
     with zipfile.ZipFile(src, "r") as zf:
       zf.extractall(output)
     return PATH.normalize(output)
-  
+
   @staticmethod
   def unzip_bytes(data:bytes, output:str) -> str:
     """

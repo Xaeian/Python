@@ -71,12 +71,13 @@ db.find("users", order="name", limit=10)
 async with db.transaction():
   db.update("users", {"verified": True}, "id = ?", 42)
 
-# Serial recorders: threaded read + 1Hz CSV append
-from xaeian.serial import Recorder, RecorderPool
+# Serial recorders: threaded read, latest value via .value
+from xaeian.serial import Recorder
 recs = [Recorder(p, name=n, regex=Recorder.SCI_NORM)
   for n, p in {"U1": "COM7", "I1": "COM8"}.items()]
-pool = RecorderPool(recs, period_ms=1000, csv_path="series.csv")
-pool.start(); ...; pool.stop()
+for r in recs: r.start() # background reader threads
+... # app-side reap loop snapshots r.value (CSV, DB, MQTT)
+for r in recs: r.stop()
 
 # Plot: fluent, stacked panels, auto datetime
 from xaeian.plot import Plot

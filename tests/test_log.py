@@ -4,7 +4,7 @@
 
 import io
 import logging
-from xaeian import logger, Print
+from xaeian import logger, Print, Color
 
 # Print writes to its `file=`; assertions use substrings (the level marker text
 # is embedded in the colored Ico, so it survives regardless of ANSI codes).
@@ -60,6 +60,12 @@ def logger_writes_abbreviated_levels_to_file(tmp_path):
   content = (tmp_path / "a.log").read_text(encoding="utf-8")
   for line in ("DBG dbgmsg", "ERR boom", "WRN warn", "PNC kaboom"):
     assert line in content
+
+def logger_strips_ansi_from_lazy_percent_args(tmp_path):
+  log = logger("xaeian_test_ansi", file=str(tmp_path / "f.log"), stream=False, file_lvl=logging.DEBUG)
+  log.error("fail %s", f"{Color.RED}x{Color.END}")
+  content = (tmp_path / "f.log").read_text(encoding="utf-8")
+  assert "\x1b" not in content and "ERR fail x" in content
 
 def logger_item_inherits_last_level(tmp_path):
   log = logger("xaeian_test_b", file=str(tmp_path / "b.log"), stream=False, file_lvl=logging.DEBUG)

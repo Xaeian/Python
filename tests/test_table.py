@@ -101,6 +101,13 @@ def join_modes_match_keys(how, names):
   right = [{"id": 1, "city": "X"}, {"id": 3, "city": "Z"}]
   assert pluck(join(left, right, on="id", how=how), "name") == names
 
+def join_right_on_suffixes_clashing_key_column():
+  # right side keyed by rid; its unrelated "id" column must not clobber the left key
+  left = [{"id": 1, "name": "L"}]
+  right = [{"rid": 1, "id": 999, "val": "R"}]
+  row = join(left, right, on="id", right_on="rid")[0]
+  assert (row["id_l"], row["id_r"], row["val"]) == (1, 999, "R")
+
 def concat_stacks_and_fills_missing():
   assert concat([{"a": 1}], [{"b": 2}]) == [{"a": 1, "b": None}, {"a": None, "b": 2}]
 

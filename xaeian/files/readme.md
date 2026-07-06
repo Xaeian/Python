@@ -46,7 +46,7 @@ CSV.add_row("log", {"ts": 1234, "val": 3.14})      # append single row
 
 ## `INI`
 
-Nested dict with sections.
+Nested dict with sections. Auto `.ini` extension; `.conf`/`.cfg` accepted as-is.
 
 ```py
 from xaeian import INI

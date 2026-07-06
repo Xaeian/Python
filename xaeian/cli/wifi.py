@@ -109,11 +109,11 @@ examples:
 """
 
 def main():
-  from ._args import _make_parser
+  from ._args import _make_parser, _add_help
   parser = _make_parser("Extract saved Wi-Fi passwords", EXAMPLES)
   parser.add_argument("-o", "--output", default=None, metavar="PATH",
     help="Save JSON report to file")
-  parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
+  _add_help(parser)
   args = parser.parse_args()
   system = platform.system()
   if system not in ("Windows", "Linux"):

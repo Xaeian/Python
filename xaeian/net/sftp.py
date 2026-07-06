@@ -12,29 +12,21 @@ Example:
   ...   s.exec("systemctl restart app")
 """
 
+__extras__ = ("sftp", ["paramiko"])
+
 import os, stat
 from pathlib import Path
 from typing import Callable
 from ..log import Logger, Print
 from ..colors import Color as c
+from .ftp import Filter, Progress, Action, _unchanged
 
 try:
   import paramiko
 except ImportError:
   raise ImportError("Install with: pip install xaeian[sftp]")
 
-__extras__ = ("sftp", ["paramiko"])
-
-#------------------------------------------------------------------------------------------- Types
-
-# (rel_path) → include?
-Filter   = Callable[[str], bool]
-# (path, done, total): rel for sync/dir, remote for single
-Progress = Callable[[str, int, int], None]
-# ("put"|"get"|"skip"|"delete", rel_path)
-Action   = tuple[str, str]
-
-#-------------------------------------------------------------------------------------------- SFTP
+#----------------------------------------------------------------------------------------- SFTP
 
 class SFTP:
   """
@@ -69,13 +61,13 @@ class SFTP:
     self._passphrase = passphrase
     self._agent = agent
     self.log: Logger|Print|None = log
-    self._ssh:  paramiko.SSHClient|None  = None
+    self._ssh: paramiko.SSHClient|None = None
     self._sftp: paramiko.SFTPClient|None = None
 
   def __enter__(self): self.connect(); return self
   def __exit__(self, *_): self.disconnect()
 
-  #----------------------------------------------------------------------------------- Connection
+  #--------------------------------------------------------------------------------- Connection
 
   def connect(self):
     """Open SSH + SFTP session."""
@@ -89,7 +81,7 @@ class SFTP:
       kw["key_filename"] = str(Path(self._key).expanduser())
       if self._passphrase: kw["passphrase"] = self._passphrase
     elif self._password: kw["password"] = self._password
-    elif self._agent:    kw["allow_agent"] = True
+    elif self._agent: kw["allow_agent"] = True
     try:
       self._ssh.connect(**kw)
       self._sftp = self._ssh.open_sftp()
@@ -101,12 +93,12 @@ class SFTP:
   def disconnect(self):
     """Close SFTP and SSH sessions."""
     if self._sftp: self._sftp.close(); self._sftp = None
-    if self._ssh:  self._ssh.close();  self._ssh  = None
+    if self._ssh: self._ssh.close(); self._ssh = None
 
   def _require_connected(self):
     if not self._sftp: raise RuntimeError("SFTP not connected: call connect() first")
 
-  #---------------------------------------------------------------------------------- Single file
+  #-------------------------------------------------------------------------------- Single file
 
   def stat(self, remote: str) -> "paramiko.SFTPAttributes|None":
     """Remote file attributes, or `None` if not found."""
@@ -191,7 +183,7 @@ class SFTP:
     self._require_connected()
     self._posix_rename(src, dst)
 
-  #--------------------------------------------------------------------------------- Directories
+  #-------------------------------------------------------------------------------- Directories
 
   def mkdir(self, remote: str):
     """Create remote directory recursively, idempotent."""
@@ -219,7 +211,7 @@ class SFTP:
       else: self._sftp.remove(path)
     self._sftp.rmdir(remote)
 
-  #------------------------------------------------------------------------------ Batch transfer
+  #----------------------------------------------------------------------------- Batch transfer
 
   def put_dir(
     self,
@@ -269,7 +261,7 @@ class SFTP:
     self._require_connected()
     self._get_dir_rec(remote, remote, Path(local), filter, callback)
 
-  #---------------------------------------------------------------------------------------- Sync
+  #--------------------------------------------------------------------------------------- Sync
 
   def sync_push(
     self,
@@ -307,9 +299,7 @@ class SFTP:
       if filter and not filter(rel): continue
       ls = lpath.stat()
       rs = remote_idx.get(rel)
-      if rs and rs.st_size == ls.st_size and (
-        rs.st_mtime is None or int(rs.st_mtime) == int(ls.st_mtime)
-      ):
+      if rs and _unchanged(rs, ls.st_mtime, ls.st_size):
         actions.append(("skip", rel)); continue
       actions.append(("put", rel))
       if not dry_run:
@@ -360,9 +350,7 @@ class SFTP:
       lpath = root / rel
       if lpath.exists():
         ls = lpath.stat()
-        if rs.st_size == ls.st_size and (
-          rs.st_mtime is None or int(rs.st_mtime) == int(ls.st_mtime)
-        ):
+        if _unchanged(rs, ls.st_mtime, ls.st_size):
           actions.append(("skip", rel)); continue
       actions.append(("get", rel))
       if not dry_run:
@@ -376,7 +364,7 @@ class SFTP:
     self._log_sync("sync_pull", actions, dry_run)
     return actions
 
-  #---------------------------------------------------------------------------------------- Exec
+  #--------------------------------------------------------------------------------------- Exec
 
   def exec(self, cmd: str, *, check: bool = False) -> tuple[str, str]:
     """
@@ -402,7 +390,7 @@ class SFTP:
       raise RuntimeError(f"remote command failed (rc={rc}): {cmd}" + (f"\n{err}" if err else ""))
     return out, err
 
-  #------------------------------------------------------------------------------------- Helpers
+  #------------------------------------------------------------------------------------ Helpers
 
   def _posix_rename(self, src: str, dst: str):
     try: self._sftp.posix_rename(src, dst)
@@ -455,7 +443,7 @@ class SFTP:
     suffix = f" {c.GREY}(dry){c.END}" if dry_run else ""
     self.log.inf(f"{op} {' '.join(parts)}{suffix}")
 
-#---------------------------------------------------------------------------------------- Helpers
+#-------------------------------------------------------------------------------------- Helpers
 
 def _is_dir(attr: "paramiko.SFTPAttributes") -> bool:
   return stat.S_ISDIR(attr.st_mode or 0)

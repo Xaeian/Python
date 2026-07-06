@@ -5,7 +5,7 @@ Compression for PDFs and images.
 
 Example:
   >>> from xaeian.media.min import compress
-  >>> compress("report.pdf", settings="/ebook")
+  >>> compress("report.pdf", pdf_settings="/ebook")
   >>> compress("photo.jpg", max_px=1280, quality=85)
 """
 
@@ -79,7 +79,7 @@ examples:
 """
 
 def main():
-  from ..cli._args import _make_parser
+  from ..cli._args import _make_parser, _add_help
   parser = _make_parser("Compress PDFs and images: auto-detects by extension", EXAMPLES)
   parser.add_argument("src", help="Input file or directory")
   parser.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
@@ -103,10 +103,11 @@ def main():
     help="AVIF encoder speed 0-10 (default: 6)")
   parser.add_argument("--no-recursive", action="store_true",
     help="Don't walk subdirectories")
-  parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
+  _add_help(parser)
   args = parser.parse_args()
   name = os.path.basename(args.src.rstrip("/\\")) or args.src
   ext = os.path.splitext(name)[1].lower()
+  orig_kB = os.path.getsize(args.src) / 1024 if os.path.isfile(args.src) else 0
   try:
     result = compress(
       args.src, args.dst, args.inplace,
@@ -126,7 +127,6 @@ def main():
     p.err(f"Failed to compress {c.ORANGE}{name}{c.END} | {e}")
     sys.exit(1)
   if isinstance(result, str):
-    orig_kB = os.path.getsize(args.src) / 1024
     new_kB = os.path.getsize(result) / 1024
     ratio = (new_kB / orig_kB * 100) if orig_kB else 0
     out_name = os.path.basename(result)

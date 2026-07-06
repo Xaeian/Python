@@ -23,12 +23,12 @@ from .file import FILE
 from .ini import INI
 from .csv import CSV
 from .json import JSON
-from .bound import _BoundNamespace, _NAMESPACE_CLASSES, Files
+from .bound import _BoundNamespace, Files
 
 __all__ = [
   "Config", "get_context", "set_context", "file_context",
   "PATH", "DIR", "FILE", "INI", "CSV", "JSON",
-  "_BoundNamespace", "_NAMESPACE_CLASSES", "Files",
+  "_BoundNamespace", "Files",
 ]
 
 try:

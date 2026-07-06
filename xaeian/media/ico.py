@@ -28,7 +28,7 @@ DEFAULT_SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
 
 FitMode = Literal["pad", "crop"]
 
-#----------------------------------------------------------------------------------- Internals
+#------------------------------------------------------------------------------------ Internals
 
 def _make_square(img:Image.Image, fit:FitMode) -> Image.Image:
   w, h = img.size
@@ -66,7 +66,7 @@ def _write_ico(path:str, sizes:list[int], blobs:list[bytes]):
     for blob in blobs:
       f.write(blob)
 
-#----------------------------------------------------------------------------------------- API
+#------------------------------------------------------------------------------------------ API
 
 def img_to_ico(
   src: str,
@@ -104,7 +104,7 @@ def img_to_ico(
   _write_ico(out_path, icon_sizes, blobs)
   return out_path
 
-#----------------------------------------------------------------------------------------- CLI
+#------------------------------------------------------------------------------------------ CLI
 
 EXAMPLES = """
 examples:
@@ -116,7 +116,7 @@ examples:
 """
 
 def main():
-  from ..cli._args import _make_parser
+  from ..cli._args import _make_parser, _add_help
   parser = _make_parser("Convert image to multi-size .ico (auto-picks sizes from source)", EXAMPLES)
   parser.add_argument("src", help="Input image path")
   parser.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
@@ -127,7 +127,7 @@ def main():
     help="Comma-separated sizes (default: auto)")
   parser.add_argument("--upscale", action="store_true",
     help="Allow upscaling beyond source size")
-  parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
+  _add_help(parser)
   args = parser.parse_args()
   name = os.path.basename(args.src)
   sizes = None
@@ -155,7 +155,8 @@ def main():
   out_name = os.path.basename(result)
   img = Image.open(args.src)
   src_w, src_h = img.size
-  icon_sizes = _pick_sizes(max(src_w, src_h), sizes, args.upscale)
+  side = min(src_w, src_h) if args.fit == "crop" else max(src_w, src_h)
+  icon_sizes = _pick_sizes(side, sizes, args.upscale)
   sizes_str = f"{c.GREY},{c.END}".join(f"{c.CYAN}{s}{c.END}" for s in icon_sizes)
   file_kB = os.path.getsize(result) / 1024
   p.ok(f"Converted {c.ORANGE}{name}{c.END} → {c.BLUE}{out_name}{c.END} "

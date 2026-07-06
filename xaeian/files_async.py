@@ -7,6 +7,7 @@ Provides async versions of `DIR`, `FILE`, `INI`, `CSV`, `JSON`, `YAML`
 using `asyncio.to_thread()` for non-blocking file I/O.
 
 Same API as sync versions: just `await` the calls.
+Generators (`DIR.iter_files`, `FILE.iter_lines`) are sync-only.
 Object-oriented access via `AsyncFiles(root_path=...)`.
 
 Example:
@@ -26,7 +27,7 @@ from .files import (
   INI as _INI,
   CSV as _CSV,
   JSON as _JSON,
-  Config, Files,
+  Files,
   get_context, set_context, file_context,
   _BoundNamespace,
 )
@@ -45,7 +46,7 @@ __all__ = [
 #----------------------------------------------------------------------------- Async namespaces
 
 class DIR:
-  """Async directory operations. Same API as `files.DIR`."""
+  """Async directory operations. Same API as `files.DIR`; `iter_files` is sync-only."""
 
   @staticmethod
   async def ensure(path, is_file=None):
@@ -83,8 +84,16 @@ class DIR:
       _DIR.zip, path, zip_output, blacklist,
     )
 
+  @staticmethod
+  async def unzip(path, output=None):
+    return await asyncio.to_thread(_DIR.unzip, path, output)
+
+  @staticmethod
+  async def unzip_bytes(data, output):
+    return await asyncio.to_thread(_DIR.unzip_bytes, data, output)
+
 class FILE:
-  """Async file read/write operations. Same API as `files.FILE`."""
+  """Async file read/write operations. Same API as `files.FILE`; `iter_lines` is sync-only."""
 
   @staticmethod
   async def exists(path):
@@ -136,6 +145,7 @@ class FILE:
 
 class INI:
   """Async INI file operations."""
+  EXTS = _INI.EXTS
   format = staticmethod(_INI.format)
   parse = staticmethod(_INI.parse)
 
@@ -223,6 +233,7 @@ class JSON:
 if _YAML is not None:
   class YAML:
     """Async YAML file operations."""
+    EXTS = _YAML.EXTS
 
     @staticmethod
     async def load(path, otherwise=None):

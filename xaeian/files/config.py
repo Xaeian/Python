@@ -52,8 +52,6 @@ def set_context(**overrides) -> Config:
   """Set global file context configuration."""
   cfg = get_context()
   new_cfg = replace(cfg, **overrides)
-  if new_cfg.root_path is None:
-    new_cfg = replace(new_cfg, root_path=_default_root_path())
   _context.set(new_cfg)
   return new_cfg
 
@@ -61,12 +59,7 @@ def set_context(**overrides) -> Config:
 def file_context(**overrides:Any):
   """Temporarily override configuration within a block."""
   cfg = get_context()
-  if overrides:
-    new_cfg = replace(cfg, **overrides)
-    if new_cfg.root_path is None:
-      new_cfg = replace(new_cfg, root_path=_default_root_path())
-  else:
-    new_cfg = cfg
+  new_cfg = replace(cfg, **overrides) if overrides else cfg
   token = _context.set(new_cfg)
   try:
     yield new_cfg

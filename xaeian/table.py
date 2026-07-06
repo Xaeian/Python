@@ -319,7 +319,7 @@ def join(
     index.setdefault(k, []).append(r)
   left_cols = _all_cols(left) if left else set()
   right_cols = _all_cols(right) if right else set()
-  overlap = (left_cols & right_cols) - {on, rk}
+  overlap = (left_cols & right_cols) - ({on} if on == rk else set())
   def _merge(lr:dict|None, rr:dict|None) -> dict:
     out = {}
     if lr:
@@ -395,7 +395,7 @@ def map_column(rows:Rows, column:str, fn:Callable[[Any], Any]) -> Rows:
       r[column] = fn(r[column])
   return rows
 
-#------------------------------------------------------------------------------- Inspection
+#----------------------------------------------------------------------------------- Inspection
 
 def describe(rows:Rows, col:str) -> dict[str, Any]:
   """
@@ -429,7 +429,7 @@ def describe(rows:Rows, col:str) -> dict[str, Any]:
     "max": vmax,
     "mean": (sum(nums) / len(nums)) if nums else None,
   }
-  
+
 #------------------------------------------------------------------------------------- Markdown
 
 def _md_esc(v:Any) -> str:
@@ -525,10 +525,10 @@ def markdown(
     | R1   |    10 |
     | R2   |    22 |
     >>> print(markdown(rows, cols=["value", "name"], header=["Val", "Ref"]))
-    |  Val | Ref |
-    | ---: | :-- |
-    |   10 | R1  |
-    |   22 | R2  |
+    | Val | Ref |
+    | --: | :-- |
+    |  10 | R1  |
+    |  22 | R2  |
   """
   if not rows: return ""
   if cols is None: cols = list(rows[0].keys())

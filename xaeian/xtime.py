@@ -66,7 +66,7 @@ class Time(datetime):
   - `t.round("mo")`: round to month start
   """
 
-  #------------------------------------------------------------------------------------- Construction
+  #------------------------------------------------------------------------------- Construction
 
   @overload
   def __new__(cls, v:TimeInput=...) -> Time: ...
@@ -110,7 +110,7 @@ class Time(datetime):
     """Create a copy of this `Time` instance."""
     return Time._from_datetime(self.replace())
 
-  #--------------------------------------------------------------------------------------- Formatting
+  #--------------------------------------------------------------------------------- Formatting
 
   def to(self, fmt:str) -> float|int|str|Time:
     """
@@ -150,7 +150,7 @@ class Time(datetime):
       return dt.isoformat(timespec="seconds")
     return self.strftime(fmt)
 
-  #----------------------------------------------------------------------------------------- Rounding
+  #----------------------------------------------------------------------------------- Rounding
 
   def round(self, unit:str) -> Time:
     """
@@ -171,11 +171,12 @@ class Time(datetime):
         start = self - timedelta(days=self.weekday())
         dt = start.replace(hour=0, minute=0, second=0, microsecond=0)
       case "mo"|"month": dt = self.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-      case "y"|"year": dt = self.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+      case "y"|"year":
+        dt = self.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
       case _: raise ValueError(f"Invalid unit '{unit}', expected: ms, s, m, h, d, w, mo, y")
     return Time._from_datetime(dt)
 
-  #--------------------------------------------------------------------------------------- Arithmetic
+  #--------------------------------------------------------------------------------- Arithmetic
 
   def __add__(self, v:str|int|float|timedelta) -> Time:
     """Add interval, seconds, or timedelta."""
@@ -203,7 +204,7 @@ class Time(datetime):
     if isinstance(v, str): return self._apply_intervals(self._flip_intervals(v))
     raise TypeError(f"Unsupported operand: Time - {type(v).__name__}")
 
-  #--------------------------------------------------------------------------------------- Comparison
+  #--------------------------------------------------------------------------------- Comparison
 
   def _to_utc(self) -> datetime:
     if self.tzinfo is None:
@@ -256,7 +257,7 @@ class Time(datetime):
     if inclusive: return lo <= self <= hi
     return lo < self < hi
 
-  #------------------------------------------------------------------------------------------- String
+  #------------------------------------------------------------------------------------- String
 
   def __str__(self) -> str:
     if self.microsecond: return self.strftime("%Y-%m-%d %H:%M:%S.%f")
@@ -265,7 +266,7 @@ class Time(datetime):
   def __repr__(self) -> str:
     return f"Time({self.to('iso')})"
 
-  #---------------------------------------------------------------------------------- Interval parsing
+  #--------------------------------------------------------------------------- Interval parsing
 
   INTERVAL_PATTERN = r"[+\-]?[0-9]*\.?[0-9]+(?:mo|ms|µs|us|y|w|d|h|m|s)"
   INTERVAL_RE = re.compile(INTERVAL_PATTERN)
@@ -307,6 +308,7 @@ class Time(datetime):
 
   def _apply_intervals(self, text:str) -> Time:
     text = text.strip()
+    if not self.is_intervals(text): raise ValueError(f"Invalid interval: '{text}'")
     tokens = text.split() if " " in text else self.INTERVAL_RE.findall(text)
     result = self
     for token in tokens: result = result._apply_interval(token)
@@ -323,7 +325,7 @@ class Time(datetime):
       else: flipped.append("-" + t)
     return " ".join(flipped)
 
-  #------------------------------------------------------------------------------------------ Factory
+  #------------------------------------------------------------------------------------ Factory
 
   PARSE_PATTERNS = [
     ("%Y-%m-%d",             r"\d{4}-\d{2}-\d{2}"),
