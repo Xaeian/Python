@@ -21,7 +21,8 @@ import uuid
 from dataclasses import dataclass
 from ..files import FILE
 
-GENERATOR_VERSION = "9.0"
+FORMAT_VERSION = "20260206"
+GENERATOR_VERSION = "10.0"
 
 def uid() -> str:
   return str(uuid.uuid4())
@@ -82,6 +83,7 @@ class Footprint:
     self.layer = layer
     self.style = style
     self._lines: list[str] = []
+    self._models: list[str] = []
 
   def _add(self, line:str):
     self._lines.append(line)
@@ -95,6 +97,8 @@ class Footprint:
     val_at:tuple = (0, 1.6, 180),
     val_layer:str = "F.Fab",
     val_font:tuple|None = None,
+    datasheet:str = "",
+    description:str = "",
   ):
     """Add Reference, Value, Datasheet, Description properties."""
     s = self.style
@@ -102,9 +106,9 @@ class Footprint:
     self._prop("Reference", self.ref, ref_at, ref_layer, font)
     font = val_font or (s.font_size, s.font_size, s.font_thick)
     self._prop("Value", self.name, val_at, val_layer, font)
-    for name in ("Datasheet", "Description"):
+    for name, value in (("Datasheet", datasheet), ("Description", description)):
       self._add(
-        f'\t(property "{name}" "" (at 0 0 0) (layer "F.Fab") (hide yes)'
+        f'\t(property "{name}" "{value}" (at 0 0 0) (layer "F.Fab") (hide yes)'
         f' (uuid "{uid()}")'
         f' (effects (font (size 1.27 1.27) (thickness 0.15))))'
       )
@@ -125,6 +129,7 @@ class Footprint:
   def attr(self, kind:str = "through_hole"):
     """Set footprint attribute."""
     self._add(f'\t(attr {kind})')
+    self._add(f'\t(duplicate_pad_numbers_are_jumpers no)')
 
   #------------------------------------------------------------------------- Drawing primitives
 
@@ -178,6 +183,15 @@ class Footprint:
       f' (end {fmt_number(ex)} {fmt_number(ey)})'
       f' (stroke (width {fmt_number(width)}) (type solid))'
       f' (layer "{layer}") (uuid "{uid()}"))'
+    )
+
+  def poly(self, pts:list[tuple], width:float, layer:str, fill:bool=True):
+    """Add `fp_poly` from `(x, y)` points."""
+    xy = " ".join(f"(xy {fmt_number(x)} {fmt_number(y)})" for x, y in pts)
+    self._add(
+      f'\t(fp_poly (pts {xy})'
+      f' (stroke (width {fmt_number(width)}) (type solid))'
+      f' (fill {"yes" if fill else "no"}) (layer "{layer}") (uuid "{uid()}"))'
     )
 
   def text(self, txt:str, x:float, y:float, layer:str,
@@ -246,7 +260,7 @@ class Footprint:
     ox, oy, oz = offset
     sx, sy, sz = scale
     rx, ry, rz = rotate
-    self._add(
+    self._models.append(
       f'\t(model "{path}"'
       f' (offset (xyz {fmt_number(ox)} {fmt_number(oy)} {fmt_number(oz)}))'
       f' (scale (xyz {fmt_number(sx)} {fmt_number(sy)} {fmt_number(sz)}))'
@@ -263,13 +277,14 @@ class Footprint:
     """Build complete footprint string."""
     header = [
       f'(footprint "{self.name}"',
-      f'\t(version 20241229)',
+      f'\t(version {FORMAT_VERSION})',
       f'\t(generator "pcbnew")',
       f'\t(generator_version "{GENERATOR_VERSION}")',
       f'\t(layer "{self.layer}")',
     ]
     footer = [
       f'\t(embedded_fonts no)',
+      *self._models,
       f')',
     ]
     return "\n".join(header + self._lines + footer)

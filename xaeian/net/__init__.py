@@ -33,6 +33,7 @@ def Remote(
   key: str|None = None,
   passphrase: str|None = None,
   agent: bool = False,
+  strict: bool = False,
   log=None,
 ) -> "SFTP|FTP": # type: ignore
   """
@@ -47,6 +48,7 @@ def Remote(
     key: SSH private key path (SFTP only).
     passphrase: Key passphrase (SFTP only).
     agent: Use SSH agent (SFTP only).
+    strict: Reject unknown host keys (SFTP only).
     log: `Print`, `Logger`, or `None`.
 
   Returns:
@@ -64,7 +66,7 @@ def Remote(
   if t == "sftp":
     if SFTP is None: raise ImportError("Install with: pip install xaeian[sftp]")
     return SFTP(host, user, p, password=password, key=key,
-      passphrase=passphrase, agent=agent, log=log)
-  return FTP(host, user, p, password=password or "", log=log)
+      passphrase=passphrase, agent=agent, strict=strict, log=log)
+  return FTP(host, user, p, password=password, log=log)
 
 __all__ = ["Remote", "FTP", "SFTP"]

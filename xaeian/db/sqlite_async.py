@@ -201,6 +201,7 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
         cur = await conn.execute(sql, p)
         rows = await cur.fetchall()
         await cur.close()
+        if conn.in_transaction: await conn.commit()  # DML via read path (e.g. RETURNING)
         return process(rows)
     except aiosqlite.Error as e:
       self._err("get_rows", e, sql, p)
@@ -223,6 +224,7 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
         rows = await cur.fetchall()
         columns = cols or [c[0] for c in cur.description]
         await cur.close()
+        if conn.in_transaction: await conn.commit()  # DML via read path (e.g. RETURNING)
         return to_dicts(rows, columns, json)
     except aiosqlite.Error as e:
       self._err("get_dicts", e, sql, p)

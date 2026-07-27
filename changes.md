@@ -1,5 +1,12 @@
 # Changes `xaeian`
 
+## `0.7.5` FTP & SFTP, SQLite fix
+
+- `db`: async `get_rows`/`get_dicts` commit `RETURNING` writes _(left the WAL lock held, or silently rolled back)_
+- `net`: hardened `FTP` and `SFTP`, fixed data loss in `sync_pull(delete=True)`
+- `eda`: footprint generator updates
+- Added `net` and async SQLite test suites
+
 ## `0.7.4` Refactor
 
 - `files`: `INI` accepts `.conf`/`.cfg`, `YAML.save` keeps `.yml`

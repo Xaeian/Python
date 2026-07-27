@@ -14,12 +14,12 @@ Example:
 
 __extras__ = ("sftp", ["paramiko"])
 
-import os, stat
+import os, stat, threading
 from pathlib import Path
 from typing import Callable
 from ..log import Logger, Print
 from ..colors import Color as c
-from .ftp import Filter, Progress, Action, _unchanged
+from .ftp import Filter, Progress, Action, _unchanged, _safe_name
 
 try:
   import paramiko
@@ -33,6 +33,9 @@ class SFTP:
   SFTP/SSH client: push/pull sync, atomic uploads, remote exec.
 
   Accepts `Print`, `Logger`, or any object with `inf/wrn/err/gap/item` as `log`.
+
+  Host keys are checked against `~/.ssh/known_hosts`: a changed key aborts.
+  An unknown host is trusted on first use unless `strict=True`.
 
   Example:
     >>> s = SFTP("host", "user", password="pass", log=Print())
@@ -51,6 +54,7 @@ class SFTP:
     key: str|None = None,
     passphrase: str|None = None,
     agent: bool = False,
+    strict: bool = False,
     log: Logger|Print|None = None,
   ):
     self.host = host
@@ -60,9 +64,12 @@ class SFTP:
     self._key = key
     self._passphrase = passphrase
     self._agent = agent
+    self._strict = strict
     self.log: Logger|Print|None = log
     self._ssh: paramiko.SSHClient|None = None
     self._sftp: paramiko.SFTPClient|None = None
+    self._index_partial = False  # a listing failed: delete must stand down
+    self._can_utime = True  # cleared when the server refuses SETSTAT
 
   def __enter__(self): self.connect(); return self
   def __exit__(self, *_): self.disconnect()
@@ -71,8 +78,12 @@ class SFTP:
 
   def connect(self):
     """Open SSH + SFTP session."""
+    self._can_utime = True
     self._ssh = paramiko.SSHClient()
-    self._ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    self._ssh.load_system_host_keys()  # without this no key is known, so none is ever checked
+    self._ssh.set_missing_host_key_policy(
+      paramiko.RejectPolicy() if self._strict else paramiko.AutoAddPolicy()
+    )
     kw: dict = {
       "hostname": self.host, "port": self.port, "username": self.user,
       "allow_agent": False, "look_for_keys": False,
@@ -85,14 +96,20 @@ class SFTP:
     try:
       self._ssh.connect(**kw)
       self._sftp = self._ssh.open_sftp()
-      if self.log: self.log.inf(f"connected {c.TURQUS}{self.host}{c.END} user:{c.VIOLET}{self.user}{c.END}")
+      if self.log:
+        self.log.inf(
+          f"connected {c.TURQUS}{self.host}{c.END} user:{c.VIOLET}{self.user}{c.END}"
+        )
     except Exception as e:
       if self.log: self.log.err(f"connect failed {c.TURQUS}{self.host}{c.END} | {e}")
       raise ConnectionError(f"SFTP connect failed host:{self.host} | {e}") from e
 
   def disconnect(self):
     """Close SFTP and SSH sessions."""
-    if self._sftp: self._sftp.close(); self._sftp = None
+    if self._sftp:
+      try: self._sftp.close()
+      except Exception: pass  # a dead channel must not strand the ssh session
+      self._sftp = None
     if self._ssh: self._ssh.close(); self._ssh = None
 
   def _require_connected(self):
@@ -135,11 +152,19 @@ class SFTP:
     label = _label or remote
     cb = (lambda done, total: callback(label, done, total)) if callback else None
     dst = f"{remote}.tmp" if atomic else remote
-    self._sftp.put(local, dst, callback=cb)
+    try: self._sftp.put(local, dst, callback=cb)
+    except Exception:
+      if atomic:
+        try: self._sftp.remove(dst)  # drop the partial .tmp
+        except Exception: pass
+      raise
     if atomic: self._posix_rename(dst, remote)
     if preserve_mtime:
       mtime = Path(local).stat().st_mtime
-      self._sftp.utime(remote, (mtime, mtime))
+      try: self._sftp.utime(remote, (mtime, mtime))
+      except Exception:
+        self._can_utime = False  # SETSTAT refused: sync_push falls back to size-only skip
+        if self.log: self.log.wrn(f"utime failed {c.GREY}{remote}{c.END}: mtime not preserved")
     if self.log: self.log.item(f"{c.GREY}{local}{c.END} → {c.GREY}{remote}{c.END}")
 
   def get(
@@ -170,6 +195,7 @@ class SFTP:
       if rstat.st_mtime is not None:
         atime = rstat.st_atime if rstat.st_atime is not None else rstat.st_mtime
         os.utime(local, (atime, rstat.st_mtime))
+      elif self.log: self.log.wrn(f"mtime unavailable {c.GREY}{remote}{c.END}: not preserved")
     if self.log: self.log.item(f"{c.GREY}{remote}{c.END} → {c.GREY}{local}{c.END}")
 
   def remove(self, remote: str):
@@ -179,7 +205,7 @@ class SFTP:
     except FileNotFoundError: pass
 
   def rename(self, src: str, dst: str):
-    """Atomic remote rename: overwrites target (posix_rename)."""
+    """Rename/move remote file: overwrites target."""
     self._require_connected()
     self._posix_rename(src, dst)
 
@@ -189,23 +215,25 @@ class SFTP:
     """Create remote directory recursively, idempotent."""
     self._require_connected()
     if not remote or remote == "/": return
-    parts = [p for p in remote.split("/") if p]
+    parts = [p for p in remote.replace("\\", "/").split("/") if p]
     prefix = "/" if remote.startswith("/") else ""
     current = ""
     for part in parts:
       current = f"{prefix}{part}" if not current else f"{current}/{part}"
       try: self._sftp.stat(current)
-      except FileNotFoundError: self._sftp.mkdir(current)
+      except FileNotFoundError:
+        try: self._sftp.mkdir(current)
+        except OSError: self._sftp.stat(current)  # lost a concurrent create: fine if it exists now
 
   def ls(self, remote: str) -> list["paramiko.SFTPAttributes"]:
     """List remote directory with attributes."""
     self._require_connected()
-    return self._sftp.listdir_attr(remote)
+    return [a for a in self._sftp.listdir_attr(remote) if _safe_name(a.filename)]
 
   def rmdir(self, remote: str):
     """Remove remote directory recursively."""
     self._require_connected()
-    for attr in self._sftp.listdir_attr(remote):
+    for attr in self.ls(remote):
       path = f"{remote}/{attr.filename}"
       if _is_dir(attr): self.rmdir(path)
       else: self._sftp.remove(path)
@@ -274,7 +302,10 @@ class SFTP:
     callback: Progress|None = None,
   ) -> list[Action]:
     """
-    Push local → remote, skipping unchanged files (mtime + size).
+    Push local → remote, skipping unchanged files.
+
+    Skip strategy: mtime+size, falling back to size-only
+    when the server refuses to set the remote mtime.
 
     Args:
       local: Local source directory.
@@ -299,7 +330,7 @@ class SFTP:
       if filter and not filter(rel): continue
       ls = lpath.stat()
       rs = remote_idx.get(rel)
-      if rs and _unchanged(rs, ls.st_mtime, ls.st_size):
+      if rs and _unchanged(rs, ls.st_mtime, ls.st_size, use_mtime=self._can_utime):
         actions.append(("skip", rel)); continue
       actions.append(("put", rel))
       if not dry_run:
@@ -325,6 +356,9 @@ class SFTP:
   ) -> list[Action]:
     """
     Pull remote → local, skipping unchanged files (mtime + size).
+
+    `delete` is refused on an incomplete remote listing,
+    so an unreadable remote can never wipe local files.
 
     Args:
       remote: Remote source directory.
@@ -357,10 +391,13 @@ class SFTP:
         self.get(f"{remote}/{rel}", str(lpath), preserve_mtime=True,
           callback=callback, _label=rel)
     if delete:
-      for rel in local_idx:
-        if rel not in remote_idx and not (filter and not filter(rel)):
-          actions.append(("delete", rel))
-          if not dry_run: (root / rel).unlink(missing_ok=True)
+      if self._index_partial:  # a partial view would make present files look deleted
+        if self.log: self.log.wrn("delete skipped: remote listing incomplete")
+      else:
+        for rel in local_idx:
+          if rel not in remote_idx and not (filter and not filter(rel)):
+            actions.append(("delete", rel))
+            if not dry_run: (root / rel).unlink(missing_ok=True)
     self._log_sync("sync_pull", actions, dry_run)
     return actions
 
@@ -380,8 +417,12 @@ class SFTP:
     self._require_connected()
     if self.log: self.log.run(f"{c.SILVER}{cmd}{c.END}")
     _, stdout, stderr = self._ssh.exec_command(cmd)
-    out = stdout.read().decode().strip()
-    err = stderr.read().decode().strip()
+    err_buf: list[bytes] = []
+    drain = threading.Thread(target=lambda: err_buf.append(stderr.read()), daemon=True)
+    drain.start()  # stderr must drain in parallel: a full channel window would stall stdout
+    out = stdout.read().decode(errors="replace").strip()
+    drain.join()
+    err = err_buf[0].decode(errors="replace").strip()
     rc = stdout.channel.recv_exit_status()
     if self.log:
       for line in out.splitlines(): self.log.gap(f"{c.GREY}{line}{c.END}")
@@ -393,24 +434,52 @@ class SFTP:
   #------------------------------------------------------------------------------------ Helpers
 
   def _posix_rename(self, src: str, dst: str):
+    """Atomic overwrite where the server supports it, delete-then-rename otherwise."""
     try: self._sftp.posix_rename(src, dst)
     except (AttributeError, IOError):
+      self._sftp.stat(src)  # src is gone: fail before dst gets destroyed
       try: self._sftp.remove(dst)
       except FileNotFoundError: pass
       self._sftp.rename(src, dst)
 
+  def _resolve(self, path: str, attr: "paramiko.SFTPAttributes"):
+    """
+    Follow a symlink: a listing describes the link, but `get()` reads its target.
+
+    Returns `None` for a broken link, or a link to a directory: it may close a cycle.
+    """
+    if not stat.S_ISLNK(attr.st_mode or 0): return attr
+    try: target = self._sftp.stat(path)
+    except OSError: target = None
+    if target is None or _is_dir(target):
+      if self.log: self.log.wrn(f"symlink skipped {c.GREY}{path}{c.END}")
+      return None
+    target.filename = attr.filename
+    return target
+
   def _index_remote(
     self, remote: str, _rel: str = "", filter: Filter|None = None
   ) -> dict[str, "paramiko.SFTPAttributes"]:
-    """Recursively build `{rel_path: SFTPAttributes}` for remote dir, pruning filtered paths."""
+    """
+    Recursively build `{rel_path: SFTPAttributes}` for remote dir, pruning filtered paths.
+
+    Sets `_index_partial` when a listing fails,
+    so callers can refuse to delete on a partial view.
+    A missing root yields `{}`: a push then creates it.
+    """
+    if not _rel: self._index_partial = False
     idx: dict = {}
     try: entries = self._sftp.listdir_attr(remote)
-    except FileNotFoundError: return idx
+    except FileNotFoundError:
+      self._index_partial = True; return idx
     for attr in entries:
+      if not _safe_name(attr.filename): continue
       rel = f"{_rel}/{attr.filename}" if _rel else attr.filename
       path = f"{remote}/{attr.filename}"
+      attr = self._resolve(path, attr)
+      if attr is None: continue
       if _is_dir(attr):
-        if filter and not (filter(rel) and filter(f"{rel}/")): continue  # prune excluded dir (e.g. .venv/)
+        if filter and not (filter(rel) and filter(f"{rel}/")): continue  # prune excluded dir
         idx.update(self._index_remote(path, rel, filter))
       else:
         if filter and not filter(rel): continue
@@ -425,10 +494,12 @@ class SFTP:
     filter: Filter|None,
     callback: Progress|None,
   ):
-    for attr in self._sftp.listdir_attr(remote):
+    for attr in self.ls(remote):
       rpath = f"{remote}/{attr.filename}"
       rel = rpath[len(remote_root):].lstrip("/")
       lpath = local / rel
+      attr = self._resolve(rpath, attr)
+      if attr is None: continue
       if _is_dir(attr):
         self._get_dir_rec(remote_root, rpath, local, filter, callback)
       else:
