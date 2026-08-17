@@ -101,9 +101,21 @@ def connect_loads_known_hosts_and_honours_strict(monkeypatch, tmp_path):
   SFTP("host", "user").connect()
   assert made[-1].loaded is True  # system known_hosts honored, read-only
   assert made[-1].own.endswith("kh")  # writable store: arms persistence and the key check
-  assert isinstance(made[-1].policy, paramiko.AutoAddPolicy)
+  assert isinstance(made[-1].policy, sftpmod._RecordPolicy)
   SFTP("host", "user", strict=True).connect()
   assert isinstance(made[-1].policy, paramiko.RejectPolicy)
+
+def forget_drops_only_the_given_host(monkeypatch, tmp_path):
+  store = tmp_path / "kh"
+  lines = ["a.example ssh-ed25519 AAAA1", "[b.example]:2222 ssh-ed25519 AAAA2", ""]
+  store.write_text("\n".join(lines), encoding="utf-8")
+  monkeypatch.setattr(sftpmod, "_known_hosts", lambda: str(store))
+  assert SFTP.forget("a.example") is True
+  assert SFTP.forget("a.example") is False # already gone
+  left = store.read_text(encoding="utf-8")
+  assert "b.example" in left and "a.example" not in left
+  assert SFTP.forget("b.example", port=2222) is True
+  assert store.read_text(encoding="utf-8") == ""
 
 def disconnect_closes_the_ssh_session_even_when_the_channel_is_dead(client):
   session = client(close_fails=True)

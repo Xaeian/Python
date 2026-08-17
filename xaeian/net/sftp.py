@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable
 from ..log import Logger, Print
 from ..colors import Color as c
+from ..files import FILE
 from .ftp import Filter, Progress, Action, _atomic_local, _unchanged, _safe_name # documented there
 
 try:
@@ -29,15 +30,27 @@ def _known_hosts() -> str:
   """
   The library's own trust store for first-contact host keys.
 
-  Kept apart from the user's `known_hosts`: paramiko saving would rewrite that file and drop
-  entries it cannot parse (`@cert-authority`, `@revoked`, foreign key types). This file it owns
-  outright, so recording a key cannot damage anything.
+  Kept apart from the user's `known_hosts`, which paramiko saving would rewrite and strip of
+  entries it cannot parse (`@cert-authority`, `@revoked`, foreign key types).
   """
   path = Path.home() / ".ssh" / "known_hosts.xaeian"
   if not path.is_file():
     path.parent.mkdir(mode=0o700, exist_ok=True)
     path.touch(mode=0o600)
   return str(path)
+
+class _RecordPolicy(paramiko.MissingHostKeyPolicy):
+  """
+  Accept an unknown host and append its key to the trust store, one line per host.
+
+  Appending instead of paramiko's rewrite-on-save keeps concurrent processes safe: two of them
+  learning hosts at the same moment cannot erase each other's entry, at worst one is duplicated.
+  """
+  def missing_host_key(self, client, hostname, key):
+    client._host_keys.add(hostname, key.get_name(), key)
+    entry = paramiko.hostkeys.HostKeyEntry([hostname], key)
+    with open(_known_hosts(), "a", encoding="utf-8") as file:
+      file.write(entry.to_line())
 
 #--------------------------------------------------------------------------------------------- SFTP
 
@@ -47,8 +60,8 @@ class SFTP:
 
   Accepts `Print`, `Logger`, or any object with `inf/wrn/err/run/gap/item` as `log`.
 
-  Host keys are checked against `~/.ssh/known_hosts`: a changed key aborts.
-  An unknown host is trusted on first use unless `strict=True`.
+  An unknown host is trusted and recorded on first contact (`strict=True` rejects it instead),
+  a changed server key aborts: `connect` documents the model, `forget` re-records a rebuilt host.
   """
   def __init__(
     self,
@@ -80,23 +93,43 @@ class SFTP:
   def __enter__(self): self.connect(); return self
   def __exit__(self, *_): self.disconnect()
 
+  @staticmethod
+  def forget(host:str, port:int=22) -> bool:
+    """
+    Drop `host` from the library's trust store, so its next connection records the key anew.
+
+    For a server rebuilt on purpose. A match in the system `known_hosts` is never touched, that
+    file belongs to the user (`ssh-keygen -R host` cleans it).
+    """
+    names = {host, f"[{host}]:{port}"}
+    path = _known_hosts()
+    lines = Path(path).read_text(encoding="utf-8").splitlines(keepends=True)
+    kept = []
+    for line in lines:
+      fields = line.split()
+      if fields and names & set(fields[0].split(",")): continue
+      kept.append(line)
+    if len(kept) == len(lines): return False
+    FILE.save(path, "".join(kept))
+    return True
+
   #------------------------------------------------------------------------------------- Connection
 
   def connect(self):
     """
     Open SSH + SFTP session.
 
-    Host identity: the system `known_hosts` is honored read-only, and a host accepted on first
-    contact is recorded in `~/.ssh/known_hosts.xaeian` - from then on a changed server key is
-    refused instead of silently trusted. `strict=True` refuses unknown hosts outright.
+    Host keys are checked against `~/.ssh/known_hosts` (read-only) and against
+    `~/.ssh/known_hosts.xaeian`, where a host accepted on first contact is recorded, so a
+    changed server key aborts from the second connection on. `strict=True` rejects an unknown
+    host outright.
     """
     self._can_utime = True
     self._ssh = paramiko.SSHClient()
     self._ssh.load_system_host_keys()
-    # writable store: gives AutoAddPolicy a place to persist, which is what arms the key check
     self._ssh.load_host_keys(_known_hosts())
     self._ssh.set_missing_host_key_policy(
-      paramiko.RejectPolicy() if self._strict else paramiko.AutoAddPolicy()
+      paramiko.RejectPolicy() if self._strict else _RecordPolicy()
     )
     kw: dict = {
       "hostname": self.host, "port": self.port, "username": self.user,
@@ -112,6 +145,12 @@ class SFTP:
       self._sftp = self._ssh.open_sftp()
       if self.log:
         self.log.inf(f"connected {c.TURQUS}{self.host}{c.END} user:{c.VIOLET}{self.user}{c.END}")
+    except paramiko.BadHostKeyException as e:
+      if self.log: self.log.err(f"host key changed {c.TURQUS}{self.host}{c.END} | {e}")
+      raise ConnectionError(
+        f"SFTP host key changed host:{self.host} | {e} | "
+        f"rebuilt on purpose? SFTP.forget({self.host!r}) drops the old key"
+      ) from e
     except Exception as e:
       if self.log: self.log.err(f"connect failed {c.TURQUS}{self.host}{c.END} | {e}")
       raise ConnectionError(f"SFTP connect failed host:{self.host} | {e}") from e
