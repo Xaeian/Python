@@ -11,7 +11,7 @@ Example:
   >>> from xaeian import logger, JSON, split_sql, Files, Plot
 """
 
-__version__ = "0.8.0"
+__version__ = "0.8.1"
 __repo__ = "Xaeian/Python"
 __python__ = ">=3.12"
 __description__ = (

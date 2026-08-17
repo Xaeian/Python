@@ -40,6 +40,9 @@ class FTP:
   """
   FTP client: push/pull sync, atomic transfers.
 
+  Plain FTP: credentials and data travel in cleartext and the server's identity is never
+  verified - the protocol has no means to. Prefer `SFTP` for anything sensitive.
+
   Capability detection on connect: MLSD (mtime+size skip) and MFMT (preserve mtime).
   No MLSD → per-file SIZE+MDTM, no MFMT → push falls back to size-only.
 

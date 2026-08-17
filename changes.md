@@ -1,12 +1,17 @@
 # Changes `xaeian`
 
+## `0.8.1` SFTP host keys
+
+- `net`: `SFTP` remembers first-contact host keys in `~/.ssh/known_hosts.xaeian`, so a changed
+  server key is refused instead of silently trusted
+
 ## `0.8.0` Safety audit
 
 Breaking: `FILE.save`/`append` write line ends verbatim, `split_sql` drops comments and keeps
 `"identifiers"` whole, `pdf_compress` refuses a PDF it cannot verify _(new `verify=`)_.
 
-- `files`: writes are atomic - savers serialize first, `FILE.save` swaps in a temp file, so a
-  failed or interrupted write leaves the previous file intact
+- `files`: writes are atomic, savers serialize first and `FILE.save` swaps in a temp file, so
+  a failed or interrupted write leaves the previous file intact
 - `files`: `PATH.normalize` keeps the UNC `//` root _(shares silently landed on the local drive)_,
   `PATH.real`/`is_under(real=)` resolve symlinks, `FILE.save(chmod=)` for secrets
 - `db`: reads commit when they own the connection _(`INSERT ... RETURNING` rolled the row away)_,

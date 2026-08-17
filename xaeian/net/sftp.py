@@ -25,6 +25,20 @@ try:
 except ImportError:
   raise ImportError("Install with: pip install xaeian[sftp]")
 
+def _known_hosts() -> str:
+  """
+  The library's own trust store for first-contact host keys.
+
+  Kept apart from the user's `known_hosts`: paramiko saving would rewrite that file and drop
+  entries it cannot parse (`@cert-authority`, `@revoked`, foreign key types). This file it owns
+  outright, so recording a key cannot damage anything.
+  """
+  path = Path.home() / ".ssh" / "known_hosts.xaeian"
+  if not path.is_file():
+    path.parent.mkdir(mode=0o700, exist_ok=True)
+    path.touch(mode=0o600)
+  return str(path)
+
 #--------------------------------------------------------------------------------------------- SFTP
 
 class SFTP:
@@ -69,10 +83,18 @@ class SFTP:
   #------------------------------------------------------------------------------------- Connection
 
   def connect(self):
-    """Open SSH + SFTP session."""
+    """
+    Open SSH + SFTP session.
+
+    Host identity: the system `known_hosts` is honored read-only, and a host accepted on first
+    contact is recorded in `~/.ssh/known_hosts.xaeian` - from then on a changed server key is
+    refused instead of silently trusted. `strict=True` refuses unknown hosts outright.
+    """
     self._can_utime = True
     self._ssh = paramiko.SSHClient()
-    self._ssh.load_system_host_keys() # without this no key is known, so none is ever checked
+    self._ssh.load_system_host_keys()
+    # writable store: gives AutoAddPolicy a place to persist, which is what arms the key check
+    self._ssh.load_host_keys(_known_hosts())
     self._ssh.set_missing_host_key_policy(
       paramiko.RejectPolicy() if self._strict else paramiko.AutoAddPolicy()
     )

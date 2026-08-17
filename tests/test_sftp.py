@@ -83,10 +83,11 @@ def client():
 
 #--------------------------------------------------------------------------------- Connection
 
-def connect_loads_known_hosts_and_honours_strict(monkeypatch):
+def connect_loads_known_hosts_and_honours_strict(monkeypatch, tmp_path):
   class Recorder:
-    def __init__(self): self.loaded, self.policy = False, None
+    def __init__(self): self.loaded, self.own, self.policy = False, None, None
     def load_system_host_keys(self): self.loaded = True
+    def load_host_keys(self, path): self.own = path
     def set_missing_host_key_policy(self, policy): self.policy = policy
     def connect(self, **kw): pass
     def open_sftp(self): return Client()
@@ -96,8 +97,10 @@ def connect_loads_known_hosts_and_honours_strict(monkeypatch):
     made.append(Recorder())
     return made[-1]
   monkeypatch.setattr(sftpmod.paramiko, "SSHClient", factory)
+  monkeypatch.setattr(sftpmod, "_known_hosts", lambda: str(tmp_path / "kh"))
   SFTP("host", "user").connect()
-  assert made[-1].loaded is True  # otherwise no key is known, so none is ever checked
+  assert made[-1].loaded is True  # system known_hosts honored, read-only
+  assert made[-1].own.endswith("kh")  # writable store: arms persistence and the key check
   assert isinstance(made[-1].policy, paramiko.AutoAddPolicy)
   SFTP("host", "user", strict=True).connect()
   assert isinstance(made[-1].policy, paramiko.RejectPolicy)
