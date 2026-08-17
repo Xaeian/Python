@@ -2,23 +2,21 @@
 
 """
 Shell command helpers: version check, execution, lookup.
+
+Thin wrappers over `subprocess` and `shutil.which`: `version`, `which` and `output` return
+`None` when a command is missing or fails, `run` returns the raw `CompletedProcess`.
 """
 
 import os, re, shlex, subprocess, shutil
 from typing import Sequence
 
-#-------------------------------------------------------------------------------------- Version
+#------------------------------------------------------------------------------------------ Version
 
 def version(cmd:str, args:Sequence[str]=("--version",)) -> str|None:
   """
-  Extract version string from command output.
+  First version-like token (`1.2.3`) in the command's stdout or stderr, exit status ignored.
 
-  Args:
-    cmd: Executable name or path.
-    args: Arguments to print version.
-
-  Returns:
-    Version string like "1.2.3" or None.
+  A leading `v` is part of the token, so `node` yields `v22.1.0`, not `22.1.0`.
   """
   try:
     proc = subprocess.run([cmd, *args], capture_output=True, text=True, check=False)
@@ -28,45 +26,28 @@ def version(cmd:str, args:Sequence[str]=("--version",)) -> str|None:
   match = re.search(r"\bv?\d+(?:\.\d+){1,3}(?:[-_\w]*)?\b", output)
   return match.group(0) if match else None
 
-#--------------------------------------------------------------------------------------- Lookup
+#------------------------------------------------------------------------------------------- Lookup
 
 def exists(cmd:str) -> bool:
   """Check if command is available on PATH."""
   return shutil.which(cmd) is not None
 
 def which(*cmds:str) -> str|None:
-  """
-  Find first available executable from candidates.
-
-  Args:
-    cmds: Candidate executable names.
-
-  Returns:
-    Full path to first found executable, or None.
-  """
+  """Full path of the first candidate found on PATH."""
   for cmd in cmds:
     path = shutil.which(cmd)
     if path: return path
   return None
 
-#-------------------------------------------------------------------------------------- Execute
+#------------------------------------------------------------------------------------------ Execute
 
 def _split(cmd:str) -> list[str]:
-  """Split command string respecting quotes and escapes."""
-  return shlex.split(cmd, posix=(os.name != "nt"))
+  """`shlex.split` with POSIX rules; on Windows backslashes are pre-escaped, so paths survive."""
+  if os.name == "nt": cmd = cmd.replace("\\", "\\\\")
+  return shlex.split(cmd)
 
 def output(cmd:str|list[str], cwd:str|None=None, encoding:str="utf-8") -> str|None:
-  """
-  Run command and return stdout as string.
-
-  Args:
-    cmd: Command string or list.
-    cwd: Working directory.
-    encoding: Output encoding.
-
-  Returns:
-    Stripped stdout or None on failure.
-  """
+  """Stripped stdout, `None` on non-zero exit or when the command cannot be launched."""
   if isinstance(cmd, str): cmd = _split(cmd)
   try:
     proc = subprocess.run(
@@ -79,32 +60,24 @@ def output(cmd:str|list[str], cwd:str|None=None, encoding:str="utf-8") -> str|No
   return proc.stdout.strip()
 
 def run(
-  cmd: str|list[str],
-  cwd: str|None = None,
-  env: dict|None = None,
-  capture: bool = True,
-  check: bool = False,
-  encoding: str = "utf-8",
-  timeout: float|None = None,
+  cmd:str|list[str],
+  cwd:str|None = None,
+  env:dict|None = None,
+  capture:bool = True,
+  check:bool = False,
+  encoding:str = "utf-8",
+  timeout:float|None = None,
 ) -> subprocess.CompletedProcess:
   """
-  Run command with sensible defaults.
+  Run command in text mode, capturing output and tolerating a non-zero exit.
 
   Args:
-    cmd: Command string or list.
-    cwd: Working directory.
-    env: Environment variables (merged with os.environ).
-    capture: Capture stdout/stderr.
-    check: Raise CalledProcessError on non-zero exit.
-    encoding: Output encoding.
-    timeout: Seconds before raising `subprocess.TimeoutExpired` (`None` = no limit).
-
-  Returns:
-    CompletedProcess instance.
+    env: Merged over `os.environ` rather than replacing it.
+    check: Raise `CalledProcessError` on non-zero exit.
+    timeout: Seconds before `subprocess.TimeoutExpired`, `None` = no limit.
   """
   if isinstance(cmd, str): cmd = _split(cmd)
-  merged_env = None
-  if env: merged_env = {**os.environ, **env}
+  merged_env = {**os.environ, **env} if env else None
   return subprocess.run(
     cmd, capture_output=capture, text=True,
     cwd=cwd, env=merged_env, check=check, encoding=encoding, timeout=timeout,

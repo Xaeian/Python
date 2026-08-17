@@ -3,22 +3,12 @@
 """
 Extended datetime with human-friendly interface.
 
-Provides `Time` class extending `datetime` with:
-- Flexible parsing (strings, timestamps, intervals)
-- Interval arithmetic (`t + "1w"`, `t - "3d"`)
-- Multiple output formats (`to("iso")`, `to("ts")`)
-- Rounding to time units (`round("h")`, `round("d")`)
-
-Requires: `pytz`, `tzlocal`
+`Time` subclasses `datetime` and adds string parsing, interval arithmetic, format
+conversion and rounding down to a unit. Requires `pytz`, `tzlocal`.
 
 Example:
   >>> from xaeian.xtime import Time
-  >>> t = Time()              # current local time
-  >>> t = Time("2025-03-01")  # parse date
-  >>> t = Time("2d")          # now + 2 days
-  >>> t + "1w"                # add 1 week
-  >>> t.to("iso")             # ISO 8601 string
-  >>> t.round("h")            # round to hour
+  >>> Time("2d").round("h").to("iso")
 """
 
 from __future__ import annotations
@@ -39,42 +29,34 @@ TimeInput = Union[str, int, float, datetime, timedelta, "Time"]
 
 class Time(datetime):
   """
-  Extended `datetime` with human-friendly interface.
+  `datetime` accepting a single value in place of the y/m/d signature:
 
-  **Creation:**
   - `Time()`: current local time
   - `Time("2025-03-01 12:00")`: parse datetime string
-  - `Time(1700000000)`: from unix timestamp
+  - `Time(1700000000)`: unix timestamp
   - `Time("2d")`: now + 2 days
   - `Time("-6h 30m")`: now - 6 hours + 30 minutes
 
-  **Arithmetic:**
-  - `t + "1w"`: add 1 week
-  - `t - "3d"`: subtract 3 days
-  - `t - other`: timedelta between two times
-
-  **Formatting via `to()`:**
-  - `t.to("ts")`: unix timestamp (float)
-  - `t.to("utc")`: convert to UTC
-  - `t.to("iso")`: ISO 8601 string
-  - `t.to("%Y-%m-%d")`: strftime format
-
-  **Rounding via `round()`:**
-  - `t.round("h")`: round to hour start
-  - `t.round("d")`: round to day start
-  - `t.round("w")`: round to week start (Monday)
-  - `t.round("mo")`: round to month start
+  Naive values are treated as local time; comparisons run in UTC. Digit-only text is a unix
+  timestamp, never a date: `Time("20250301")` lands in 1970.
   """
-
-  #------------------------------------------------------------------------------- Construction
+  #----------------------------------------------------------------------------------- Construction
 
   @overload
   def __new__(cls, v:TimeInput=...) -> Time: ...
 
   @overload
-  def __new__(cls, year:int, month:int, day:int,
-    hour:int=0, minute:int=0, second:int=0,
-    microsecond:int=0, tzinfo:object=None) -> Time: ...
+  def __new__(
+    cls,
+    year:int,
+    month:int,
+    day:int,
+    hour:int = 0,
+    minute:int = 0,
+    second:int = 0,
+    microsecond:int = 0,
+    tzinfo:object = None,
+  ) -> Time: ...
 
   def __new__(cls, *args, **kwargs):
     if not args and not kwargs: return cls._now()
@@ -86,11 +68,10 @@ class Time(datetime):
 
   @classmethod
   def _from_datetime(cls, dt:datetime) -> Time:
-    """Convert datetime to `Time`."""
     return datetime.__new__(cls,
       dt.year, dt.month, dt.day,
       dt.hour, dt.minute, dt.second,
-      dt.microsecond, tzinfo=dt.tzinfo
+      dt.microsecond, tzinfo=dt.tzinfo,
     )
 
   @classmethod
@@ -99,35 +80,30 @@ class Time(datetime):
     return cls._from_datetime(datetime.now(tz=tzlocal.get_localzone()))
 
   def to_datetime(self) -> datetime:
-    """Convert `Time` to standard datetime."""
+    """Downcast to a plain `datetime`."""
     return datetime(
       self.year, self.month, self.day,
       self.hour, self.minute, self.second,
-      self.microsecond, tzinfo=self.tzinfo
+      self.microsecond, tzinfo=self.tzinfo,
     )
 
   def copy(self) -> Time:
-    """Create a copy of this `Time` instance."""
+    """Copy of this instance."""
     return Time._from_datetime(self.replace())
 
-  #--------------------------------------------------------------------------------- Formatting
+  #------------------------------------------------------------------------------------- Formatting
 
   def to(self, fmt:str) -> float|int|str|Time:
     """
-    Convert/format `Time`.
+    Convert or format by specifier:
 
-    Args:
-      fmt: Format specifier:
-        - "ts"|"timestamp": Unix seconds (float)
-        - "s"|"second": Unix seconds (int)
-        - "ms"|"millisecond": Unix milliseconds (int)
-        - "utc"|"local": timezone conversion
-        - "iso": ISO 8601 string
-        - "tz:Zone/Name": convert to timezone
-        - other: passed to `strftime`
-
-    Returns:
-      float|int|Time|str depending on fmt.
+    - "ts"|"timestamp": unix seconds (float)
+    - "s"|"second": unix seconds (int)
+    - "ms"|"millisecond": unix milliseconds (int)
+    - "utc"|"local": same instant as a `Time` in that zone
+    - "iso": ISO 8601 string
+    - "tz:Zone/Name"|"iso:Zone/Name": ISO 8601 string in that zone
+    - other: passed to `strftime`
     """
     raw = fmt.strip()
     cmd = raw.lower()
@@ -150,15 +126,10 @@ class Time(datetime):
       return dt.isoformat(timespec="seconds")
     return self.strftime(fmt)
 
-  #----------------------------------------------------------------------------------- Rounding
+  #--------------------------------------------------------------------------------------- Rounding
 
   def round(self, unit:str) -> Time:
-    """
-    Round Time down to specified unit.
-
-    Args:
-      unit: ms, s, m, h, d, w, mo, y
-    """
+    """Round down to unit: ms, s, m, h, d, w (Monday start), mo, y."""
     match unit.lower():
       case "ms"|"millisecond":
         us = (self.microsecond // 1000) * 1000
@@ -176,10 +147,10 @@ class Time(datetime):
       case _: raise ValueError(f"Invalid unit '{unit}', expected: ms, s, m, h, d, w, mo, y")
     return Time._from_datetime(dt)
 
-  #--------------------------------------------------------------------------------- Arithmetic
+  #------------------------------------------------------------------------------------- Arithmetic
 
   def __add__(self, v:str|int|float|timedelta) -> Time:
-    """Add interval, seconds, or timedelta."""
+    """Add an interval string, a number of seconds, or a timedelta."""
     if isinstance(v, (int, float)):
       return Time._from_datetime(datetime.fromtimestamp(
         self.timestamp() + v, tz=self.tzinfo or tzlocal.get_localzone()
@@ -192,7 +163,7 @@ class Time(datetime):
     return self.__add__(v)
 
   def __sub__(self, v:TimeInput|None) -> Time|timedelta:
-    """Subtract interval/seconds/timedelta (→ Time) or datetime (→ timedelta)."""
+    """Subtract interval/seconds/timedelta (→ Time) or datetime (→ timedelta). None → self."""
     if v is None: return self
     if isinstance(v, (int, float)):
       return Time._from_datetime(datetime.fromtimestamp(
@@ -204,7 +175,7 @@ class Time(datetime):
     if isinstance(v, str): return self._apply_intervals(self._flip_intervals(v))
     raise TypeError(f"Unsupported operand: Time - {type(v).__name__}")
 
-  #--------------------------------------------------------------------------------- Comparison
+  #------------------------------------------------------------------------------------- Comparison
 
   def _to_utc(self) -> datetime:
     if self.tzinfo is None:
@@ -213,6 +184,7 @@ class Time(datetime):
 
   @staticmethod
   def _safe_parse(v:TimeInput) -> datetime|None:
+    """UTC-normalized parse, None for anything unparsable, so comparisons can defer."""
     try:
       t = Time._parse(v)
       if t.tzinfo is None:
@@ -252,12 +224,12 @@ class Time(datetime):
     return datetime.__ge__(self._to_utc(), other)
 
   def between(self, low:TimeInput, high:TimeInput, inclusive:bool=True) -> bool:
-    """Check if `Time` is between two bounds."""
+    """Bounds check, `inclusive=False` makes both ends strict."""
     lo, hi = Time._parse(low), Time._parse(high)
     if inclusive: return lo <= self <= hi
     return lo < self < hi
 
-  #------------------------------------------------------------------------------------- String
+  #----------------------------------------------------------------------------------------- String
 
   def __str__(self) -> str:
     if self.microsecond: return self.strftime("%Y-%m-%d %H:%M:%S.%f")
@@ -266,23 +238,25 @@ class Time(datetime):
   def __repr__(self) -> str:
     return f"Time({self.to('iso')})"
 
-  #--------------------------------------------------------------------------- Interval parsing
+  #------------------------------------------------------------------------------- Interval parsing
 
+  # unit alternation is longest-first: `m` must not shadow `mo` or `ms`
   INTERVAL_PATTERN = r"[+\-]?[0-9]*\.?[0-9]+(?:mo|ms|µs|us|y|w|d|h|m|s)"
   INTERVAL_RE = re.compile(INTERVAL_PATTERN)
   INTERVALS_RE = re.compile(rf"^(?:{INTERVAL_PATTERN}\s*)+$")
 
   @classmethod
   def is_interval(cls, text:str) -> bool:
-    """Check if text is valid single interval."""
+    """True for one interval token, like `-6h`."""
     return bool(cls.INTERVAL_RE.fullmatch(text.strip()))
 
   @classmethod
   def is_intervals(cls, text:str) -> bool:
-    """Check if text is valid interval sequence."""
+    """True for a sequence of interval tokens, like `-6h 30m`."""
     return bool(cls.INTERVALS_RE.fullmatch(text.strip()))
 
   def _apply_interval(self, interval:str) -> Time:
+    """Shift by one token; `y`/`mo` keep the day number, clamped to the target month length."""
     match = re.search(r"-?[0-9]*\.?[0-9]+", interval)
     if not match: return self
     value = float(match.group())
@@ -296,11 +270,11 @@ class Time(datetime):
       day = min(dt.day, calendar.monthrange(year, month)[1])
       return Time._from_datetime(dt.replace(year=year, month=month, day=day))
     match unit:
-      case "w":  delta = timedelta(weeks=value)
-      case "d":  delta = timedelta(days=value)
-      case "h":  delta = timedelta(hours=value)
-      case "m":  delta = timedelta(minutes=value)
-      case "s":  delta = timedelta(seconds=value)
+      case "w": delta = timedelta(weeks=value)
+      case "d": delta = timedelta(days=value)
+      case "h": delta = timedelta(hours=value)
+      case "m": delta = timedelta(minutes=value)
+      case "s": delta = timedelta(seconds=value)
       case "ms": delta = timedelta(milliseconds=value)
       case "µs"|"us": delta = timedelta(microseconds=value)
       case _: return self
@@ -309,15 +283,17 @@ class Time(datetime):
   def _apply_intervals(self, text:str) -> Time:
     text = text.strip()
     if not self.is_intervals(text): raise ValueError(f"Invalid interval: '{text}'")
-    tokens = text.split() if " " in text else self.INTERVAL_RE.findall(text)
+    tokens = self.INTERVAL_RE.findall(text)
     result = self
     for token in tokens: result = result._apply_interval(token)
     return result
 
   @classmethod
   def _flip_intervals(cls, text:str) -> str:
+    """Negate every token sign, so subtraction reuses the addition path."""
     text = text.strip()
-    tokens = text.split() if " " in text else cls.INTERVAL_RE.findall(text)
+    if not cls.is_intervals(text): return text
+    tokens = cls.INTERVAL_RE.findall(text)
     flipped = []
     for t in tokens:
       if t.startswith("-"): flipped.append("+" + t[1:])
@@ -325,29 +301,30 @@ class Time(datetime):
       else: flipped.append("-" + t)
     return " ".join(flipped)
 
-  #------------------------------------------------------------------------------------ Factory
+  #---------------------------------------------------------------------------------------- Factory
 
+  # (strptime format, full-match guard), tried in order after ISO 8601 fails
   PARSE_PATTERNS = [
-    ("%Y-%m-%d",             r"\d{4}-\d{2}-\d{2}"),
-    ("%d-%m-%Y",             r"\d{2}-\d{2}-\d{4}"),
-    ("%d.%m.%Y",             r"\d{2}\.\d{2}\.\d{4}"),
-    ("%Y/%m/%d",             r"\d{4}/\d{2}/\d{2}"),
-    ("%Y%m%d",               r"\d{8}"),
-    ("%Y-%m-%d %H:%M",       r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}"),
-    ("%Y-%m-%d %H:%M:%S",    r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"),
+    ("%Y-%m-%d", r"\d{4}-\d{2}-\d{2}"),
+    ("%d-%m-%Y", r"\d{2}-\d{2}-\d{4}"),
+    ("%d.%m.%Y", r"\d{2}\.\d{2}\.\d{4}"),
+    ("%Y/%m/%d", r"\d{4}/\d{2}/\d{2}"),
+    ("%Y%m%d", r"\d{8}"),
+    ("%Y-%m-%d %H:%M", r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}"),
+    ("%Y-%m-%d %H:%M:%S", r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"),
     ("%Y-%m-%d %H:%M:%S.%f", r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3,6}"),
-    ("%d.%m.%Y %H:%M",       r"\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}"),
-    ("%d.%m.%Y %H:%M:%S",    r"\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}"),
+    ("%d.%m.%Y %H:%M", r"\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}"),
+    ("%d.%m.%Y %H:%M:%S", r"\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}"),
     ("%d.%m.%Y %H:%M:%S.%f", r"\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}\.\d{3,6}"),
-    ("%m/%d/%y",             r"\d{2}/\d{2}/\d{2}"),
-    ("%m/%d/%y %H:%M",       r"\d{2}/\d{2}/\d{2} \d{2}:\d{2}"),
-    ("%m/%d/%y %H:%M:%S",    r"\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}"),
+    ("%m/%d/%y", r"\d{2}/\d{2}/\d{2}"),
+    ("%m/%d/%y %H:%M", r"\d{2}/\d{2}/\d{2} \d{2}:\d{2}"),
+    ("%m/%d/%y %H:%M:%S", r"\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}"),
     ("%m/%d/%y %H:%M:%S.%f", r"\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}\.\d{3,6}"),
   ]
 
   @classmethod
   def _parse(cls, v:TimeInput) -> Time:
-    """Parse input to Time. Raises ValueError/TypeError on failure."""
+    """Any input → `Time`, TypeError for unsupported types, ValueError for unreadable text."""
     if isinstance(v, Time): return v
     if isinstance(v, datetime): return cls._from_datetime(v)
     if isinstance(v, timedelta):
@@ -359,7 +336,6 @@ class Time(datetime):
     if s.lower() == "now": return cls._now()
     if s.replace(".", "", 1).replace("-", "", 1).isdigit():
       return cls._from_datetime(datetime.fromtimestamp(float(s), tz=tzlocal.get_localzone()))
-    if cls.is_interval(s): return cls._now()._apply_interval(s)
     if cls.is_intervals(s): return cls._now()._apply_intervals(s)
     try: return cls._from_datetime(datetime.fromisoformat(s))
     except ValueError: pass
@@ -376,7 +352,7 @@ def time_to(v:TimeInput|None, fmt:str) -> str|int|float|Time|None:
   if isinstance(v, str) and not v.strip(): return None
   return Time(v).to(fmt)
 
-#---------------------------------------------------------------------------------------- Tests
+#-------------------------------------------------------------------------------------------- Tests
 
 if __name__ == "__main__":
   t1 = Time()
@@ -384,17 +360,17 @@ if __name__ == "__main__":
   t3 = Time("03/01/25 12:00:00")
   t4 = Time("2d")
   t5 = Time("-6h 30m")
-  t7 = Time(1700000000)
-  t8 = Time(timedelta(days=1, hours=5))
-  t9 = Time("2025-03-01T12:00:00+02:00")
+  t6 = Time(1700000000)
+  t7 = Time(timedelta(days=1, hours=5))
+  t8 = Time("2025-03-01T12:00:00+02:00")
   print("now:", t1)
   print("parsed:", t2)
   print("alt format:", t3)
   print("now + 2d:", t4)
   print("-6h 30m:", t5)
-  print("timestamp:", t7)
-  print("timedelta:", t8)
-  print("ISO with tz:", t9, "→", t9.to("iso"))
+  print("timestamp:", t6)
+  print("timedelta:", t7)
+  print("ISO with tz:", t8, "→", t8.to("iso"))
   print()
   print("t2 + 1w:", t2 + "1w")
   print("t2 - 3d:", t2 - "3d")

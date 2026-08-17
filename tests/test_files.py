@@ -291,3 +291,37 @@ def files_object_independent_of_global_context(tmp_path):
     FILE.save("ctx.txt", "in-B")    # global namespace follows the context → B
   assert (a / "iso.txt").exists() and not (b / "iso.txt").exists()
   assert (b / "ctx.txt").exists()
+
+#------------------------------------------------------------------------------------ PATH.real
+
+def real_resolves_symlinks(tmp_path):
+  outside = tmp_path / "outside.txt"; outside.write_text("x")
+  base = tmp_path / "base"; base.mkdir()
+  link = base / "link.txt"
+  try: os.symlink(outside, link)
+  except OSError: pytest.skip("symlinks not permitted")
+  assert PATH.real(str(link)).endswith("outside.txt")
+  assert PATH.is_under(str(link), str(base)) # lexical check cannot see through the link
+  assert not PATH.is_under(str(link), str(base), real=True)
+
+def is_under_real_keeps_plain_files(tmp_path):
+  f = tmp_path / "base" / "a.txt"
+  f.parent.mkdir(); f.write_text("x")
+  assert PATH.is_under(str(f), str(tmp_path / "base"), real=True)
+
+#------------------------------------------------------------------------------------- DIR deep
+
+def file_list_deep_flag():
+  FILE.save("a.log", "1"); FILE.save("sub/b.log", "2")
+  assert sorted(DIR.file_list(".", basename=True)) == ["a.log", "b.log"]
+  assert DIR.file_list(".", basename=True, deep=False) == ["a.log"]
+  assert DIR.file_list(".", match="a.*", basename=True, deep=False) == ["a.log"]
+
+#------------------------------------------------------------------------------ FILE.save chmod
+
+def file_save_chmod_sets_final_permissions(tmp_path):
+  FILE.save("s.env", "K=v\n", chmod=0o600)
+  FILE.save("s.env", "K=w\n", chmod=0o600) # existing file: content replaced, mode kept
+  assert FILE.load("s.env") == "K=w\n"
+  if os.name != "nt":
+    assert oct((tmp_path / "s.env").stat().st_mode)[-3:] == "600"

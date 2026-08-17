@@ -1,6 +1,6 @@
 # xaeian/db/mysql_async.py
 
-"""MySQL async implementation with connection pooling."""
+"""MySQL async implementation."""
 from __future__ import annotations
 
 import asyncio
@@ -10,44 +10,26 @@ from ..log import Logger, Print
 
 from .abstract_async import AbstractAsyncDatabase
 from .utils import (
-  listify, to_dicts, ident, ph, serialize_params,
-  serialize_dict, split_sql, parse_row, _upsert_sql,
+  listify, to_dicts, serialize_params, split_sql, parse_row, _insert_sql, _upsert_sql,
 )
 
 class MysqlAsyncDatabase(AbstractAsyncDatabase):
   """
   MySQL async database (aiomysql) with connection pooling.
 
-  Pool is created lazily on first query or explicitly via `start()`.
-  Pool uses `autocommit=True` - each statement commits immediately.
-  Transactions use explicit `begin()`/`commit()`.
-
-  Args:
-    db_name: Database name.
-    host: Server hostname.
-    user: Username.
-    password: Password.
-    port: Server port.
-    log: Logger instance.
-    min_pool: Minimum pool connections.
-    max_pool: Maximum pool connections.
-
-  Example:
-    >>> db = MysqlAsyncDatabase("mydb", user="root", password="secret")
-    >>> await db.start()
-    >>> await db.insert("users", {"name": "Jan"})
-    >>> await db.close()
+  Pool runs `autocommit=True`, so every statement commits immediately; grouping statements
+  needs the `transaction()` context manager.
   """
   def __init__(
     self,
-    db_name: str|None = None,
-    host: str = "localhost",
-    user: str = "root",
-    password: str = "",
-    port: int = 3306,
-    log: Logger|Print|None = None,
-    min_pool: int = 1,
-    max_pool: int = 10,
+    db_name:str|None = None,
+    host:str = "localhost",
+    user:str = "root",
+    password:str = "",
+    port:int = 3306,
+    log:Logger|Print|None = None,
+    min_pool:int = 1,
+    max_pool:int = 10,
   ):
     super().__init__()
     self.host = host
@@ -63,19 +45,19 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
     self._max_pool = max_pool
 
   async def conn(self):
-    """Create standalone connection (outside pool)."""
+    """Standalone connection, outside the pool."""
     import aiomysql
     return await aiomysql.connect(
       host=self.host, port=self.port,
       user=self.user, password=self.password,
-      db=self.db_name
+      db=self.db_name,
     )
 
   async def _close(self, conn):
     conn.close()
     await conn.wait_closed()
 
-  #---------------------------------------------------------------------------------- Lifecycle
+  #-------------------------------------------------------------------------------------- Lifecycle
 
   async def _ensure_pool(self):
     if self._pool is not None:
@@ -115,7 +97,7 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
       await self._pool.wait_closed()
       self._pool = None
 
-  #-------------------------------------------------------------------------------- Transaction
+  #------------------------------------------------------------------------------------ Transaction
 
   @asynccontextmanager
   async def transaction(self):
@@ -134,8 +116,7 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
       self._conn = None
       pool.release(conn)
 
-
-  #------------------------------------------------------------------------------------ Execute
+  #---------------------------------------------------------------------------------------- Execute
 
   async def exec(self, sql:str, params=None) -> int:
     import aiomysql
@@ -220,7 +201,7 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
     except aiomysql.Error as e:
       self._err("exec_batch", e)
 
-  #-------------------------------------------------------------------------------------- Query
+  #------------------------------------------------------------------------------------------ Query
 
   async def get_rows(self, sql:str, params=None, json:list[int]|None=None) -> list[list]:
     import aiomysql
@@ -247,7 +228,13 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
     except aiomysql.Error as e:
       self._err("get_rows", e, sql, p)
 
-  async def get_dicts(self, sql:str, params=None, cols:list[str]|None=None, json:list[str]|None=None) -> list[dict]:
+  async def get_dicts(
+    self,
+    sql:str,
+    params=None,
+    cols:list[str]|None = None,
+    json:list[str]|None = None,
+  ) -> list[dict]:
     import aiomysql
     p = serialize_params(params)
     if self.in_transaction():
@@ -272,27 +259,23 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
   async def _insert_returning(self, table:str, data:dict, ret:str) -> Any:
     """MySQL uses `lastrowid` (ignores `ret` column name)."""
     import aiomysql
-    d = serialize_dict(data)
-    t = ident(table)
-    cols = ", ".join(ident(k) for k in d.keys())
-    vals = ph(len(d), self.ph)
-    sql = f"INSERT INTO {t} ({cols}) VALUES {vals}"
+    sql, params = _insert_sql(table, data, self.ph)
     if self.in_transaction():
       try:
         async with self._conn.cursor() as cur:
-          await cur.execute(sql, tuple(d.values()))
+          await cur.execute(sql, params)
           return cur.lastrowid
       except aiomysql.Error as e:
-        self._err("insert", e, sql, tuple(d.values()))
+        self._err("insert", e, sql, params)
     try:
       async with self._connect() as conn:
         async with conn.cursor() as cur:
-          await cur.execute(sql, tuple(d.values()))
+          await cur.execute(sql, params)
           return cur.lastrowid
     except aiomysql.Error as e:
-      self._err("insert", e, sql, tuple(d.values()))
+      self._err("insert", e, sql, params)
 
-  #------------------------------------------------------------------------------------- Schema
+  #----------------------------------------------------------------------------------------- Schema
 
   async def has_table(self, name:str) -> bool:
     return await self.get_value(
@@ -311,16 +294,28 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
     if not name: return False
     return name in (await self.get_column("SHOW DATABASES"))
 
-  #------------------------------------------------------------------------------------- Upsert
+  #----------------------------------------------------------------------------------------- Upsert
 
-  async def upsert(self, table:str, data:dict, on:str|list[str], update:list[str]|None=None) -> int:
-    """INSERT ON DUPLICATE KEY UPDATE. `on` param ignored - uses table's unique keys."""
+  async def upsert(
+    self,
+    table:str,
+    data:dict,
+    on:str|list[str],
+    update:list[str]|None = None,
+  ) -> int:
+    """
+    INSERT ON DUPLICATE KEY UPDATE.
+
+    The table's unique keys decide the conflict, not `on`; `update` defaults to every column
+    except `on`.
+    """
     sql, params = _upsert_sql(table, data, on, update, self.ph, None)
     return await self.exec(sql, params)
 
-  #------------------------------------------------------------------------ Database Management
+  #---------------------------------------------------------------------------- Database Management
 
   async def create_database(self, name:str|None=None) -> bool:
+    """Create database. Returns `False` if it already exists."""
     if self.in_transaction(): raise RuntimeError("create_database() not allowed in transaction")
     import aiomysql
     name = name or self.db_name
@@ -342,6 +337,7 @@ class MysqlAsyncDatabase(AbstractAsyncDatabase):
       self.db_name = backup
 
   async def drop_database(self, name:str|None=None) -> bool:
+    """Drop database and everything in it. Returns `False` if it does not exist."""
     if self.in_transaction(): raise RuntimeError("drop_database() not allowed in transaction")
     import aiomysql
     name = name or self.db_name

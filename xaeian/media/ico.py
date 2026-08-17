@@ -1,14 +1,9 @@
 # xaeian/media/ico.py
 
 """
-Image to ICO conversion -- multi-size favicon generator.
+Image to ICO conversion - multi-size favicon generator.
 
-Uses Pillow for image processing, writes ICO manually for full control.
-
-Example:
-  >>> from xaeian.media.ico import img_to_ico
-  >>> img_to_ico("logo.png")
-  >>> img_to_ico("photo.jpg", sizes=[16, 32, 48], fit="crop")
+Pillow decodes and resizes, the ICO container is packed by hand for full control.
 """
 
 import os, sys, struct
@@ -28,7 +23,7 @@ DEFAULT_SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
 
 FitMode = Literal["pad", "crop"]
 
-#------------------------------------------------------------------------------------ Internals
+#---------------------------------------------------------------------------------------- Internals
 
 def _make_square(img:Image.Image, fit:FitMode) -> Image.Image:
   w, h = img.size
@@ -44,6 +39,7 @@ def _make_square(img:Image.Image, fit:FitMode) -> Image.Image:
   return out
 
 def _pick_sizes(max_side:int, sizes:list[int]|None, upscale:bool) -> list[int]:
+  """Ascending pool sizes capped at `max_side` unless `upscale`, or `[max_side]` if none fit."""
   pool = sizes if sizes else DEFAULT_SIZES
   if upscale:
     return sorted(pool)
@@ -51,12 +47,14 @@ def _pick_sizes(max_side:int, sizes:list[int]|None, upscale:bool) -> list[int]:
   return sorted(picked) if picked else [max_side]
 
 def _write_ico(path:str, sizes:list[int], blobs:list[bytes]):
+  """Pack PNG blobs into an ICO: 6-byte header, then one 16-byte directory entry per image."""
   count = len(sizes)
-  header = struct.pack("<HHH", 0, 1, count)
+  header = struct.pack("<HHH", 0, 1, count) # reserved, type 1 = icon, image count
   entries = []
   offset = 6 + 16 * count
   for s, blob in zip(sizes, blobs):
-    w = 0 if s == 256 else s
+    w = 0 if s == 256 else s # the side is a single byte, so 0 encodes 256
+    # width, height, palette colors, reserved, planes, bpp, blob length, blob offset
     entries.append(struct.pack("<BBBBHHII", w, w, 0, 0, 1, 32, len(blob), offset))
     offset += len(blob)
   with open(path, "wb") as f:
@@ -66,26 +64,24 @@ def _write_ico(path:str, sizes:list[int], blobs:list[bytes]):
     for blob in blobs:
       f.write(blob)
 
-#------------------------------------------------------------------------------------------ API
+#---------------------------------------------------------------------------------------------- API
 
 def img_to_ico(
-  src: str,
-  dst: str|None = None,
-  sizes: list[int]|None = None,
-  fit: FitMode = "pad",
-  upscale: bool = False,
+  src:str,
+  dst:str|None = None,
+  sizes:list[int]|None = None,
+  fit:FitMode = "pad",
+  upscale:bool = False,
 ) -> str:
-  """Convert image to multi-size .ico file.
+  """
+  Convert image to multi-size .ico file.
+
+  Every entry is stored as a 32-bit RGBA PNG, so the source may carry transparency.
 
   Args:
-    src: Input image path (png/jpg/webp/...).
-    dst: Output .ico path. None = same name with .ico extension.
-    sizes: Icon sizes to include. None = auto from DEFAULT_SIZES.
-    fit: Non-square handling -- "pad" (transparent padding) or "crop" (center crop).
-    upscale: Allow sizes larger than source image.
-
-  Returns:
-    Output file path.
+    dst: None → `src` with .ico extension.
+    sizes: None → DEFAULT_SIZES. Sizes above the source side are dropped unless `upscale`.
+    fit: Non-square source, "pad" transparent to square or "crop" centered.
   """
   src = require_file(src, "Image")
   try:
@@ -104,7 +100,7 @@ def img_to_ico(
   _write_ico(out_path, icon_sizes, blobs)
   return out_path
 
-#------------------------------------------------------------------------------------------ CLI
+#---------------------------------------------------------------------------------------------- CLI
 
 EXAMPLES = """
 examples:
@@ -117,7 +113,8 @@ examples:
 
 def main():
   from ..cli._args import _make_parser, _add_help
-  parser = _make_parser("Convert image to multi-size .ico (auto-picks sizes from source)", EXAMPLES)
+  parser = _make_parser("Convert image to multi-size .ico (auto-picks sizes from source)",
+    EXAMPLES)
   parser.add_argument("src", help="Input image path")
   parser.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
     help="Output .ico path (default: <n>.ico)")
@@ -135,7 +132,7 @@ def main():
     try:
       sizes = [int(s.strip()) for s in args.sizes.split(",")]
       if any(s < 1 or s > 512 for s in sizes):
-        p.err(f"Sizes must be {c.CYAN}1{c.END}–{c.CYAN}512{c.END} px")
+        p.err(f"Sizes must be {c.CYAN}1{c.END}-{c.CYAN}512{c.END} px")
         sys.exit(1)
     except ValueError:
       p.err(f"Invalid sizes {c.BLUE}{args.sizes}{c.END} {c.GREY}(expected comma-separated "

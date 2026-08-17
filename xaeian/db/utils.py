@@ -8,37 +8,21 @@ import re
 from datetime import datetime
 from typing import Any
 
-#---------------------------------------------------------------------------------------- Regex
+#-------------------------------------------------------------------------------------------- Regex
 
 ISO_RE = re.compile(
   r"^\d{4}-\d{2}-\d{2}"
   r"([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$"
 )
-"""ISO 8601 datetime pattern."""
+"""ISO 8601 date, with optional time and timezone."""
 
 PH_RE = re.compile(r"\$(\d+)")
 """PostgreSQL placeholder pattern ($1, $2, ...)."""
 
-#-------------------------------------------------------------------------------- Serialization
+#------------------------------------------------------------------------------------ Serialization
 
 def serialize(val:Any) -> Any:
-  """
-  Serialize value for database storage.
-
-  Converts `dict`/`list` to JSON string, ISO datetime string to `datetime`.
-
-  Args:
-    val: Value to serialize.
-
-  Returns:
-    Serialized value ready for database.
-
-  Example:
-    >>> serialize({"key": "value"})
-    '{"key": "value"}'
-    >>> serialize("2024-01-15T10:30:00Z")
-    datetime(2024, 1, 15, 10, 30, tzinfo=...)
-  """
+  """Serialize for storage: `dict`/`list` → JSON, ISO datetime string → `datetime`."""
   if val is None: return None
   if isinstance(val, (dict, list)):
     return json.dumps(val, ensure_ascii=False, default=str)
@@ -48,156 +32,55 @@ def serialize(val:Any) -> Any:
   return val
 
 def norm(params:Any) -> tuple:
-  """
-  Normalize parameters to tuple.
-
-  Args:
-    params: `None`, single value, `list`, or `tuple`.
-
-  Returns:
-    Tuple of parameters.
-
-  Example:
-    >>> norm(None)
-    ()
-    >>> norm(42)
-    (42,)
-    >>> norm([1, 2, 3])
-    (1, 2, 3)
-  """
+  """Normalize `None` / bare value / `list` / `tuple` params to a tuple."""
   if params is None: return ()
   if isinstance(params, tuple): return params
   if isinstance(params, list): return tuple(params)
   return (params,)
 
 def serialize_params(params:Any) -> tuple:
-  """
-  Normalize and serialize parameters.
-
-  Args:
-    params: Raw parameters.
-
-  Returns:
-    Tuple of serialized values.
-  """
+  """Normalize and serialize parameters."""
   return tuple(serialize(v) for v in norm(params))
 
 def serialize_dict(data:dict) -> dict:
-  """
-  Serialize all values in dict.
-
-  Args:
-    data: Dict with raw values.
-
-  Returns:
-    Dict with serialized values.
-  """
+  """Serialize every value in dict."""
   return {k: serialize(v) for k, v in data.items()}
 
 def listify(data:Any) -> Any:
-  """
-  Recursively convert tuples to lists.
-
-  Args:
-    data: Data structure with tuples.
-
-  Returns:
-    Same structure with lists instead of tuples.
-  """
+  """Recursively convert tuples to lists: drivers return tuple rows, the API returns lists."""
   if isinstance(data, (tuple, list)): return [listify(item) for item in data]
   return data
 
-#---------------------------------------------------------------------------------- SQL Helpers
+#-------------------------------------------------------------------------------------- SQL Helpers
 
 def ident(name:str) -> str:
-  """
-  Validate SQL identifier.
-
-  Args:
-    name: Table or column name.
-
-  Returns:
-    Validated identifier.
-
-  Raises:
-    ValueError: When name contains invalid characters.
-
-  Example:
-    >>> ident("users")
-    'users'
-    >>> ident("user_id")
-    'user_id'
-  """
+  """Guard a table/column name before it is interpolated into SQL: alphanumeric and `_` only."""
   if not name.replace("_", "").isalnum():
     raise ValueError(f"Invalid identifier: {name!r}")
   return name
 
 def ph(n:int, style:str="?", offset:int=0) -> str:
   """
-  Generate placeholder tuple string.
+  Build a parenthesized placeholder list: `"(?, ?)"`, `"($1, $2)"`.
 
-  Args:
-    n: Number of placeholders.
-    style: `"?"` for SQLite, `"%s"` for MySQL and sync PostgreSQL, `"$"` for async PostgreSQL.
-    offset: Starting number for `$N` style.
-
-  Returns:
-    Placeholder tuple like `"(?, ?)"` or `"($1, $2)"`.
-
-  Example:
-    >>> ph(3)
-    '(?, ?, ?)'
-    >>> ph(3, "$")
-    '($1, $2, $3)'
+  Style: `"?"` SQLite, `"%s"` MySQL and sync PostgreSQL, `"$"` async PostgreSQL, where
+  `offset` is the count of placeholders already numbered before this one.
   """
-  if style == "$": phs = [f"${i + offset + 1}" for i in range(n)]
-  else: phs = [style] * n
-  return "(" + ", ".join(phs) + ")"
+  return "(" + ", ".join(ph_list(n, style, offset)) + ")"
 
 def ph_list(n:int, style:str="?", offset:int=0) -> list[str]:
-  """
-  Generate placeholder list.
-
-  Args:
-    n: Number of placeholders.
-    style: Placeholder style.
-    offset: Starting number for `$N` style.
-
-  Returns:
-    List of placeholders.
-
-  Example:
-    >>> ph_list(3)
-    ['?', '?', '?']
-    >>> ph_list(3, "$")
-    ['$1', '$2', '$3']
-  """
+  """Placeholders unwrapped: `['$1', '$2']`. Styles as in `ph`."""
   if style == "$": return [f"${i + offset + 1}" for i in range(n)]
   return [style] * n
 
 def renum_ph(where:str, offset:int) -> str:
-  """
-  Renumber `$N` placeholders by offset.
-
-  Args:
-    where: SQL WHERE clause with `$N` placeholders.
-    offset: Number to add to each placeholder.
-
-  Returns:
-    WHERE clause with renumbered placeholders.
-
-  Example:
-    >>> renum_ph("id = $1 AND status = $2", 3)
-    'id = $4 AND status = $5'
-  """
+  """Shift every `$N` in `where` by `offset`, so `$1` with offset 3 → `$4`."""
   if not offset: return where
-  if PH_RE.search(where):
-    return PH_RE.sub(lambda m: f"${int(m.group(1)) + offset}", where)
-  return where
+  return PH_RE.sub(lambda m: f"${int(m.group(1)) + offset}", where)
 
-#--------------------------------------------------------------------------------- SQL Builders
+#------------------------------------------------------------------------------------- SQL Builders
 
-# Shared by the sync/async bases; each returns (sql, params).
+# Shared by the sync and async implementations.
 
 def _insert_sql(table:str, data:dict, style:str) -> tuple[str, tuple]:
   """Build `INSERT INTO ... VALUES (...)` and its params (no RETURNING)."""
@@ -207,7 +90,11 @@ def _insert_sql(table:str, data:dict, style:str) -> tuple[str, tuple]:
   return f"INSERT INTO {t} ({cols}) VALUES {ph(len(d), style)}", tuple(d.values())
 
 def _insert_many_sql(table:str, rows:list[dict], style:str) -> tuple[str, list[tuple]]:
-  """Build INSERT and per-row param tuples for a non-empty row list."""
+  """
+  Build INSERT and per-row param tuples for a non-empty row list.
+
+  Columns are taken from the first row, so every row must carry the same keys.
+  """
   rows2 = [serialize_dict(r) for r in rows]
   t = ident(table)
   cols = ", ".join(ident(k) for k in rows2[0].keys())
@@ -223,8 +110,18 @@ def _update_sql(table:str, data:dict, where:str, params:Any, style:str) -> tuple
   p = tuple(d.values()) + serialize_params(params)
   return f"UPDATE {t} SET {sets} WHERE {renum_ph(where, n)}", p
 
-def _find_sql(table:str, order:str|None, limit:int|None, style:str, where:dict) -> tuple[str, tuple]:
-  """Build `SELECT * FROM ...` with kwargs WHERE / ORDER BY / LIMIT."""
+def _find_sql(
+  table:str,
+  order:str|None,
+  limit:int|None,
+  style:str,
+  where:dict,
+) -> tuple[str, tuple]:
+  """
+  Build `SELECT * FROM ...` with kwargs WHERE / ORDER BY / LIMIT.
+
+  `order` and `limit` are interpolated raw, so they must never come from user input.
+  """
   t = ident(table)
   sql = f"SELECT * FROM {t}"
   params = ()
@@ -238,15 +135,19 @@ def _find_sql(table:str, order:str|None, limit:int|None, style:str, where:dict) 
   return sql, params
 
 def _upsert_sql(
-  table:str, data:dict, on:str|list[str],
-  update:list[str]|None, style:str, excluded:str|None,
+  table:str,
+  data:dict,
+  on:str|list[str],
+  update:list[str]|None,
+  style:str,
+  excluded:str|None,
 ) -> tuple[str, tuple]:
   """
   Build dialect-aware upsert and its params.
 
-  Args:
-    excluded: Conflict-row alias (`"excluded"`/`"EXCLUDED"`) for `ON CONFLICT ... DO UPDATE`,
-      or `None` for MySQL `ON DUPLICATE KEY UPDATE`.
+  `excluded` is the conflict-row alias (`"excluded"`/`"EXCLUDED"`) for `ON CONFLICT ... DO
+  UPDATE`, or `None` for MySQL `ON DUPLICATE KEY UPDATE`, which names no conflict target.
+  `update` defaults to every column of `data` except those named in `on`.
   """
   d = serialize_dict(data)
   t = ident(table)
@@ -262,24 +163,10 @@ def _upsert_sql(
     sql = f"INSERT INTO {t} ({cols}) VALUES {vals} ON CONFLICT ({conf}) DO UPDATE SET {sets}"
   return sql, tuple(d.values())
 
-#--------------------------------------------------------------------------------- JSON Parsing
+#------------------------------------------------------------------------------------- JSON Parsing
 
 def parse_json(val:Any) -> Any:
-  """
-  Parse JSON string to dict/list.
-
-  Args:
-    val: Value to parse.
-
-  Returns:
-    Parsed JSON or original value on failure.
-
-  Example:
-    >>> parse_json('{"key": "value"}')
-    {'key': 'value'}
-    >>> parse_json('not json')
-    'not json'
-  """
+  """Parse a JSON string, returning the value unchanged when it does not parse."""
   if val is None: return None
   if isinstance(val, (dict, list)): return val
   if isinstance(val, str):
@@ -288,53 +175,16 @@ def parse_json(val:Any) -> Any:
   return val
 
 def parse_row(row:list, json_idx:set[int]) -> list:
-  """
-  Parse JSON at specified indices in row.
-
-  Args:
-    row: Row as list of values.
-    json_idx: Set of column indices to parse as JSON.
-
-  Returns:
-    Row with JSON columns parsed.
-  """
+  """Parse JSON in the columns whose index is in `json_idx`."""
   return [parse_json(v) if i in json_idx else v for i, v in enumerate(row)]
 
 def to_dicts(rows:list, cols:list[str], json:list[str]|None=None) -> list[dict]:
-  """
-  Convert rows to dicts.
-
-  Args:
-    rows: List of row tuples/lists.
-    cols: Column names.
-    json: Column names to parse as JSON.
-
-  Returns:
-    List of dicts.
-  """
+  """Zip rows against `cols`, parsing the columns named in `json`."""
   if not json: return [dict(zip(cols, row)) for row in rows]
   jset = set(json)
-  result = []
-  for row in rows:
-    d = {}
-    for k, v in zip(cols, row):
-      d[k] = parse_json(v) if k in jset else v
-    result.append(d)
-  return result
+  return [{k: parse_json(v) if k in jset else v for k, v in zip(cols, row)} for row in rows]
 
 def split_sql(sql:str) -> list[str]:
-  """
-  Split SQL by semicolons, respecting quotes.
-
-  Args:
-    sql: Multi-statement SQL string.
-
-  Returns:
-    List of individual statements.
-
-  Example:
-    >>> split_sql("SELECT 1; SELECT 'a;b'")
-    ['SELECT 1;', "SELECT 'a;b'"]
-  """
+  """Split multi-statement SQL on `;`, protecting `'...'` literals but not `"identifiers"`."""
   from ..xstring import split_sql as _split_sql
   return _split_sql(sql)

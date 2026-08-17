@@ -3,8 +3,8 @@
 """
 KiCad output cleanup for footprints and 3D models.
 
-`clean_footprint` rounds coordinate floats and optionally restyles line widths
-in `.kicad_mod` files; `clean_step` tidies redundant naming in `.step` models.
+`clean_footprint` compacts and restyles `.kicad_mod` files, `clean_step` tidies `.step` models.
+Both take `dry=True` to skip writing and return `(original_size, new_size)` in characters.
 
 Example:
   >>> from xaeian.eda import clean_footprint, clean_step
@@ -17,7 +17,7 @@ from ..xstring import strip_comments
 from ..files import FILE, PATH
 from .fp import Style, L, fmt_number
 
-#---------------------------------------------------------------------------- Footprint cleanup
+#-------------------------------------------------------------------------------- Footprint cleanup
 
 def _round_coords(text:str) -> str:
   """Round coordinate floats to 2 decimal places."""
@@ -28,7 +28,6 @@ def _round_coords(text:str) -> str:
 
 def _compact_block(text:str) -> str:
   """Collapse multi-line S-expression blocks to single lines."""
-  # Collapse property blocks
   text = re.sub(
     r'\(property\s+"([^"]+)"\s+"([^"]*)"\s+'
     r'\(at\s+([^)]+)\)\s+'
@@ -48,7 +47,6 @@ def _compact_block(text:str) -> str:
     ),
     text, flags=re.DOTALL,
   )
-  # Collapse fp_line blocks
   text = re.sub(
     r'\(fp_line\s+\(start\s+([^)]+)\)\s+\(end\s+([^)]+)\)\s+'
     r'\(stroke\s+\(width\s+([^)]+)\)\s+\(type\s+solid\)\s*\)\s+'
@@ -57,7 +55,6 @@ def _compact_block(text:str) -> str:
     r' (layer "\4") (uuid "\5"))',
     text, flags=re.DOTALL,
   )
-  # Collapse fp_rect blocks
   text = re.sub(
     r'\(fp_rect\s+\(start\s+([^)]+)\)\s+\(end\s+([^)]+)\)\s+'
     r'\(stroke\s+\(width\s+([^)]+)\)\s+\(type\s+solid\)\s*\)\s+'
@@ -67,7 +64,6 @@ def _compact_block(text:str) -> str:
     r' (fill \4) (layer "\5") (uuid "\6"))',
     text, flags=re.DOTALL,
   )
-  # Collapse fp_arc blocks
   text = re.sub(
     r'\(fp_arc\s+\(start\s+([^)]+)\)\s+\(mid\s+([^)]+)\)\s+'
     r'\(end\s+([^)]+)\)\s+'
@@ -77,7 +73,6 @@ def _compact_block(text:str) -> str:
     r' (stroke (width \4) (type solid)) (layer "\5") (uuid "\6"))',
     text, flags=re.DOTALL,
   )
-  # Collapse pad blocks
   text = re.sub(
     r'\(pad\s+"([^"]*)"\s+(smd|thru_hole|np_thru_hole)\s+(\w+)\s+'
     r'\(at\s+([^)]+)\)\s+\(size\s+([^)]+)\)\s+'
@@ -90,7 +85,6 @@ def _compact_block(text:str) -> str:
     lambda m: _compact_pad(m),
     text, flags=re.DOTALL,
   )
-  # Collapse model blocks
   text = re.sub(
     r'\(model\s+"([^"]+)"\s+'
     r'\(offset\s+\(xyz\s+([^)]+)\)\s*\)\s+'
@@ -99,7 +93,6 @@ def _compact_block(text:str) -> str:
     r'(model "\1" (offset (xyz \2)) (scale (xyz \3)) (rotate (xyz \4)))',
     text, flags=re.DOTALL,
   )
-  # Collapse fp_poly blocks
   text = re.sub(
     r'\(fp_poly\s+\(pts\s+((?:\(xy\s+[^)]+\)\s*)+)\)\s+'
     r'\(stroke\s+\(width\s+([^)]+)\)\s+\(type\s+solid\)\s*\)\s+'
@@ -112,11 +105,11 @@ def _compact_block(text:str) -> str:
     ),
     text, flags=re.DOTALL,
   )
-  # Clean up multiple blank lines
   text = re.sub(r"\n{2,}", "\n", text)
   return text
 
 def _compact_pad(m) -> str:
+  """Rebuild one `pad` on a single line; `thru_hole` always gets `(remove_unused_layers no)`."""
   num, mount, shape = m[1], m[2], m[3]
   at, size = m[4], m[5]
   drill_raw, layers = m[6], m[7]
@@ -141,21 +134,17 @@ def _width_pat(layer:str) -> str:
     rf'(?:\(fill\s+(?:yes|no)\)\s*)?\(layer\s+"{layer}"\)'
   )
 
-def clean_footprint(filepath:str, style:Style=L, restyle:bool=True, dry:bool=False,
+def clean_footprint(
+  filepath:str,
+  style:Style = L,
+  restyle:bool = True,
+  dry:bool = False,
 ) -> tuple[int, int]:
-  """Clean and compact a hand-drawn `.kicad_mod` footprint.
+  """
+  Clean and compact a hand-drawn `.kicad_mod` footprint, `restyle` applies the `style` tier.
 
-  Applies style tier fonts/widths, removes cruft,
-  compacts multi-line to single-line S-expressions.
-
-  Args:
-    filepath: Path to `.kicad_mod` file.
-    style: Size tier for line widths and fonts.
-    restyle: When `True`, apply style tier widths and fonts.
-    dry: When `True`, don't write changes.
-
-  Returns:
-    Tuple of `(original_size, new_size)` in bytes.
+  Rewrites in place: the Value property is forced to the file stem at a fixed position, so the
+  filename is the single source of the footprint name.
   """
   text = FILE.load(filepath)
   orig_size = len(text)
@@ -163,24 +152,19 @@ def clean_footprint(filepath:str, style:Style=L, restyle:bool=True, dry:bool=Fal
   s = style
   fs = fmt_number(s.font_size)
   ft = fmt_number(s.font_thick)
-  # Fix Value text to match filename
   text = re.sub(
     r'(\(property "Value" ")[^"]*(")',
     rf'\g<1>{stem}\2',
     text,
   )
-  # Fix Value at position
   text = re.sub(
     r'(\(property "Value" "[^"]*"\s+)\(at [^)]+\)',
     rf'\g<1>(at 0 1.6 180)',
     text,
   )
-  # Remove (unlocked yes)
   text = re.sub(r'\s*\(unlocked yes\)', '', text)
-  # Remove (justify ...) from property effects
   text = re.sub(r'\s*\(justify[^)]*\)', '', text)
   if restyle:
-    # Fix Reference + Value font to style
     text = re.sub(
       r'(\(property "(Reference|Value)" .+?)'
       r'(\(size )\d+\.?\d*\s+\d+\.?\d*\)',
@@ -193,7 +177,6 @@ def clean_footprint(filepath:str, style:Style=L, restyle:bool=True, dry:bool=Fal
       rf'\g<1>\g<3>{ft})',
       text, flags=re.DOTALL,
     )
-    # Fab width
     text = re.sub(
       _width_pat(r"F\.Fab"),
       lambda m: re.sub(
@@ -201,7 +184,7 @@ def clean_footprint(filepath:str, style:Style=L, restyle:bool=True, dry:bool=Fal
       ),
       text, flags=re.DOTALL,
     )
-    # Silk width remap: max → s.silk, rest → s.silk_detail
+    # widest silk stroke → s.silk, everything thinner → s.silk_detail
     silk_widths = set()
     for m in re.finditer(
       _width_pat(r"F\.SilkS"),
@@ -222,7 +205,6 @@ def clean_footprint(filepath:str, style:Style=L, restyle:bool=True, dry:bool=Fal
         _remap_silk,
         text, flags=re.DOTALL,
       )
-    # CrtYd width
     text = re.sub(
       _width_pat(r"F\.CrtYd"),
       lambda m: re.sub(
@@ -230,35 +212,32 @@ def clean_footprint(filepath:str, style:Style=L, restyle:bool=True, dry:bool=Fal
       ),
       text, flags=re.DOTALL,
     )
-  # Round coordinate artifacts
   text = _round_coords(text)
-  # Compact to single-line S-expressions
   text = _compact_block(text)
   new_size = len(text)
   if not dry:
     FILE.save(filepath, text)
   return orig_size, new_size
 
-#------------------------------------------------------------------------------------- STEP ops
+#----------------------------------------------------------------------------------------- STEP ops
 
 def _clean_file_name(block:str, fname:str) -> str:
   """Rebuild FILE_NAME keeping author and date, clearing junk."""
-  date = re.search(r"'(\d{4}-\d{2}-\d{2}T[\d:]+)'", block)
+  body = block.split("(", 1)[-1] # FILE_NAME's own paren is not the author group
+  date = re.search(r"'(\d{4}-\d{2}-\d{2}T[\d:]+(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)'", body)
   date = date.group(1) if date else ""
-  after_date = block.split(date, 1)[-1] if date else block
+  after_date = body.split(date, 1)[-1] if date else body
   author = re.search(r"(\([^)]*\))", after_date)
   author = author.group(1) if author else "('')"
   return f"FILE_NAME('{fname}','{date}',{author},(''),'','','');"
 
 def clean_step(filepath:str, dry:bool=False) -> tuple[int, int]:
-  """Clean STEP file: strip comments, minimize header, fix names.
+  """
+  Clean a `.step` / `.stp` file: strip comments, minimize header, fix names.
 
-  Args:
-    filepath: Path to `.step` / `.stp` file.
-    dry: When `True`, don't write changes.
-
-  Returns:
-    Tuple of `(original_size, new_size)` in bytes.
+  `FILE_NAME`, `FILE_DESCRIPTION` and `PRODUCT` are rebuilt from the path, so the model names
+  itself `<parent>/<file>` regardless of what the CAD tool wrote.
+  Raises `ValueError` and writes nothing if the ISO-10303 end markers did not survive.
   """
   text = FILE.load(filepath)
   orig_size = len(text)
@@ -285,7 +264,7 @@ def clean_step(filepath:str, dry:bool=False) -> tuple[int, int]:
   )
   text = re.sub(
     r"(PRODUCT\s*\(\s*')([^']*?)('\s*,\s*')([^']*?)(')",
-    rf"\g<1>{stem}\3{stem}\5",
+    rf"\g<1>{stem}\g<3>{stem}\g<5>",
     text,
   )
   new_size = len(text)

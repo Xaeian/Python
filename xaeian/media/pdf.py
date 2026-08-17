@@ -3,61 +3,54 @@
 """
 PDF manipulation: compress, merge, split, extract, metadata, text overlay.
 
-Uses Ghostscript for compression, pypdf for structure, PyMuPDF (fitz) for text.
-
-Example:
-  >>> from xaeian.media.pdf import pdf_compress, pdf_merge, pdf_extract
-  >>> pdf_compress("report.pdf", settings="/ebook")
-  >>> pdf_merge(["p1.pdf", "p2.pdf"], "combined.pdf")
-  >>> pdf_extract("report.pdf", "pages.pdf", "1,3,5-7")
+Compression shells out to Ghostscript, structure edits use pypdf, text PyMuPDF (fitz).
 """
 
 import os, subprocess
-from typing import Literal, Sequence
+from typing import Literal, NoReturn, Sequence
 from pypdf import PdfReader, PdfWriter
-from ..files import DIR
+from ..files import DIR, FILE
 from ..cmd import which
 from .utils import require_file, resolve_dst
 
-#---------------------------------------------------------------------------------------- Types
+#-------------------------------------------------------------------------------------------- Types
 
 PdfCompatLevel = Literal["1.2", "1.3", "1.4", "1.5", "1.6", "1.7"]
 PdfSettings = Literal["/screen", "/ebook", "/printer", "/prepress", "/default"]
 
-#------------------------------------------------------------------------------------- Compress
+#----------------------------------------------------------------------------------------- Compress
 
 def pdf_compress(
-  src: str,
-  dst: str|None = None,
-  level: PdfCompatLevel = "1.7",
-  settings: PdfSettings = "/screen",
-  programs: Sequence[str] = ("gswin64c", "gswin32c", "gs"),
-  inplace: bool = False,
+  src:str,
+  dst:str|None = None,
+  level:PdfCompatLevel = "1.7",
+  settings:PdfSettings = "/screen",
+  programs:Sequence[str] = ("gswin64c", "gswin32c", "gs"),
+  inplace:bool = False,
+  verify:bool = True,
 ) -> str:
-  """Compress PDF using Ghostscript.
+  """
+  Compress PDF, one of `programs` must be on PATH.
 
-  Args:
-    src: Input PDF path.
-    dst: Output path. None = auto (see `inplace`).
-    level: PDF compatibility level.
-    settings: Ghostscript preset (/screen, /ebook, /printer, /prepress).
-    programs: Candidate Ghostscript executables.
-    inplace: If True and dst is None, overwrite source. Otherwise add -min suffix.
+  `settings` ranges from /screen (smallest) to /prepress (largest), it drives image
+  downsampling, so a text-only PDF may come out no smaller. `dst` None → `-min` suffix
+  beside the source, or the source itself when `inplace`.
 
-  Returns:
-    Output file path.
+  Ghostscript exits 0 on damaged input after writing a stub, so `verify` reads the page count
+  before and after and refuses a result that lost pages. A source that cannot be read is refused
+  outright, since a conversion cannot be checked against an original nobody can open. Passing
+  `verify=False` compresses a malformed file anyway and accepts a silently truncated result.
   """
   src = require_file(src, "PDF")
+  src_pages = _page_count(src) if verify else 0
+  if verify and not src_pages: _refuse_unreadable(src)
   gs_cmd = which(*programs)
   if gs_cmd is None:
     raise RuntimeError("Ghostscript not found")
   out_path = resolve_dst(src, dst, inplace, "min")
-  # Inplace needs tmp file: GS can't read and write same file
-  if inplace and dst is None:
-    base, ext = os.path.splitext(src)
-    tmp_path = f"{base}-tmp{ext}"
-  else:
-    tmp_path = out_path
+  # GS can't read and write the same file, and a refused result must never reach `out_path`
+  base, ext = os.path.splitext(out_path)
+  tmp_path = f"{base}-tmp{ext}"
   cmd = [
     gs_cmd,
     "-dNOPAUSE", "-dBATCH", "-dQUIET",
@@ -69,23 +62,42 @@ def pdf_compress(
   ]
   proc = subprocess.run(cmd, check=False)
   if proc.returncode != 0 or not os.path.exists(tmp_path):
+    FILE.remove(tmp_path)
     raise RuntimeError(f"Ghostscript failed (code {proc.returncode})")
-  if inplace and dst is None:
-    os.replace(tmp_path, src)
+  out_pages = _page_count(tmp_path) if verify else src_pages
+  if out_pages < src_pages:
+    FILE.remove(tmp_path)
+    raise RuntimeError(f"Ghostscript dropped pages: {out_pages} of {src_pages}")
+  os.replace(tmp_path, out_path)
   return out_path
 
-#------------------------------------------------------------------------------------- Metadata
+def _page_count(path:str) -> int:
+  """Page count, `0` when the file cannot be read as PDF."""
+  try:
+    return len(PdfReader(path).pages)
+  except Exception:
+    return 0
+
+def _refuse_unreadable(path:str) -> NoReturn:
+  """Raise naming why the PDF could not be read, so the caller knows what to repair."""
+  try:
+    reason = "encrypted" if PdfReader(path).is_encrypted else "no pages"
+  except Exception as e:
+    reason = f"malformed ({type(e).__name__})"
+  raise RuntimeError(
+    f"Cannot read PDF, refusing to compress unverifiable input: {path} - {reason}. "
+    "Repair it first, or pass verify=False to compress it unchecked."
+  )
+
+#----------------------------------------------------------------------------------------- Metadata
 
 def pdf_scrub_metadata(src:str, dst:str|None=None, inplace:bool=False) -> str:
-  """Remove all metadata from PDF.
+  """
+  Rebuild a PDF with an empty document info dictionary.
 
-  Args:
-    src: Input PDF path.
-    dst: Output path. None = auto (see `inplace`).
-    inplace: If True and dst is None, overwrite source. Otherwise add -nometa suffix.
-
-  Returns:
-    Output file path.
+  Pages are copied whole, so anything riding on a page (annotations, embedded files) is
+  kept: this clears the document info, it does not strip every trace of provenance.
+  `dst` None → `-nometa` suffix beside the source, or the source itself when `inplace`.
   """
   src = require_file(src, "PDF")
   reader = PdfReader(src)
@@ -98,18 +110,10 @@ def pdf_scrub_metadata(src:str, dst:str|None=None, inplace:bool=False) -> str:
     writer.write(f)
   return out_path
 
-#------------------------------------------------------------------------------------ Structure
+#---------------------------------------------------------------------------------------- Structure
 
 def pdf_merge(paths:Sequence[str], dst:str) -> str:
-  """Merge multiple PDFs into one.
-
-  Args:
-    paths: List of input PDF paths.
-    dst: Output file path.
-
-  Returns:
-    Output file path.
-  """
+  """Merge PDFs into one, pages in the order `paths` are given."""
   if not paths:
     raise ValueError("No input files")
   writer = PdfWriter()
@@ -124,16 +128,7 @@ def pdf_merge(paths:Sequence[str], dst:str) -> str:
   return dst
 
 def pdf_split(src:str, dst_dir:str, prefix:str="page") -> list[str]:
-  """Split PDF into single-page files.
-
-  Args:
-    src: Input PDF path.
-    dst_dir: Output directory.
-    prefix: Filename prefix (creates prefix_001.pdf, prefix_002.pdf...).
-
-  Returns:
-    List of created file paths.
-  """
+  """Split PDF into one file per page, named `<prefix>_001.pdf` upward."""
   src = require_file(src, "PDF")
   dst_dir = os.path.abspath(dst_dir)
   os.makedirs(dst_dir, exist_ok=True)
@@ -148,17 +143,15 @@ def pdf_split(src:str, dst_dir:str, prefix:str="page") -> list[str]:
     created.append(out_path)
   return created
 
-#---------------------------------------------------------------------------------------- Pages
+#-------------------------------------------------------------------------------------------- Pages
 
 def parse_pages(spec:str|int|Sequence[str|int], total:int) -> list[int]:
-  """Parse page specification into 0-based indices.
+  """
+  Parse a 1-based page spec into sorted 0-based indices.
 
-  Args:
-    spec: Page spec (1-based): int, str "1,3,5-7,!2", or list [1, "5-7", "!2"].
-    total: Total number of pages in document.
-
-  Returns:
-    Sorted list of 0-based page indices.
+  `spec` takes 5, "1,3,5-7,!2" or [1, "5-7", "!2"]: `!` excludes, an open range "5-"
+  runs to `total`, and a spec holding only exclusions starts from every page. Numbers
+  beyond `total` are dropped silently, so an over-wide range is a safe way to say "rest".
   """
   if isinstance(spec, int): spec = str(spec)
   elif not isinstance(spec, str): spec = ",".join(str(x) for x in spec)
@@ -184,17 +177,7 @@ def parse_pages(spec:str|int|Sequence[str|int], total:int) -> list[int]:
   return [p - 1 for p in result]
 
 def pdf_extract(src:str, dst:str, pages:str|int|Sequence[str|int]) -> str:
-  """Extract selected pages from PDF.
-
-  Args:
-    src: Input PDF path.
-    dst: Output file path.
-    pages: Page specification (1-based). Supports:
-      int (5), str ("1,3,5-7,!2"), list ([1, 3, "5-7", "!2"]).
-
-  Returns:
-    Output file path.
-  """
+  """Extract pages into a new PDF, `pages` in the 1-based spec of `parse_pages`."""
   src = require_file(src, "PDF")
   reader = PdfReader(src)
   indices = parse_pages(pages, len(reader.pages))
@@ -207,8 +190,10 @@ def pdf_extract(src:str, dst:str, pages:str|int|Sequence[str|int]) -> str:
     writer.write(f)
   return dst
 
-#----------------------------------------------------------------------------------------- Text
+#--------------------------------------------------------------------------------------------- Text
 
+# PyMuPDF base-14 codes: helv/tiro/cour = Helvetica/Times/Courier regular, a bo/it/bi ending
+# marks bold, italic, bold-italic; symb = Symbol, zadb = ZapfDingbats
 FitzFontname = Literal[
   "helv", "hebo", "heit", "hebi",
   "tiro", "tibo", "tiit", "tibi",
@@ -217,31 +202,25 @@ FitzFontname = Literal[
 ]
 
 def pdf_add_text(
-  src: str,
-  dst: str|None = None,
-  text: str = "",
-  pos: tuple[float, float] = (50, 50),
-  fontname: FitzFontname = "helv",
-  fontsize: float = 12,
-  color: tuple[float, float, float] = (0, 0, 0),
-  pages: Sequence[int]|None = None,
-  inplace: bool = False,
+  src:str,
+  dst:str|None = None,
+  text:str = "",
+  pos:tuple[float, float] = (50, 50),
+  fontname:FitzFontname = "helv",
+  fontsize:float = 12,
+  color:tuple[float, float, float] = (0, 0, 0),
+  pages:Sequence[int]|None = None,
+  inplace:bool = False,
 ) -> str:
-  """Add text overlay to PDF pages using PyMuPDF.
+  """
+  Add a text overlay to PDF pages.
 
   Args:
-    src: Input PDF path.
-    dst: Output path. None = auto (see `inplace`).
-    text: Text to insert.
-    pos: (x, y) position in points from top-left.
-    fontname: Built-in PDF font name.
-    fontsize: Font size in points.
-    color: RGB color tuple (0.0-1.0 per channel).
-    pages: 0-based page indices to annotate. None = all pages.
-    inplace: If True and dst is None, overwrite source. Otherwise add -text suffix.
-
-  Returns:
-    Output file path.
+    dst: None → `-text` suffix beside the source, or the source itself when `inplace`.
+    pos: (x, y) in points from the top-left corner, marking the text baseline start.
+      `fontsize` is in points as well, 72 to the inch.
+    color: RGB, 0.0-1.0 per channel.
+    pages: 0-based indices, None → every page.
   """
   import fitz
   src = require_file(src, "PDF")
@@ -250,7 +229,7 @@ def pdf_add_text(
   for i, page in enumerate(doc):
     if pages is None or i in pages:
       page.insert_text(pos, text, fontname=fontname, fontsize=fontsize, color=color)
-  # Fitz can't save to same file: use tmp + replace
+  # Fitz can't save over the file it opened
   if out_path == src:
     base, ext = os.path.splitext(src)
     tmp_path = f"{base}-tmp{ext}"

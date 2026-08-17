@@ -3,17 +3,12 @@
 """
 String manipulation utilities.
 
-Functions for replacing, splitting, and stripping text with
-quote-awareness and comment removal for various languages.
+Line-anchored replace, placeholder mapping, quote-aware split, comment stripping for C, SQL
+and Python, and cryptographically secure token/password generation.
 
 Example:
-  >>> from xaeian import split_str, strip_comments_c, generate_password
   >>> split_str('hello "big world" here')
   ['hello', '"big world"', 'here']
-  >>> strip_comments_c('int x = 1; // comment')
-  'int x = 1; '
-  >>> generate_password(12)
-  'aB3$xY9!mN2@'
 """
 
 import re
@@ -22,20 +17,9 @@ import string
 
 def replace_start(text:str, find:str, replace:str, border:bool=False) -> str:
   """
-  Replace substring at start of each line.
+  Replace `find` at every line start. `border` demands a word boundary after `find`.
 
-  Args:
-    text: Input text (possibly multiline).
-    find: Substring to match at line start.
-    replace: Replacement text.
-    border: When `True`, require word boundary after `find`.
-
-  Returns:
-    Text with matching line prefixes replaced.
-
-  Example:
-    >>> replace_start("old_value = 1\\nold_name = 2", "old_", "new_")
-    'new_value = 1\\nnew_name = 2'
+  `replace` is inserted verbatim, not expanded as a regex replacement template.
   """
   if not find: return text
   pattern = rf"(?m)^{re.escape(find)}{r'\b' if border else ''}"
@@ -43,42 +27,24 @@ def replace_start(text:str, find:str, replace:str, border:bool=False) -> str:
 
 def replace_end(text:str, find:str, replace:str, border:bool=False) -> str:
   """
-  Replace substring at end of each line.
+  Replace `find` at every line end. `border` demands a word boundary before `find`.
 
-  Args:
-    text: Input text (possibly multiline).
-    find: Substring to match at line end.
-    replace: Replacement text.
-    border: When `True`, require word boundary before `find`.
-
-  Returns:
-    Text with matching line suffixes replaced.
-
-  Example:
-    >>> replace_end("file.txt\\ndata.txt", ".txt", ".md")
-    'file.md\\ndata.md'
+  `replace` is inserted verbatim, not expanded as a regex replacement template.
   """
   if not find: return text
   pattern = rf"(?m){r'\b' if border else ''}{re.escape(find)}$"
   return re.sub(pattern, lambda _m: replace, text)
 
 def replace_map(
-  subject: str|list|dict,
-  mapping: dict,
-  prefix: str = "",
-  suffix: str = "",
+  subject:str|list|dict,
+  mapping:dict,
+  prefix:str = "",
+  suffix:str = "",
 ) -> str|list|dict:
   """
-  Replace mapping keys with values, recursively.
+  Replace every `{prefix}{key}{suffix}` with its mapped value, recursing into lists and dicts.
 
-  Args:
-    subject: String, list, or dict to process.
-    mapping: Dict of `{key: value}` replacements.
-    prefix: Prefix before each key in text.
-    suffix: Suffix after each key in text.
-
-  Returns:
-    Subject with all matching patterns replaced.
+  Dict keys are left untouched, only values are rewritten. Anything else passes through as is.
 
   Example:
     >>> replace_map("Hello %NAME%!", {"NAME": "World"}, "%", "%")
@@ -95,256 +61,200 @@ def replace_map(
   return subject
 
 def ensure_prefix(text:str, prefix:str) -> str:
-  """
-  Ensure text starts with prefix (idempotent).
-
-  Args:
-    text: Input string.
-    prefix: Required prefix.
-
-  Returns:
-    Text guaranteed to start with `prefix`.
-
-  Example:
-    >>> ensure_prefix("path/file", "/")
-    '/path/file'
-  """
-  if not prefix: return text
+  """Prepend `prefix` unless `text` already starts with it."""
   if text.startswith(prefix): return text
   return prefix + text
 
 def ensure_suffix(text:str, suffix:str) -> str:
-  """
-  Ensure text ends with suffix (idempotent).
-
-  Args:
-    text: Input string.
-    suffix: Required suffix.
-
-  Returns:
-    Text guaranteed to end with `suffix`.
-
-  Example:
-    >>> ensure_suffix("config", ".json")
-    'config.json'
-  """
-  if not suffix: return text
+  """Append `suffix` unless `text` already ends with it."""
   if text.endswith(suffix): return text
   return text + suffix
 
-def split_str(string:str, sep:str=" ", quote:str='"', esc:str=None) -> list[str]:
+SQL_QUOTES = "'\""
+
+#---------------------------------------------------------------------------------------- Tokenizer
+
+def scan(
+  text:str,
+  quotes:str = "",
+  esc:str|None = None,
+  line:str|None = None,
+  block:tuple|None = None,
+  sep:str = "",
+) -> list[tuple[str, str]]:
   """
-  Split string by separator, preserving quoted segments.
+  Split text into `(kind, chunk)` runs: `text`, `quote`, `unclosed`, `comment` or `sep`.
 
-  Args:
-    string: Input text to split.
-    sep: Separator string (can be multi-char).
-    quote: Quote character protecting segments.
-    esc: Escape character. When `None`, doubled quotes escape (`""`).
+  One pass settles the precedence the three concerns need, so no caller has to repeat it: a quote
+  opens only outside a comment, a comment marker is inert inside a quote, and `sep` matches only
+  outside both. A quote reaching the end of the input without its closing delimiter comes back as
+  `unclosed`, which lets a caller reject it or keep it. Concatenating every chunk rebuilds `text`.
 
-  Returns:
-    List of tokens with quotes preserved.
+  Example:
+    >>> scan("a,'b,c'", quotes="'", sep=",")
+    [('text', 'a'), ('sep', ','), ('quote', "'b,c'")]
+  """
+  out = []
+  buf = []
+  i, n = 0, len(text)
+  def flush():
+    if buf:
+      out.append(("text", "".join(buf)))
+      buf.clear()
+  while i < n:
+    ch = text[i]
+    if quotes and ch in quotes:
+      flush()
+      start = i
+      i += 1
+      closed = False
+      while i < n:
+        c = text[i]
+        i += 1
+        if esc and c == esc and i < n:
+          i += 1
+          continue
+        if c != ch: continue
+        if not esc and i < n and text[i] == ch: # doubled quote escapes, the run stays open
+          i += 1
+          continue
+        closed = True
+        break
+      out.append(("quote" if closed else "unclosed", text[start:i]))
+      continue
+    if line and text.startswith(line, i):
+      flush()
+      end = text.find("\n", i)
+      end = n if end < 0 else end
+      out.append(("comment", text[i:end]))
+      i = end
+      continue
+    if block and text.startswith(block[0], i):
+      flush()
+      end = text.find(block[1], i + len(block[0]))
+      end = n if end < 0 else end + len(block[1])
+      out.append(("comment", text[i:end]))
+      i = end
+      continue
+    if sep and text.startswith(sep, i):
+      flush()
+      out.append(("sep", sep))
+      i += len(sep)
+      continue
+    buf.append(ch)
+    i += 1
+  flush()
+  return out
 
-  Raises:
-    ValueError: When `sep` is empty or quote is unclosed.
+#------------------------------------------------------------------------------------------- Splits
+
+def split_str(text:str, sep:str=" ", quote:str='"', esc:str|None=None) -> list[str]:
+  """
+  Split by `sep`, keeping quoted segments whole and their quotes in the output.
+
+  `sep` may be multi-char. `quote` may list several delimiters (`SQL_QUOTES` for SQL), each
+  closed only by itself. `esc` escapes inside quotes; when `None`, a doubled quote escapes.
+  An unclosed quote raises `ValueError`.
 
   Example:
     >>> split_str('hello "big world" here')
     ['hello', '"big world"', 'here']
-    >>> split_str('a,"b,c",d', sep=",")
-    ['a', '"b,c"', 'd']
   """
   if not sep: raise ValueError("Separator cannot be empty")
-  res = []
-  buf = []
-  in_quote = False
-  i = 0
-  while i < len(string):
-    ch = string[i]
-    if in_quote:
-      buf.append(ch)
-      if esc and ch == esc and i + 1 < len(string):
-        buf.append(string[i + 1])
-        i += 2
-        continue
-      if not esc and ch == quote and i + 1 < len(string) and string[i + 1] == quote:
-        buf.append(string[i + 1])
-        i += 2
-        continue
-      if ch == quote: in_quote = False
-      i += 1
+  parts = scan(text, quotes=quote, esc=esc, sep=sep)
+  if any(kind == "unclosed" for kind, _ in parts):
+    raise ValueError(f"Unclosed quote in: {text[:50]}...")
+  res, buf = [], []
+  for kind, chunk in parts:
+    if kind == "sep":
+      res.append("".join(buf))
+      buf = []
     else:
-      if ch == quote:
-        in_quote = True
-        buf.append(ch)
-        i += 1
-      elif string[i:i + len(sep)] == sep:
-        res.append("".join(buf))
-        buf = []
-        i += len(sep)
-      else:
-        buf.append(ch)
-        i += 1
-  if in_quote: raise ValueError(f"Unclosed quote in: {string[:50]}...")
+      buf.append(chunk)
   res.append("".join(buf))
   return res
 
 def _normalize_sql(sql:str) -> str:
-  """
-  Collapse whitespace and punctuation spacing OUTSIDE quoted literals.
-
-  String literals (`'...'`, with `''` escaping) are preserved verbatim so their
-  content is never mangled; only the surrounding SQL is normalized.
-  """
-  spans = [] # list of (is_quoted, text)
-  buf = []
-  i, n = 0, len(sql)
-  while i < n:
-    ch = sql[i]
-    if ch == "'":
-      spans.append((False, "".join(buf)))
-      buf = []
-      lit = ["'"]
-      i += 1
-      while i < n:
-        c = sql[i]
-        lit.append(c)
-        if c == "'":
-          if i + 1 < n and sql[i + 1] == "'":  # '' escape: keep both, stay in literal
-            lit.append("'")
-            i += 2
-            continue
-          i += 1
-          break
-        i += 1
-      spans.append((True, "".join(lit)))
-    else:
-      buf.append(ch)
-      i += 1
-  spans.append((False, "".join(buf)))
+  """Collapse whitespace and spacing around `(),=`, leaving quoted spans exactly as they are."""
   out = []
-  for quoted, text in spans:
-    if quoted:
-      out.append(text)
+  for kind, chunk in scan(sql, quotes=SQL_QUOTES):
+    if kind != "text":
+      out.append(chunk)
     else:
-      text = re.sub(r"\s+", " ", text)
-      text = re.sub(r"\s*([(),=])\s*", r"\1", text)
-      out.append(text)
+      chunk = re.sub(r"\s+", " ", chunk)
+      out.append(re.sub(r"\s*([(),=])\s*", r"\1", chunk))
   return "".join(out).strip()
 
 def split_sql(sqls:str) -> list[str]:
   """
-  Split SQL script into normalized statements.
+  Split into `;`-terminated statements, dropping comments and normalizing spacing.
 
-  Whitespace and punctuation spacing are normalized outside quoted literals;
-  string literals (`'...'`) keep their content intact.
-
-  Args:
-    sqls: SQL text with one or more statements.
-
-  Returns:
-    List of SQL statements, each ending with `;`.
+  `'literals'` and `"identifiers"` are protected, so a `;` or `,` inside either one neither
+  splits the statement nor loses its spacing. `--` and `/* */` comments are removed before the
+  split, since collapsing newlines would otherwise let a line comment swallow what follows it.
 
   Example:
-    >>> split_sql("SELECT 1; SELECT 2;")
+    >>> split_sql("SELECT 1; -- note\\nSELECT 2;")
     ['SELECT 1;', 'SELECT 2;']
   """
-  parts = split_str(sqls, sep=";", quote="'")
   out = []
-  for sql in parts:
+  for sql in split_str(strip_comments_sql(sqls), sep=";", quote=SQL_QUOTES):
     sql = _normalize_sql(sql)
     if sql: out.append(sql + ";")
   return out
 
+#----------------------------------------------------------------------------------------- Comments
+
 def strip_comments(
-  string:str,
-  line:str = "//",
-  block:tuple = ("/*", "*/"),
+  text:str,
+  line:str|None = "//",
+  block:tuple|None = ("/*", "*/"),
   quotes:str = '"',
   esc:str|None = None,
 ) -> str:
   """
-  Remove comments while preserving quoted strings.
+  Remove line and block comments, leaving quoted strings untouched.
 
-  Args:
-    string: Input source text.
-    line: Line comment marker (e.g., `"//"`, `"#"`). `None` to disable.
-    block: Block comment markers as `(open, close)` tuple. `None` to disable.
-    quotes: Quote character(s) protecting content.
-    esc: Escape character. When `None`, doubled quotes escape (`""`).
-
-  Returns:
-    Text with comments removed.
-
-  Example:
-    >>> strip_comments('int x = 1; // comment\\nint y;')
-    'int x = 1; \\nint y;'
+  `line` is the marker text, `block` an `(open, close)` pair, `None` disables that kind.
+  `quotes` lists every character that opens a string. `esc` escapes inside quotes; when
+  `None`, a doubled quote escapes.
   """
-  result = []
-  i = 0
-  quote_char = None
-  while i < len(string):
-    ch = string[i]
-    if quote_char:
-      result.append(ch)
-      if esc and ch == esc and i + 1 < len(string):
-        result.append(string[i + 1])
-        i += 2
-        continue
-      if not esc and ch == quote_char and i + 1 < len(string) and string[i + 1] == quote_char:
-        result.append(string[i + 1])
-        i += 2
-        continue
-      if ch == quote_char: quote_char = None
-      i += 1
-    else:
-      if ch in quotes:
-        quote_char = ch
-        result.append(ch)
-        i += 1
-      elif line and string[i:i + len(line)] == line:
-        while i < len(string) and string[i] != "\n": i += 1
-      elif block and string[i:i + len(block[0])] == block[0]:
-        i += len(block[0])
-        while i < len(string) and string[i:i + len(block[1])] != block[1]: i += 1
-        i += len(block[1])
-      else:
-        result.append(ch)
-        i += 1
-  return "".join(result)
+  parts = scan(text, quotes=quotes, esc=esc, line=line, block=block)
+  return "".join(chunk for kind, chunk in parts if kind != "comment")
 
-def strip_comments_c(string:str) -> str:
+def strip_comments_c(text:str) -> str:
   """Strip C/C++/Java/JavaScript comments (`//` and `/* */`)."""
-  return strip_comments(string, line="//", block=("/*", "*/"), quotes='"', esc="\\")
+  return strip_comments(text, line="//", block=("/*", "*/"), quotes='"', esc="\\")
 
-def strip_comments_sql(string:str) -> str:
-  """Strip SQL comments (`--` and `/* */`)."""
-  return strip_comments(string, line="--", block=("/*", "*/"), quotes="'")
+def strip_comments_sql(text:str) -> str:
+  """Strip SQL comments (`--` and `/* */`), leaving both literals and identifiers intact."""
+  return strip_comments(text, line="--", block=("/*", "*/"), quotes=SQL_QUOTES)
 
-def strip_comments_py(string:str) -> str:
+def strip_comments_py(text:str) -> str:
   """Strip Python comments (`#`)."""
-  return strip_comments(string, line="#", block=None, quotes="\"'")
+  return strip_comments(text, line="#", block=None, quotes="\"'", esc="\\")
+
+#------------------------------------------------------------------------------------------ Secrets
+
+TOKEN_ALPHABET = string.ascii_letters + string.digits
+
+def generate_token(length:int=32, alphabet:str=TOKEN_ALPHABET) -> str:
+  """
+  Generate a cryptographically secure random token.
+
+  Unlike `generate_password`, no character class is forced, so the alphanumeric default
+  survives a URL, an HTTP header or a filename unescaped.
+  """
+  if length < 1: raise ValueError("Token length must be >= 1")
+  if not alphabet: raise ValueError("Token alphabet must not be empty")
+  return "".join(secrets.choice(alphabet) for _ in range(length))
 
 def generate_password(length:int=16, extend_spec:bool=False) -> str:
   """
-  Generate cryptographically secure random password.
+  Generate a cryptographically secure random password, `length` at least `4`.
 
-  Guarantees at least one character from each class:
-  lowercase, uppercase, digit, and special character.
-
-  Args:
-    length: Password length (minimum `4`).
-    extend_spec: When `True`, use extended special character set.
-
-  Returns:
-    Random password string.
-
-  Raises:
-    ValueError: When `length < 4`.
-
-  Example:
-    >>> len(generate_password(12))
-    12
+  At least one lowercase, uppercase, digit and special character is guaranteed.
+  `extend_spec` widens the special set beyond `!@#$%^&*?`.
   """
   if length < 4: raise ValueError("Password length must be >= 4")
   lower = string.ascii_lowercase
@@ -365,7 +275,7 @@ def generate_password(length:int=16, extend_spec:bool=False) -> str:
     pwd[i], pwd[j] = pwd[j], pwd[i]
   return "".join(pwd)
 
-#---------------------------------------------------------------------------------------- Tests
+#-------------------------------------------------------------------------------------------- Tests
 
 if __name__ == "__main__":
   print("split_str:", split_str('a,"b,c",d', sep=","))

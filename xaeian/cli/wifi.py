@@ -3,12 +3,8 @@
 """
 Extract saved Wi-Fi network names and passwords.
 
-Supports Windows (netsh) and Linux (nmcli).
-
-Example:
-  >>> from xaeian.cli.wifi import wifi_passwords
-  >>> for net in wifi_passwords():
-  ...   print(net["ssid"], net["password"])
+Windows via `netsh`, Linux via `nmcli` falling back to /etc/NetworkManager/system-connections,
+which only root can read.
 """
 
 import os, sys, re, subprocess, platform
@@ -18,7 +14,7 @@ from ..colors import Color as c
 
 p = Print()
 
-#------------------------------------------------------------------------------------ Internals
+#---------------------------------------------------------------------------------------- Internals
 
 def _run(cmd:list[str]) -> str|None:
   try:
@@ -37,6 +33,7 @@ def _windows() -> list[dict]:
     detail = _run(["netsh", "wlan", "show", "profile", ssid, "key=clear"])
     password = None
     if detail:
+      # netsh labels are localized: English, then Polish
       m = re.search(r"Key Content\s*:\s*(.+)", detail)
       if not m:
         m = re.search(r"Zawarto.{1,5} klucza\s*:\s*(.+)", detail)
@@ -84,14 +81,16 @@ def _linux() -> list[dict]:
       })
   return results
 
-#------------------------------------------------------------------------------------------ API
+#---------------------------------------------------------------------------------------------- API
 
 def wifi_passwords() -> list[dict]:
-  """Get saved Wi-Fi networks with passwords.
+  """
+  Saved Wi-Fi networks, sorted by SSID.
+
+  Raises RuntimeError outside Windows and Linux.
 
   Returns:
-    List of dicts with keys: ssid, password.
-    Password is None if not stored or not accessible.
+    Dicts with keys: ssid, password - password is None for open or unreadable profiles.
   """
   system = platform.system()
   if system == "Windows": networks = _windows()
@@ -100,7 +99,7 @@ def wifi_passwords() -> list[dict]:
   networks.sort(key=lambda n: n["ssid"].lower())
   return networks
 
-#------------------------------------------------------------------------------------------ CLI
+#---------------------------------------------------------------------------------------------- CLI
 
 EXAMPLES = """
 examples:

@@ -38,7 +38,7 @@ sp.COLOR_TIME = Color.SILVER
 
 ## `Recorder`
 
-Stream-based single numeric value reader. Robust to mid-value `\r\n` splits (Brymen, Rigol). Built-in regex patterns for common multimeter formats.
+Single numeric value read from the newest complete line. Robust to values split across reads (Brymen, Rigol). Built-in regex patterns for common multimeter formats.
 
 ```py
 from xaeian.serial import Recorder

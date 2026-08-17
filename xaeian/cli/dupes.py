@@ -1,15 +1,6 @@
 # xaeian/cli/dupes.py
 
-"""
-Duplicate file finder -- hash-based with optional ZIP scanning.
-
-Uses SHA-256 by default, groups by size first for speed.
-
-Example:
-  >>> from xaeian.cli.dupes import find_dupes
-  >>> groups = find_dupes("photos/")
-  >>> groups = find_dupes("archive/", zips=True, min_size=1024)
-"""
+"""Duplicate file finder - content hashing, optionally reaching inside ZIP archives."""
 
 import os, sys, hashlib, zipfile
 from collections import defaultdict
@@ -19,7 +10,7 @@ from ..colors import Color as c
 
 p = Print()
 
-#------------------------------------------------------------------------------------ Internals
+#---------------------------------------------------------------------------------------- Internals
 
 def _hash_bytes(data:bytes, algo:str="sha256") -> str:
   return hashlib.new(algo, data).hexdigest()
@@ -32,7 +23,7 @@ def _hash_zip_entry(zip_path:str, info:zipfile.ZipInfo, algo:str="sha256") -> st
     return None
 
 def _scan_zip(zip_path:str, min_size:int, items:dict):
-  """Scan ZIP contents, add entries to size-grouped items dict."""
+  """Append ZIP entries to the size-keyed `items` dict; unreadable archives are skipped."""
   try:
     with zipfile.ZipFile(zip_path, "r") as zf:
       for info in zf.infolist():
@@ -42,6 +33,12 @@ def _scan_zip(zip_path:str, min_size:int, items:dict):
   except Exception:
     pass
 
+def _short(ref:str, root:str) -> str:
+  """Shorten a `find_dupes` ref for printing; a ZIP entry keeps its `::entry` suffix."""
+  if not ref.startswith("zip://"): return os.path.relpath(ref, root)
+  archive, _, entry = ref.removeprefix("zip://").partition("::")
+  return f"{os.path.relpath(archive, root)}::{entry}"
+
 def _is_zip(path:str) -> bool:
   if not path.lower().endswith(".zip"): return False
   try: return zipfile.is_zipfile(path)
@@ -49,29 +46,29 @@ def _is_zip(path:str) -> bool:
 
 from ._args import _fmt_size
 
-#------------------------------------------------------------------------------------------ API
+#---------------------------------------------------------------------------------------------- API
 
 def find_dupes(
-  root: str,
-  algo: str = "sha256",
-  min_size: int = 1,
-  zips: bool = False,
-  follow_symlinks: bool = False,
+  root:str,
+  algo:str = "sha256",
+  min_size:int = 1,
+  zips:bool = False,
+  follow_symlinks:bool = False,
 ) -> list[dict]:
-  """Find duplicate files by content hash.
+  """
+  Find duplicate files under `root` by content hash.
 
-  Groups files by size first, then hashes only size-collisions.
+  Groups by size first, hashes only size-collisions. Unreadable files and archives are skipped.
 
   Args:
-    root: Directory to scan.
-    algo: Hash algorithm (sha256, md5, sha1).
-    min_size: Ignore files smaller than N bytes.
-    zips: Scan inside .zip archives.
-    follow_symlinks: Follow symlinks when walking.
+    algo: Any `hashlib` name (sha256, md5, sha1).
+    min_size: Skip files below N bytes.
+    zips: Hash entries inside .zip archives instead of the archive itself.
+    follow_symlinks: Walk into symlinked directories, so link and target report as duplicates.
 
   Returns:
-    List of dicts with keys: size, hash, count, paths.
-    Sorted by size ascending.
+    Dicts with keys: size, hash, count, paths - sorted by size ascending.
+    A ZIP entry appears as `zip://<archive>::<entry>`.
   """
   root = os.path.abspath(root)
   if not os.path.isdir(root):
@@ -107,7 +104,7 @@ def find_dupes(
   groups.sort(key=lambda g: g["size"])
   return groups
 
-#------------------------------------------------------------------------------------------ CLI
+#---------------------------------------------------------------------------------------------- CLI
 
 EXAMPLES = """
 examples:
@@ -157,7 +154,7 @@ def main():
       p.inf(f"[{c.GOLD}{i}{c.END}] {c.CYAN}{_fmt_size(g['size'])}{c.END} "
         f"x{g['count']} {c.GREY}{g['hash'][:16]}...{c.END}")
       for path in g["paths"]:
-        p.gap(f"{c.GREY}{os.path.relpath(path, root)}{c.END}")
+        p.gap(f"{c.GREY}{_short(path, root)}{c.END}")
   if args.output:
     JSON.save_pretty(args.output, {"root": root, "zips": args.zips, "groups": groups})
     p.ok(f"Saved {c.TEAL}{args.output}{c.END}")

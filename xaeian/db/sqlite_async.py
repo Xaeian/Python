@@ -10,26 +10,15 @@ from ..log import Logger, Print
 
 from .abstract_async import AbstractAsyncDatabase
 from .utils import (
-  listify, to_dicts, ident, ph, serialize_params,
-  serialize_dict, split_sql, parse_row, _upsert_sql,
+  listify, to_dicts, ident, serialize_params, split_sql, parse_row, _insert_sql, _upsert_sql,
 )
 
 class SqliteAsyncDatabase(AbstractAsyncDatabase):
   """
-  SQLite async database (aiosqlite) with persistent connection.
+  SQLite async database (aiosqlite). `db_name` is a file path or `":memory:"`.
 
-  On `start()`, opens a single connection with WAL mode.
-  Without `start()`, falls back to per-query connections (backward compat).
-
-  Args:
-    db_name: Database file path or `":memory:"`.
-    log: Logger instance for error logging.
-
-  Example:
-    >>> db = SqliteAsyncDatabase("app.db")
-    >>> await db.start()
-    >>> await db.insert("users", {"name": "Jan"})
-    >>> await db.close()
+  Without `start()`, every query opens and closes its own connection, so a `":memory:"` database
+  starts empty each time. `insert(returning=...)` uses `RETURNING`, so it needs SQLite 3.35+.
   """
   def __init__(self, db_name:str, log:Logger|Print|None=None):
     super().__init__()
@@ -38,15 +27,15 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
     self._persistent = None
 
   async def conn(self):
-    """Create new standalone connection."""
+    """New standalone connection, outside the persistent one."""
     import aiosqlite
     return await aiosqlite.connect(self.db_name)
 
-  #---------------------------------------------------------------------------------- Lifecycle
+  #-------------------------------------------------------------------------------------- Lifecycle
 
   @asynccontextmanager
   async def _connect(self):
-    """Get connection - persistent or new (fallback)."""
+    """Persistent connection, rolled back on error, or a throwaway one as fallback."""
     if self._persistent:
       try:
         yield self._persistent
@@ -62,7 +51,7 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
         await conn.close()
 
   async def start(self):
-    """Open persistent connection with WAL mode."""
+    """Open persistent connection and set pragmas: WAL for file databases, `foreign_keys=ON`."""
     if self._persistent: return
     self._persistent = await self.conn()
     if self.db_name != ":memory:":
@@ -77,7 +66,7 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
       await self._persistent.close()
       self._persistent = None
 
-  #-------------------------------------------------------------------------------- Transaction
+  #------------------------------------------------------------------------------------ Transaction
 
   @asynccontextmanager
   async def transaction(self):
@@ -87,6 +76,7 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
     else:
       self._conn = await self.conn()
     try:
+      await self._conn.execute("BEGIN") # driver opens one only for DML, leaving DDL outside
       yield self
       await self._conn.commit()
     except Exception:
@@ -97,8 +87,7 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
         await self._conn.close()
       self._conn = None
 
-
-  #------------------------------------------------------------------------------------ Execute
+  #---------------------------------------------------------------------------------------- Execute
 
   async def exec(self, sql:str, params=None) -> int:
     import aiosqlite
@@ -165,18 +154,13 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
           await cur.close()
       return total
 
-    if self.in_transaction():
-      try: return await run(self._conn)
-      except aiosqlite.Error as e: self._err("exec_batch", e)
-    try:
-      async with self._connect() as conn:
-        total = await run(conn)
-        await conn.commit()
-        return total
-    except aiosqlite.Error as e:
-      self._err("exec_batch", e)
+    if not self.in_transaction():
+      async with self.transaction():
+        return await self.exec_batch(sqls)
+    try: return await run(self._conn)
+    except aiosqlite.Error as e: self._err("exec_batch", e)
 
-  #-------------------------------------------------------------------------------------- Query
+  #------------------------------------------------------------------------------------------ Query
 
   async def get_rows(self, sql:str, params=None, json:list[int]|None=None) -> list[list]:
     import aiosqlite
@@ -201,12 +185,18 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
         cur = await conn.execute(sql, p)
         rows = await cur.fetchall()
         await cur.close()
-        if conn.in_transaction: await conn.commit()  # DML via read path (e.g. RETURNING)
+        if conn.in_transaction: await conn.commit() # DML via read path (e.g. RETURNING)
         return process(rows)
     except aiosqlite.Error as e:
       self._err("get_rows", e, sql, p)
 
-  async def get_dicts(self, sql:str, params=None, cols:list[str]|None=None, json:list[str]|None=None) -> list[dict]:
+  async def get_dicts(
+    self,
+    sql:str,
+    params=None,
+    cols:list[str]|None = None,
+    json:list[str]|None = None,
+  ) -> list[dict]:
     import aiosqlite
     p = serialize_params(params)
     if self.in_transaction():
@@ -224,37 +214,34 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
         rows = await cur.fetchall()
         columns = cols or [c[0] for c in cur.description]
         await cur.close()
-        if conn.in_transaction: await conn.commit()  # DML via read path (e.g. RETURNING)
+        if conn.in_transaction: await conn.commit() # DML via read path (e.g. RETURNING)
         return to_dicts(rows, columns, json)
     except aiosqlite.Error as e:
       self._err("get_dicts", e, sql, p)
 
   async def _insert_returning(self, table:str, data:dict, ret:str) -> Any:
     import aiosqlite
-    d = serialize_dict(data)
-    t = ident(table)
-    cols = ", ".join(ident(k) for k in d.keys())
-    vals = ph(len(d), self.ph)
-    sql = f"INSERT INTO {t} ({cols}) VALUES {vals} RETURNING {ident(ret)}"
+    sql, params = _insert_sql(table, data, self.ph)
+    sql = f"{sql} RETURNING {ident(ret)}"
     if self.in_transaction():
       try:
-        cur = await self._conn.execute(sql, tuple(d.values()))
+        cur = await self._conn.execute(sql, params)
         row = await cur.fetchone()
         await cur.close()
         return row[0] if row else None
       except aiosqlite.Error as e:
-        self._err("insert", e, sql, tuple(d.values()))
+        self._err("insert", e, sql, params)
     try:
       async with self._connect() as conn:
-        cur = await conn.execute(sql, tuple(d.values()))
+        cur = await conn.execute(sql, params)
         row = await cur.fetchone()
         await cur.close()
         await conn.commit()
         return row[0] if row else None
     except aiosqlite.Error as e:
-      self._err("insert", e, sql, tuple(d.values()))
+      self._err("insert", e, sql, params)
 
-  #------------------------------------------------------------------------------------- Schema
+  #----------------------------------------------------------------------------------------- Schema
 
   async def has_table(self, name:str) -> bool:
     return await self.get_value(
@@ -265,19 +252,27 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
     return await self.get_column("SELECT name FROM sqlite_master WHERE type='table'")
 
   async def has_database(self, name:str|None=None) -> bool:
+    """Check the database file exists on disk; `":memory:"` is never a file, so `False`."""
     n = name or self.db_name
     return os.path.isfile(n) if n else False
 
-  #------------------------------------------------------------------------------------- Upsert
+  #----------------------------------------------------------------------------------------- Upsert
 
-  async def upsert(self, table:str, data:dict, on:str|list[str], update:list[str]|None=None) -> int:
-    """INSERT ON CONFLICT (SQLite 3.24+)."""
+  async def upsert(
+    self,
+    table:str,
+    data:dict,
+    on:str|list[str],
+    update:list[str]|None = None,
+  ) -> int:
+    """INSERT ON CONFLICT (SQLite 3.24+). `on` must be a UNIQUE or PRIMARY KEY column set."""
     sql, params = _upsert_sql(table, data, on, update, self.ph, "excluded")
     return await self.exec(sql, params)
 
-  #------------------------------------------------------------------------ Database Management
+  #---------------------------------------------------------------------------- Database Management
 
   async def create_database(self, name:str|None=None) -> bool:
+    """Create database file. Returns `False` if it already exists."""
     if self.in_transaction(): raise RuntimeError("create_database() not allowed in transaction")
     import aiosqlite
     n = name or self.db_name
@@ -288,6 +283,7 @@ class SqliteAsyncDatabase(AbstractAsyncDatabase):
     return True
 
   async def drop_database(self, name:str|None=None) -> bool:
+    """Delete database file. Returns `False` if it does not exist."""
     if self.in_transaction(): raise RuntimeError("drop_database() not allowed in transaction")
     n = name or self.db_name
     if not n: raise ValueError("db_name required")

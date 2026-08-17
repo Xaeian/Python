@@ -3,24 +3,18 @@
 """
 Lightweight database abstraction layer.
 
-Supports SQLite, MySQL, PostgreSQL with sync and async interfaces.
+SQLite, MySQL, PostgreSQL behind one sync and one async interface.
 Auto-converts: `dict`/`list` → JSON, ISO datetime → `datetime` object.
 All driver/SQL errors raise `DatabaseError`.
 
 Example:
-  >>> from xaeian.db import Database
   >>> db = Database("sqlite", "app.db")
-  >>> db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
   >>> db.insert("users", {"name": "Jan"})
   >>> user = db.find_one("users", name="Jan")
-
-Transaction:
   >>> with db.transaction():
-  ...   db.insert("orders", {"user_id": 1, "total": 99.50})
-  ...   db.update("users", {"balance": 0}, "id = ?", user_id)
+  ...   db.update("users", {"balance": 0}, "id = ?", user["id"])
 
 Async:
-  >>> from xaeian.db import AsyncDatabase
   >>> db = AsyncDatabase("postgres", "app", user="postgres", password="pass")
   >>> async with db.transaction():
   ...   await db.insert("users", {"name": "Jan"})
@@ -61,41 +55,28 @@ _PORTS = {"mysql": 3306, "postgres": 5432}
 def _norm(t:str|DatabaseType) -> str:
   return t.value if isinstance(t, DatabaseType) else str(t).strip().lower()
 
-def _load(mapping:dict, t:str):
-  mod_name, cls_name = mapping[t]
+def _load(mapping:dict, key:str):
+  mod_name, cls_name = mapping[key]
   mod = importlib.import_module(mod_name, __name__)
   return getattr(mod, cls_name)
 
-#-------------------------------------------------------------------------------------- Factory
+#------------------------------------------------------------------------------------------ Factory
 
 def Database(
-  type: str|DatabaseType,
-  db_name: str|None = None,
-  host: str = "localhost",
-  user: str|None = None,
-  password: str = "",
-  port: int|None = None,
-  log: Logger|Print|None = None,
+  type:str|DatabaseType,
+  db_name:str|None = None,
+  host:str = "localhost",
+  user:str|None = None,
+  password:str = "",
+  port:int|None = None,
+  log:Logger|Print|None = None,
 ):
   """
   Create sync database instance.
 
-  Args:
-    type: Database type (`"sqlite"`, `"mysql"`, `"postgres"`).
-    db_name: Database name or file path (SQLite).
-    host: Server hostname (ignored for SQLite).
-    user: Username (ignored for SQLite).
-    password: Password (ignored for SQLite).
-    port: Server port (default: 3306 for MySQL, 5432 for PostgreSQL).
-    log: Logger for error logging.
-
-  Returns:
-    Database instance (`SqliteDatabase`, `MysqlDatabase`, `PostgresDatabase`).
-
-  Example:
-    >>> db = Database("sqlite", "app.db")
-    >>> db = Database("mysql", "mydb", user="root", password="secret")
-    >>> db = Database("postgres", "mydb", user="postgres", password="secret")
+  For SQLite `db_name` is the file path and host/user/password are ignored; when omitted it is
+  `":memory:"`, which only holds data for the span of one `transaction()`. Default port 3306
+  MySQL / 5432 PostgreSQL, default user `root` / `postgres`.
   """
   t = _norm(type)
   if t not in _SYNC: raise ValueError(f"Unknown database type: {type!r}")
@@ -105,33 +86,15 @@ def Database(
   return cls(db_name, host, user, password, port or _PORTS[t], log=log)
 
 def AsyncDatabase(
-  type: str|DatabaseType,
-  db_name: str|None = None,
-  host: str = "localhost",
-  user: str|None = None,
-  password: str = "",
-  port: int|None = None,
-  log: Logger|Print|None = None,
+  type:str|DatabaseType,
+  db_name:str|None = None,
+  host:str = "localhost",
+  user:str|None = None,
+  password:str = "",
+  port:int|None = None,
+  log:Logger|Print|None = None,
 ):
-  """
-  Create async database instance.
-
-  Args:
-    type: Database type (`"sqlite"`, `"mysql"`, `"postgres"`).
-    db_name: Database name or file path (SQLite).
-    host: Server hostname (ignored for SQLite).
-    user: Username (ignored for SQLite).
-    password: Password (ignored for SQLite).
-    port: Server port (default: 3306 for MySQL, 5432 for PostgreSQL).
-    log: Logger for error logging.
-
-  Returns:
-    Async database instance.
-
-  Example:
-    >>> db = AsyncDatabase("postgres", "mydb", user="postgres", password="secret")
-    >>> users = await db.get_dicts("SELECT * FROM users")
-  """
+  """Create async database instance, arguments as in `Database`."""
   t = _norm(type)
   if t not in _ASYNC: raise ValueError(f"Unknown database type: {type!r}")
   cls = _load(_ASYNC, t)
@@ -139,22 +102,22 @@ def AsyncDatabase(
   user = user or ("postgres" if t == "postgres" else "root")
   return cls(db_name, host, user, password, port or _PORTS[t], log=log)
 
-#-------------------------------------------------------------------------------------- Exports
+#------------------------------------------------------------------------------------------ Exports
 
 from .errors import DatabaseError
 from .utils import (
   ident, ph, to_dicts, serialize, serialize_params, serialize_dict,
-  split_sql, norm, parse_json, parse_row
+  split_sql, norm, parse_json, parse_row,
 )
 from .kv_common import KvEntry
 
 __all__ = [
   "Database", "AsyncDatabase", "DatabaseType", "DatabaseError",
   "ident", "ph", "to_dicts", "serialize", "serialize_params", "serialize_dict",
-  "split_sql", "norm", "parse_json", "parse_row", "KvEntry"
+  "split_sql", "norm", "parse_json", "parse_row", "KvEntry",
 ]
 
-#--------------------------------------------------------------------------------- Lazy Imports
+#------------------------------------------------------------------------------------- Lazy Imports
 
 _LAZY = {
   "PostgresDatabase": (".postgres", "PostgresDatabase"),
@@ -178,10 +141,7 @@ if TYPE_CHECKING:
   from .kv_async import AsyncKeyValue
 
 def __getattr__(name:str):
-  if name not in _LAZY:
-    raise AttributeError(f"module 'xaeian.db' has no attribute {name!r}")
-  mod_name, cls_name = _LAZY[name]
-  mod = importlib.import_module(mod_name, __name__)
-  return getattr(mod, cls_name)
+  if name not in _LAZY: raise AttributeError(f"module 'xaeian.db' has no attribute {name!r}")
+  return _load(_LAZY, name)
 
 __all__ += list(_LAZY.keys())

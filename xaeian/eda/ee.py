@@ -1,22 +1,13 @@
 # xaeian/eda/ee.py
 
 """
-Electronics helpers: E-series and voltage converter resistor selection.
+Standard E-series resistor values and voltage converter divider selection.
 
-Constants:
-  `E6`, `E12`, `E24`: standard resistor value series
-
-Functions:
-  `expand_series`: expand series across decades
-
-Classes:
-  `VConv`: voltage converter resistor divider formulas and finder
+`VConv` instances (`RDIV`, `AOZ1282`, `MC34063`, `LM317`, `LM337`) give Vout for a resistor pair
+and search the E-series for the pair closest to a target voltage.
 
 Example:
-  >>> from xaeian.eda.ee import AOZ1282
-  >>> results = AOZ1282.find(3.3)
-  >>> for R1, R2, vout in results:
-  ...   print(f"R1={R1}kΩ R2={R2}kΩ → {vout:.4f}V")
+  >>> R1, R2, vout = AOZ1282.find(3.3)[0]
 """
 
 from typing import Callable
@@ -32,49 +23,38 @@ def expand_series(
   series:list[float],
   decades:tuple[float, ...] = (1, 10),
 ) -> list[float]:
-  """
-  Expand E-series values across decades.
-
-  Args:
-    series: Base series values (e.g. E12).
-    decades: Multipliers (default: 1x, 10x).
-
-  Returns:
-    Sorted list of expanded values.
-
-  Example:
-    >>> expand_series(E6, decades=(1, 10, 100))
-    [1.0, 1.5, 2.2, ..., 680.0]
-  """
+  """Expand an E-series over decade multipliers, deduplicated and sorted."""
   return sorted(set(round(x * m, 2) for m in decades for x in series))
 
-#---------------------------------------------------------------------------------- VConv class
+#-------------------------------------------------------------------------------------- VConv class
 
 class VConv:
-  """Voltage converter resistor divider - callable with `.find()`."""
-
+  """Voltage converter divider: call it for Vout, `.find()` for the closest R1/R2 pair."""
   def __init__(self, formula, vref:float, doc:str=""):
     self._formula = formula
     self.vref = vref
     self.__doc__ = doc
 
   def __call__(self, R1:float, R2:float, vref:float|None=None) -> float:
+    """Vout for the `R1`/`R2` pair, `vref=None` uses the converter's own reference."""
     return self._formula(R1, R2, vref if vref is not None else self.vref)
 
   def __repr__(self):
     return f"<VConv vref={self.vref}>"
 
-  def find(self,
+  def find(
+    self,
     vtarget:float,
     rseries:list[float]|None = None,
     vref:float|None = None,
     tolerance:float = 0.1,
     limit:int = 5,
   ) -> list[tuple[float, float, float]]:
-    """Find R1/R2 closest to target voltage.
+    """
+    Find R1/R2 pairs within `tolerance` volts of `vtarget`: `(R1, R2, Vout)`, best first.
 
-    Returns:
-      List of `(R1_kΩ, R2_kΩ, Vout)` tuples, best match first.
+    At most `limit` pairs. `rseries=None` → `expand_series(E24)`, `vref=None` → the converter's
+    own `vref`; R1 and R2 are taken from `rseries` and carry its unit.
     """
     if rseries is None:
       rseries = expand_series(E24)
@@ -89,7 +69,7 @@ class VConv:
     results.sort(key=lambda x: x[0])
     return [(R1, R2, vout) for (_, R1, R2, vout) in results[:limit]]
 
-#-------------------------------------------------------------------------- Converter instances
+#------------------------------------------------------------------------------ Converter instances
 
 RDIV = VConv(
   lambda R1, R2, vref: vref * R1 / (R1 + R2),

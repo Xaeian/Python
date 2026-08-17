@@ -1,12 +1,6 @@
 # xaeian/cli/tree.py
 
-"""
-Directory tree visualizer with filtering and color output.
-
-Example:
-  >>> from xaeian.cli.tree import tree
-  >>> tree("src/", exts=[".py"], ignore=["__pycache__"])
-"""
+"""Directory tree visualizer with filtering and color output."""
 
 import os, sys
 from ..files import PATH, JSON
@@ -15,12 +9,12 @@ from ..colors import Color as c
 
 p = Print()
 
-#------------------------------------------------------------------------------------ Internals
+#---------------------------------------------------------------------------------------- Internals
 
-_PIPE   = "│   "
-_TEE    = "├── "
-_LAST   = "└── "
-_BLANK  = "    "
+_PIPE = "│   "
+_TEE = "├── "
+_LAST = "└── "
+_BLANK = "    "
 
 DEFAULT_IGNORE = {
   "__pycache__", ".git", ".svn", ".hg",
@@ -41,32 +35,29 @@ def _match_exts(name:str, exts:list[str]|None) -> bool:
 def _should_ignore(name:str, ignore:set[str]) -> bool:
   return name in ignore or name.startswith(".")
 
-#------------------------------------------------------------------------------------------ API
+#---------------------------------------------------------------------------------------------- API
 
 def tree(
-  root: str,
-  exts: list[str]|None = None,
-  ignore: set[str]|None = None,
-  show_hidden: bool = False,
-  show_size: bool = False,
-  max_depth: int|None = None,
-  dirs_only: bool = False,
-  color: bool = True,
+  root:str,
+  exts:list[str]|None = None,
+  ignore:set[str]|None = None,
+  show_hidden:bool = False,
+  show_size:bool = False,
+  max_depth:int|None = None,
+  dirs_only:bool = False,
+  color:bool = True,
 ) -> dict:
-  """Draw directory tree and return stats.
+  """
+  Build the tree rows and stats for `root`; nothing is printed.
 
   Args:
-    root: Root directory path.
-    exts: Show only files with these extensions (e.g. [".py", ".c"]).
-    ignore: Names to skip (default: __pycache__, .git, node_modules, etc.).
-    show_hidden: Show dotfiles/dotdirs when True.
-    show_size: Show file sizes.
-    max_depth: Max recursion depth (None = unlimited).
-    dirs_only: Show only directories.
-    color: Use ANSI colors.
+    exts: Filename suffixes to keep, case-insensitive (e.g. [".py", ".c"]).
+    ignore: Names skipped at any level (default: DEFAULT_IGNORE).
+    show_hidden: Include dot-prefixed names; `ignore` still applies.
+    max_depth: Depth cap, None = unlimited.
 
   Returns:
-    Dict with keys: dirs, files, size, lines.
+    Keys: dirs, files, size (bytes), lines (rendered rows, root first).
   """
   root = os.path.abspath(root)
   if not os.path.isdir(root):
@@ -119,7 +110,7 @@ def tree(
   _walk(root, "", 0)
   return stats
 
-#------------------------------------------------------------------------------------------ CLI
+#---------------------------------------------------------------------------------------------- CLI
 
 EXAMPLES = """
 examples:

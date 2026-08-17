@@ -3,32 +3,35 @@
 """
 Image manipulation: resize, convert, compress, metadata.
 
-Uses Pillow for all operations.
-
-Example:
-  >>> from xaeian.media.img import img_resize, img_compress
-  >>> img_resize("photo.jpg", width=800)
-  >>> img_compress("photos/", "out/", max_px=1280, quality=85)
+Pillow-backed. AVIF encoding needs a Pillow build with AVIF support, `img_compress` falls
+back to the next candidate format when it is missing.
 """
 
 import os
 from io import BytesIO
 from typing import Literal
 from PIL import Image, ImageOps
-from ..files import DIR, PATH
+from ..files import DIR, FILE, PATH
 from .utils import IMG_EXTS, require_file, resolve_dst
 
-#---------------------------------------------------------------------------------------- Types
+#-------------------------------------------------------------------------------------------- Types
 
 ImgFormat = Literal["keep", "auto", "avif", "webp", "jpg", "png"]
 
-#------------------------------------------------------------------------------------ Internals
+#---------------------------------------------------------------------------------------- Internals
+
+def _save(img:Image.Image, path:str, **kw) -> None:
+  """Encode in memory, then `FILE.save`, so a refusing encoder never truncates the target."""
+  bio = BytesIO()
+  bio.name = path # PIL takes the output format from the target extension
+  img.save(bio, **kw)
+  FILE.save(path, bio.getvalue())
 
 def _has_alpha(img:Image.Image) -> bool:
   return img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
 
 def _flatten_rgb(img:Image.Image, bg:tuple=(255, 255, 255)) -> Image.Image:
-  """Flatten alpha to RGB with background color."""
+  """Composite any alpha onto `bg`, since JPEG cannot carry a transparency channel."""
   if _has_alpha(img):
     base = Image.new("RGB", img.size, bg)
     if img.mode != "RGBA":
@@ -38,7 +41,7 @@ def _flatten_rgb(img:Image.Image, bg:tuple=(255, 255, 255)) -> Image.Image:
   return img.convert("RGB") if img.mode != "RGB" else img
 
 def _resize_max(img:Image.Image, max_px:int) -> tuple[Image.Image, tuple, tuple]:
-  """Resize to fit within `max_px`, keeping aspect ratio."""
+  """Downscale to fit `max_px` on the long side → (img, orig_size, new_size)."""
   w, h = img.size
   scale = min(max_px / max(w, h), 1.0)
   if scale < 1.0:
@@ -47,7 +50,7 @@ def _resize_max(img:Image.Image, max_px:int) -> tuple[Image.Image, tuple, tuple]
   return img, (w, h), (w, h)
 
 def _try_encode(img:Image.Image, fmt:str, quality:int, avif_speed:int=6) -> bytes|None:
-  """Encode image to bytes. Returns None on failure."""
+  """Encode to bytes, None when the format is unsupported or the encoder fails."""
   bio = BytesIO()
   try:
     if fmt == "AVIF":
@@ -79,11 +82,10 @@ def _fmt_from_ext(ext:str) -> tuple[str, str]|None:
   return None
 
 def _pick_formats(req:ImgFormat, img:Image.Image, src_ext:str) -> list[tuple[str, str]]:
-  """Build ordered format list for encoding attempts."""
+  """Ordered (PIL format, ext) candidates, preferred first then fallbacks, empty when none fit."""
   if req == "keep":
     m = _fmt_from_ext(src_ext)
-    if m: return [m]
-    return [("JPEG", ".jpg")]
+    return [m] if m else []
   if req == "avif":
     return [("AVIF", ".avif"), ("WEBP", ".webp"), ("JPEG", ".jpg")]
   if req == "webp":
@@ -98,17 +100,20 @@ def _pick_formats(req:ImgFormat, img:Image.Image, src_ext:str) -> list[tuple[str
   return [("AVIF", ".avif"), ("WEBP", ".webp"), ("JPEG", ".jpg"), ("PNG", ".png")]
 
 def _encode_best(
-  img: Image.Image,
-  fmt_order: list[tuple[str, str]],
-  quality: int,
-  target_kB: int|None = None,
-  avif_speed: int = 6,
-  pick_smallest: bool = False,
+  img:Image.Image,
+  fmt_order:list[tuple[str, str]],
+  quality:int,
+  target_kB:int|None = None,
+  avif_speed:int = 6,
+  pick_smallest:bool = False,
 ) -> tuple[bytes|None, str|None, str|None, int|None]:
-  """Try formats in order, optionally stepping down quality to hit target size.
+  """
+  Encode along `fmt_order`, stopping at the first fit → (data, fmt, ext, quality).
 
-  When `pick_smallest` is True, tries all formats and returns the smallest
-  result instead of the first successful encode.
+  With `target_kB` set, quality steps down by 5 to a floor of 35. `pick_smallest` tries
+  every format and keeps the smallest result instead of stopping early. PNG is lossless,
+  so it is only ever tried once at the starting quality. When nothing reaches `target_kB`
+  the smallest attempt is returned anyway, so the goal is best-effort, not a guarantee.
   """
   q_start = max(1, min(100, quality))
   q_min, step = 35, 5
@@ -145,18 +150,17 @@ def _encode_best(
   if best: return best
   return None, None, None, None
 
-#------------------------------------------------------------------------------------- Metadata
+#----------------------------------------------------------------------------------------- Metadata
 
 def img_scrub_metadata(src:str, dst:str|None=None, inplace:bool=False) -> str:
-  """Remove all metadata (EXIF, etc.) from image.
+  """
+  Remove all metadata (EXIF, ICC, comments) by rebuilding the pixel data into a fresh image.
 
-  Args:
-    src: Input image path.
-    dst: Output path. None = auto (see `inplace`).
-    inplace: If True and dst is None, overwrite source. Otherwise add -nometa suffix.
+  Not lossless: JPEG output is re-encoded at quality 95, and only the first frame of a
+  multi-frame file survives. The EXIF orientation tag is dropped without being baked into
+  the pixels, so a photo that relied on it comes out sideways.
 
-  Returns:
-    Output file path.
+  `dst` None → `-nometa` suffix beside the source, or the source itself when `inplace`.
   """
   src = require_file(src, "Image")
   image = Image.open(src)
@@ -167,40 +171,36 @@ def img_scrub_metadata(src:str, dst:str|None=None, inplace:bool=False) -> str:
     if "transparency" in image.info:
       clean.info["transparency"] = image.info["transparency"]
   clean.putdata(data)
+  image.close() # the source handle must be gone before an in-place save replaces the file
   out_path = resolve_dst(src, dst, inplace, "nometa")
   ext = PATH.ext(out_path).lower()
   if ext == ".png":
-    clean.save(out_path, optimize=True, compress_level=9)
+    _save(clean, out_path, optimize=True, compress_level=9)
   elif ext in (".jpg", ".jpeg"):
-    clean.save(out_path, quality=95, optimize=True, progressive=True)
+    _save(clean, out_path, quality=95, optimize=True, progressive=True)
   elif ext == ".webp":
-    clean.save(out_path, method=6)
+    _save(clean, out_path, method=6)
   else:
-    clean.save(out_path)
+    _save(clean, out_path)
   return out_path
 
-#--------------------------------------------------------------------------------------- Resize
+#------------------------------------------------------------------------------------------- Resize
 
 def img_resize(
-  src: str,
-  dst: str|None = None,
-  width: int|None = None,
-  height: int|None = None,
-  scale: float|None = None,
-  inplace: bool = False,
+  src:str,
+  dst:str|None = None,
+  width:int|None = None,
+  height:int|None = None,
+  scale:float|None = None,
+  inplace:bool = False,
 ) -> str:
-  """Resize image.
+  """
+  Resize image, upscaling as readily as downscaling.
 
   Args:
-    src: Input image path.
-    dst: Output path. None = auto (see `inplace`).
-    width: Target width (keeps aspect if height=None).
-    height: Target height (keeps aspect if width=None).
-    scale: Scale factor (e.g. 0.5 = half size). Ignored if width/height set.
-    inplace: If True and dst is None, overwrite source. Otherwise add -resized suffix.
-
-  Returns:
-    Output file path.
+    dst: None → `-resized` suffix beside the source, or the source itself when `inplace`.
+    width: Alone keeps aspect ratio, together with `height` forces exact size.
+    scale: Factor for both sides, used only when `width` and `height` are None.
   """
   src = require_file(src, "Image")
   image = Image.open(src)
@@ -216,22 +216,18 @@ def img_resize(
   else:
     raise ValueError("Specify width, height, or scale")
   resized = image.resize(new_size, Image.LANCZOS)
+  image.close() # the source handle must be gone before an in-place save replaces the file
   out_path = resolve_dst(src, dst, inplace, "resized")
-  resized.save(out_path)
+  _save(resized, out_path)
   return out_path
 
-#-------------------------------------------------------------------------------------- Convert
+#------------------------------------------------------------------------------------------ Convert
 
 def img_convert(src:str, dst:str, quality:int=90) -> str:
-  """Convert image to different format (detected from `dst` extension).
+  """
+  Convert image to the format named by the `dst` extension.
 
-  Args:
-    src: Input image path.
-    dst: Output path (extension determines format).
-    quality: JPEG/WebP quality (1-100).
-
-  Returns:
-    Output file path.
+  `quality` 1-100 applies to jpg/webp/avif, png and anything else ignore it.
   """
   src = require_file(src, "Image")
   dst = os.path.abspath(dst)
@@ -252,37 +248,40 @@ def img_convert(src:str, dst:str, quality:int=90) -> str:
     image.save(dst)
   return dst
 
-#------------------------------------------------------------------------------------- Compress
+#----------------------------------------------------------------------------------------- Compress
 
 def img_compress(
-  src: str,
-  dst: str|None = None,
-  max_px: int = 1920,
-  format: ImgFormat = "keep",
-  quality: int = 80,
-  target_kB: int|None = None,
-  avif_speed: int = 6,
-  recursive: bool = True,
-  inplace: bool = False,
+  src:str,
+  dst:str|None = None,
+  max_px:int = 1920,
+  format:ImgFormat = "keep",
+  quality:int = 80,
+  target_kB:int|None = None,
+  avif_speed:int = 6,
+  recursive:bool = True,
+  inplace:bool = False,
 ) -> list[dict]:
-  """Compress image(s): resize, optimize encoding, pick best format.
+  """
+  Compress a file or a directory of images: resize, re-encode, pick best format.
 
-  Handles single file or entire directory. Auto-corrects EXIF rotation.
+  EXIF rotation is baked into the pixels and all other metadata is dropped. Skipped without
+  an error: files Pillow cannot open, multi-frame files, and files no encoder accepts, which
+  under "keep" means gif, bmp and tiff. Two sources landing on one output path raise
+  `FileExistsError`, as does an in-place output that would overwrite an unrelated file.
 
   Args:
-    src: Input file or directory path.
-    dst: Output file/directory. None = add -min suffix (file) or -min/ dir (dir).
-    max_px: Max width/height in pixels. Downscales keeping aspect ratio.
-    format: Output format strategy:
-      "keep" = same as source, "auto" = smallest size,
-      "avif"/"webp"/"jpg"/"png" = force format (with fallback).
+    dst: None → `-min` suffix on a file, `-min/` sibling tree on a directory.
+    max_px: Long-side cap in px, only ever downscales.
+    format: "keep" = source format, "auto" = whichever encodes smallest,
+      "avif"/"webp"/"jpg"/"png" = force, with fallbacks if the encoder is missing.
     quality: Starting quality 1-100.
-    target_kB: Target file size in KB. Steps quality down to reach it.
-    avif_speed: AVIF encoder speed 0-10 (lower = slower, better).
-    recursive: Walk subdirectories when src is directory.
+    target_kB: Size goal, quality steps down to 35 trying to reach it, best effort only.
+    avif_speed: AVIF encoder speed 0-10, lower is slower and smaller.
+    inplace: Overwrite source, deleting the original when the format changes.
 
   Returns:
-    List of dicts with keys: src, dst, orig_size, new_size, orig_kB, new_kB, format.
+    One dict per file with keys: src, dst, orig_size, new_size, orig_kB, new_kB, format.
+    `*_size` is a (width, height) pixel pair, `*_kB` are whole kB rounded down.
   """
   src = os.path.abspath(src)
   if not os.path.exists(src):
@@ -308,15 +307,9 @@ def img_compress(
   if dst is not None:
     dst = os.path.abspath(dst)
   results = []
+  taken: dict[str, str] = {} # case-folded output path → the source that claimed it
   for filepath in files:
-    if is_single:
-      if dst is not None:
-        out_path = dst
-      elif inplace:
-        out_path = filepath
-      else:
-        out_path = None
-    else:
+    if not is_single:
       rel = os.path.relpath(filepath, src)
       if dst is not None:
         out_dir = os.path.join(dst, os.path.dirname(rel))
@@ -325,13 +318,13 @@ def img_compress(
       else:
         base_dir = f"{src.rstrip(os.sep)}-min"
         out_dir = os.path.join(base_dir, os.path.dirname(rel))
-      out_path = None
     try:
       img = Image.open(filepath)
+      if getattr(img, "n_frames", 1) > 1: continue # a re-encode keeps the first frame only
       img = ImageOps.exif_transpose(img)
     except Exception:
       continue
-    orig_kB = os.path.getsize(filepath) // 1024  # before potential overwrite
+    orig_kB = os.path.getsize(filepath) // 1024 # before potential overwrite
     img, orig_size, new_size = _resize_max(img, max_px)
     src_ext = os.path.splitext(filepath)[1].lower()
     fmt_order = _pick_formats(format, img, src_ext)
@@ -339,21 +332,21 @@ def img_compress(
       pick_smallest=(format == "auto"))
     if data is None: continue
     stem = os.path.splitext(os.path.basename(filepath))[0]
-    if is_single and out_path is not None:
-      if dst is not None:  # explicit dst wins over inplace
-        final = out_path
-      else:
-        final = os.path.join(os.path.dirname(filepath), f"{stem}{ext}")
-    elif is_single:
-      final = os.path.join(os.path.dirname(filepath), f"{stem}-min{ext}")
+    if is_single:
+      if dst is not None: final = dst # explicit dst wins over inplace
+      elif inplace: final = os.path.join(os.path.dirname(filepath), f"{stem}{ext}")
+      else: final = os.path.join(os.path.dirname(filepath), f"{stem}-min{ext}")
     else:
-      os.makedirs(out_dir, exist_ok=True)
       final = os.path.join(out_dir, f"{stem}{ext}")
-    DIR.ensure(final)
-    with open(final, "wb") as f:
-      f.write(data)
-    if inplace and dst is None and final != filepath and os.path.isfile(filepath):
-      os.remove(filepath)
+    key = os.path.normcase(final)
+    if key in taken:
+      raise FileExistsError(f"Two sources map to one output: '{taken[key]}' and '{filepath}'")
+    taken[key] = filepath
+    renamed = inplace and dst is None and key != os.path.normcase(filepath)
+    if renamed and os.path.exists(final):
+      raise FileExistsError(f"Output would overwrite an unrelated file: '{filepath}' → {final}")
+    FILE.save(final, data)
+    if renamed: FILE.remove(filepath)
     results.append({
       "src": filepath,
       "dst": final,

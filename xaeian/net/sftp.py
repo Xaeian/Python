@@ -3,8 +3,7 @@
 """
 SFTP/SSH client for deployment and data collection.
 
-Accepts `Print` or `Logger` as `log`: or `None` for silence.
-Auth: key file takes priority, then password, then SSH agent.
+Auth priority: key file, then password, then SSH agent.
 
 Example:
   >>> with SFTP("10.0.0.1", "pi", key="~/.ssh/id_rsa") as s:
@@ -19,43 +18,36 @@ from pathlib import Path
 from typing import Callable
 from ..log import Logger, Print
 from ..colors import Color as c
-from .ftp import Filter, Progress, Action, _unchanged, _safe_name
+from .ftp import Filter, Progress, Action, _atomic_local, _unchanged, _safe_name # documented there
 
 try:
   import paramiko
 except ImportError:
   raise ImportError("Install with: pip install xaeian[sftp]")
 
-#----------------------------------------------------------------------------------------- SFTP
+#--------------------------------------------------------------------------------------------- SFTP
 
 class SFTP:
   """
-  SFTP/SSH client: push/pull sync, atomic uploads, remote exec.
+  SFTP/SSH client: push/pull sync, atomic transfers, remote exec.
 
-  Accepts `Print`, `Logger`, or any object with `inf/wrn/err/gap/item` as `log`.
+  Accepts `Print`, `Logger`, or any object with `inf/wrn/err/run/gap/item` as `log`.
 
   Host keys are checked against `~/.ssh/known_hosts`: a changed key aborts.
   An unknown host is trusted on first use unless `strict=True`.
-
-  Example:
-    >>> s = SFTP("host", "user", password="pass", log=Print())
-    >>> with s:
-    ...   actions = s.sync_push("./data", "/home/user/data", dry_run=True)
-    ...   s.sync_push("./data", "/home/user/data")
-    ...   s.exec("python3 process.py")
   """
   def __init__(
     self,
-    host: str,
-    user: str,
-    port: int = 22,
+    host:str,
+    user:str,
+    port:int = 22,
     *,
-    password: str|None = None,
-    key: str|None = None,
-    passphrase: str|None = None,
-    agent: bool = False,
-    strict: bool = False,
-    log: Logger|Print|None = None,
+    password:str|None = None,
+    key:str|None = None,
+    passphrase:str|None = None,
+    agent:bool = False,
+    strict:bool = False,
+    log:Logger|Print|None = None,
   ):
     self.host = host
     self.user = user
@@ -68,19 +60,19 @@ class SFTP:
     self.log: Logger|Print|None = log
     self._ssh: paramiko.SSHClient|None = None
     self._sftp: paramiko.SFTPClient|None = None
-    self._index_partial = False  # a listing failed: delete must stand down
-    self._can_utime = True  # cleared when the server refuses SETSTAT
+    self._index_partial = False # a listing failed: delete must stand down
+    self._can_utime = True # cleared when the server refuses SETSTAT
 
   def __enter__(self): self.connect(); return self
   def __exit__(self, *_): self.disconnect()
 
-  #--------------------------------------------------------------------------------- Connection
+  #------------------------------------------------------------------------------------- Connection
 
   def connect(self):
     """Open SSH + SFTP session."""
     self._can_utime = True
     self._ssh = paramiko.SSHClient()
-    self._ssh.load_system_host_keys()  # without this no key is known, so none is ever checked
+    self._ssh.load_system_host_keys() # without this no key is known, so none is ever checked
     self._ssh.set_missing_host_key_policy(
       paramiko.RejectPolicy() if self._strict else paramiko.AutoAddPolicy()
     )
@@ -97,9 +89,7 @@ class SFTP:
       self._ssh.connect(**kw)
       self._sftp = self._ssh.open_sftp()
       if self.log:
-        self.log.inf(
-          f"connected {c.TURQUS}{self.host}{c.END} user:{c.VIOLET}{self.user}{c.END}"
-        )
+        self.log.inf(f"connected {c.TURQUS}{self.host}{c.END} user:{c.VIOLET}{self.user}{c.END}")
     except Exception as e:
       if self.log: self.log.err(f"connect failed {c.TURQUS}{self.host}{c.END} | {e}")
       raise ConnectionError(f"SFTP connect failed host:{self.host} | {e}") from e
@@ -108,44 +98,41 @@ class SFTP:
     """Close SFTP and SSH sessions."""
     if self._sftp:
       try: self._sftp.close()
-      except Exception: pass  # a dead channel must not strand the ssh session
+      except Exception: pass # a dead channel must not strand the ssh session
       self._sftp = None
     if self._ssh: self._ssh.close(); self._ssh = None
 
   def _require_connected(self):
     if not self._sftp: raise RuntimeError("SFTP not connected: call connect() first")
 
-  #-------------------------------------------------------------------------------- Single file
+  #------------------------------------------------------------------------------------ Single file
 
-  def stat(self, remote: str) -> "paramiko.SFTPAttributes|None":
-    """Remote file attributes, or `None` if not found."""
+  def stat(self, remote:str) -> "paramiko.SFTPAttributes|None":
+    """Remote attributes, or `None` if not found. Follows symlinks."""
     self._require_connected()
     try: return self._sftp.stat(remote)
     except FileNotFoundError: return None
 
-  def exists(self, remote: str) -> bool:
-    """Check if remote path exists."""
+  def exists(self, remote:str) -> bool:
+    """Check if a remote path exists, directories included."""
     return self.stat(remote) is not None
 
   def put(
     self,
-    local: str,
-    remote: str,
+    local:str,
+    remote:str,
     *,
-    atomic: bool = True,
-    preserve_mtime: bool = False,
-    callback: Progress|None = None,
-    _label: str|None = None,
+    atomic:bool = True,
+    preserve_mtime:bool = False,
+    callback:Progress|None = None,
+    _label:str|None = None,
   ):
     """
-    Upload single file.
+    Upload single file, creating the missing remote parent directories.
 
     Args:
-      local: Local source path.
-      remote: Remote destination path.
       atomic: Upload to `{remote}.tmp`, rename on completion.
-      preserve_mtime: Set remote mtime to match local (required for sync).
-      callback: `(remote, bytes_done, total_bytes)` progress hook.
+      preserve_mtime: Set remote mtime to match local, which `sync_push` relies on to skip.
     """
     self._require_connected()
     self.mkdir(os.path.dirname(remote))
@@ -155,7 +142,7 @@ class SFTP:
     try: self._sftp.put(local, dst, callback=cb)
     except Exception:
       if atomic:
-        try: self._sftp.remove(dst)  # drop the partial .tmp
+        try: self._sftp.remove(dst) # drop the partial .tmp
         except Exception: pass
       raise
     if atomic: self._posix_rename(dst, remote)
@@ -163,33 +150,33 @@ class SFTP:
       mtime = Path(local).stat().st_mtime
       try: self._sftp.utime(remote, (mtime, mtime))
       except Exception:
-        self._can_utime = False  # SETSTAT refused: sync_push falls back to size-only skip
+        self._can_utime = False # SETSTAT refused: sync_push falls back to size-only skip
         if self.log: self.log.wrn(f"utime failed {c.GREY}{remote}{c.END}: mtime not preserved")
     if self.log: self.log.item(f"{c.GREY}{local}{c.END} → {c.GREY}{remote}{c.END}")
 
   def get(
     self,
-    remote: str,
-    local: str,
+    remote:str,
+    local:str,
     *,
-    preserve_mtime: bool = False,
-    callback: Progress|None = None,
-    _label: str|None = None,
+    preserve_mtime:bool = False,
+    callback:Progress|None = None,
+    _label:str|None = None,
   ):
     """
-    Download single file.
+    Download single file, creating the missing local parent directories.
+
+    The bytes land beside the target and are swapped in on completion,
+    so a failed transfer leaves the previous local file untouched.
 
     Args:
-      remote: Remote source path.
-      local: Local destination path.
-      preserve_mtime: Set local mtime to match remote (required for sync).
-      callback: `(remote, bytes_done, total_bytes)` progress hook.
+      preserve_mtime: Set local mtime to match remote, which `sync_pull` relies on to skip.
     """
     self._require_connected()
-    Path(local).parent.mkdir(parents=True, exist_ok=True)
     label = _label or remote
     cb = (lambda done, total: callback(label, done, total)) if callback else None
-    self._sftp.get(remote, local, callback=cb)
+    with _atomic_local(local) as tmp:
+      self._sftp.get(remote, tmp, callback=cb)
     if preserve_mtime:
       rstat = self._sftp.stat(remote)
       if rstat.st_mtime is not None:
@@ -198,20 +185,20 @@ class SFTP:
       elif self.log: self.log.wrn(f"mtime unavailable {c.GREY}{remote}{c.END}: not preserved")
     if self.log: self.log.item(f"{c.GREY}{remote}{c.END} → {c.GREY}{local}{c.END}")
 
-  def remove(self, remote: str):
+  def remove(self, remote:str):
     """Delete remote file. Silent if not found."""
     self._require_connected()
     try: self._sftp.remove(remote)
     except FileNotFoundError: pass
 
-  def rename(self, src: str, dst: str):
+  def rename(self, src:str, dst:str):
     """Rename/move remote file: overwrites target."""
     self._require_connected()
     self._posix_rename(src, dst)
 
-  #-------------------------------------------------------------------------------- Directories
+  #------------------------------------------------------------------------------------ Directories
 
-  def mkdir(self, remote: str):
+  def mkdir(self, remote:str):
     """Create remote directory recursively, idempotent."""
     self._require_connected()
     if not remote or remote == "/": return
@@ -223,14 +210,14 @@ class SFTP:
       try: self._sftp.stat(current)
       except FileNotFoundError:
         try: self._sftp.mkdir(current)
-        except OSError: self._sftp.stat(current)  # lost a concurrent create: fine if it exists now
+        except OSError: self._sftp.stat(current) # lost a concurrent create: fine if it exists now
 
-  def ls(self, remote: str) -> list["paramiko.SFTPAttributes"]:
-    """List remote directory with attributes."""
+  def ls(self, remote:str) -> list["paramiko.SFTPAttributes"]:
+    """List remote directory with attributes. Symlinks are reported as links, not resolved."""
     self._require_connected()
     return [a for a in self._sftp.listdir_attr(remote) if _safe_name(a.filename)]
 
-  def rmdir(self, remote: str):
+  def rmdir(self, remote:str):
     """Remove remote directory recursively."""
     self._require_connected()
     for attr in self.ls(remote):
@@ -239,31 +226,27 @@ class SFTP:
       else: self._sftp.remove(path)
     self._sftp.rmdir(remote)
 
-  #----------------------------------------------------------------------------- Batch transfer
+  #--------------------------------------------------------------------------------- Batch transfer
 
   def put_dir(
     self,
-    local: str,
-    remote: str,
+    local:str,
+    remote:str,
     *,
-    filter: Filter|None = None,
-    atomic: bool = True,
-    callback: Progress|None = None,
+    filter:Filter|None = None,
+    atomic:bool = True,
+    callback:Progress|None = None,
   ):
     """
-    Upload directory recursively.
+    Upload every file recursively. No skip check: `sync_push` transfers only what changed.
 
-    Args:
-      local: Local source directory.
-      remote: Remote destination directory.
-      filter: `(rel_path) → bool`: return `False` to skip.
-      atomic: Atomic upload per file.
-      callback: Per-file progress hook.
+    Walks files, so an empty local directory has no remote counterpart afterwards.
     """
     self._require_connected()
     root = Path(local)
     files = [f for f in root.rglob("*") if f.is_file()]
-    if self.log: self.log.inf(f"put_dir {c.CYAN}{len(files)}{c.END} files → {c.SKY}{remote}{c.END}")
+    if self.log:
+      self.log.inf(f"put_dir {c.CYAN}{len(files)}{c.END} files → {c.SKY}{remote}{c.END}")
     for f in files:
       rel = f.relative_to(root).as_posix()
       if filter and not filter(rel): continue
@@ -271,59 +254,47 @@ class SFTP:
 
   def get_dir(
     self,
-    remote: str,
-    local: str,
+    remote:str,
+    local:str,
     *,
-    filter: Filter|None = None,
-    callback: Progress|None = None,
+    filter:Filter|None = None,
+    callback:Progress|None = None,
   ):
-    """
-    Download directory recursively.
-
-    Args:
-      remote: Remote source directory.
-      local: Local destination directory.
-      filter: `(rel_path) → bool`: return `False` to skip.
-      callback: Per-file progress hook.
-    """
+    """Download every file recursively. No skip check: `sync_pull` transfers only what changed."""
     self._require_connected()
     self._get_dir_rec(remote, remote, Path(local), filter, callback)
 
-  #--------------------------------------------------------------------------------------- Sync
+  #------------------------------------------------------------------------------------------- Sync
 
   def sync_push(
     self,
-    local: str,
-    remote: str,
+    local:str,
+    remote:str,
     *,
-    delete: bool = False,
-    dry_run: bool = False,
-    filter: Filter|None = None,
-    callback: Progress|None = None,
+    delete:bool = False,
+    dry_run:bool = False,
+    filter:Filter|None = None,
+    callback:Progress|None = None,
   ) -> list[Action]:
     """
     Push local → remote, skipping unchanged files.
 
-    Skip strategy: mtime+size, falling back to size-only
-    when the server refuses to set the remote mtime.
+    Skip strategy: mtime+size, falling back to size-only for the rest
+    of the session once the server refuses to set a remote mtime.
+
+    `delete` is refused when the local source is not a directory,
+    so a missing source can never wipe the remote.
 
     Args:
-      local: Local source directory.
-      remote: Remote destination directory.
-      delete: Remove remote files absent locally (respects filter).
-      dry_run: Plan actions without executing.
-      filter: `(rel_path) → bool`: return `False` to skip.
-      callback: Per-file progress hook.
+      delete: Remove remote files absent locally, `filter` respected.
+      dry_run: Plan actions without executing, the returned list is still complete.
 
     Returns:
-      List of `("put"|"skip"|"delete", rel_path)` actions.
+      `("put"|"skip"|"delete", rel_path)` per file.
     """
     self._require_connected()
     root = Path(local)
-    local_files = {
-      f.relative_to(root).as_posix(): f
-      for f in root.rglob("*") if f.is_file()
-    }
+    local_files = {f.relative_to(root).as_posix(): f for f in root.rglob("*") if f.is_file()}
     remote_idx = self._index_remote(remote, filter=filter)
     actions: list[Action] = []
     for rel, lpath in local_files.items():
@@ -337,22 +308,25 @@ class SFTP:
         self.put(str(lpath), f"{remote}/{rel}", atomic=True,
           preserve_mtime=True, callback=callback, _label=rel)
     if delete:
-      for rel in remote_idx:
-        if rel not in local_files and not (filter and not filter(rel)):
-          actions.append(("delete", rel))
-          if not dry_run: self.remove(f"{remote}/{rel}")
+      if not root.is_dir(): # a missing source would make every remote file look deleted
+        if self.log: self.log.wrn("delete skipped: local source is not a directory")
+      else:
+        for rel in remote_idx:
+          if rel not in local_files and not (filter and not filter(rel)):
+            actions.append(("delete", rel))
+            if not dry_run: self.remove(f"{remote}/{rel}")
     self._log_sync("sync_push", actions, dry_run)
     return actions
 
   def sync_pull(
     self,
-    remote: str,
-    local: str,
+    remote:str,
+    local:str,
     *,
-    delete: bool = False,
-    dry_run: bool = False,
-    filter: Filter|None = None,
-    callback: Progress|None = None,
+    delete:bool = False,
+    dry_run:bool = False,
+    filter:Filter|None = None,
+    callback:Progress|None = None,
   ) -> list[Action]:
     """
     Pull remote → local, skipping unchanged files (mtime + size).
@@ -361,15 +335,11 @@ class SFTP:
     so an unreadable remote can never wipe local files.
 
     Args:
-      remote: Remote source directory.
-      local: Local destination directory.
-      delete: Remove local files absent remotely (respects filter).
-      dry_run: Plan actions without executing.
-      filter: `(rel_path) → bool`: return `False` to skip.
-      callback: Per-file progress hook.
+      delete: Remove local files absent remotely, `filter` respected.
+      dry_run: Plan actions without executing, the returned list is still complete.
 
     Returns:
-      List of `("get"|"skip"|"delete", rel_path)` actions.
+      `("get"|"skip"|"delete", rel_path)` per file.
     """
     self._require_connected()
     root = Path(local)
@@ -391,7 +361,7 @@ class SFTP:
         self.get(f"{remote}/{rel}", str(lpath), preserve_mtime=True,
           callback=callback, _label=rel)
     if delete:
-      if self._index_partial:  # a partial view would make present files look deleted
+      if self._index_partial: # a partial view would make present files look deleted
         if self.log: self.log.wrn("delete skipped: remote listing incomplete")
       else:
         for rel in local_idx:
@@ -401,25 +371,23 @@ class SFTP:
     self._log_sync("sync_pull", actions, dry_run)
     return actions
 
-  #--------------------------------------------------------------------------------------- Exec
+  #------------------------------------------------------------------------------------------- Exec
 
-  def exec(self, cmd: str, *, check: bool = False) -> tuple[str, str]:
+  def exec(self, cmd:str, *, check:bool=False) -> tuple[str, str]:
     """
-    Run command on remote host.
+    Run command on remote host, blocking until it exits.
 
-    Args:
-      cmd: Command to run.
-      check: Raise `RuntimeError` on non-zero exit status.
+    The exit status is never returned - `check=True` raises `RuntimeError` on non-zero.
 
     Returns:
-      `(stdout, stderr)` as stripped strings.
+      `(stdout, stderr)`, decoded with `errors="replace"` and stripped.
     """
     self._require_connected()
     if self.log: self.log.run(f"{c.SILVER}{cmd}{c.END}")
     _, stdout, stderr = self._ssh.exec_command(cmd)
     err_buf: list[bytes] = []
     drain = threading.Thread(target=lambda: err_buf.append(stderr.read()), daemon=True)
-    drain.start()  # stderr must drain in parallel: a full channel window would stall stdout
+    drain.start() # stderr must drain in parallel: a full channel window would stall stdout
     out = stdout.read().decode(errors="replace").strip()
     drain.join()
     err = err_buf[0].decode(errors="replace").strip()
@@ -431,18 +399,18 @@ class SFTP:
       raise RuntimeError(f"remote command failed (rc={rc}): {cmd}" + (f"\n{err}" if err else ""))
     return out, err
 
-  #------------------------------------------------------------------------------------ Helpers
+  #---------------------------------------------------------------------------------------- Helpers
 
-  def _posix_rename(self, src: str, dst: str):
+  def _posix_rename(self, src:str, dst:str):
     """Atomic overwrite where the server supports it, delete-then-rename otherwise."""
     try: self._sftp.posix_rename(src, dst)
     except (AttributeError, IOError):
-      self._sftp.stat(src)  # src is gone: fail before dst gets destroyed
+      self._sftp.stat(src) # src is gone: fail before dst gets destroyed
       try: self._sftp.remove(dst)
       except FileNotFoundError: pass
       self._sftp.rename(src, dst)
 
-  def _resolve(self, path: str, attr: "paramiko.SFTPAttributes"):
+  def _resolve(self, path:str, attr:"paramiko.SFTPAttributes"):
     """
     Follow a symlink: a listing describes the link, but `get()` reads its target.
 
@@ -458,13 +426,15 @@ class SFTP:
     return target
 
   def _index_remote(
-    self, remote: str, _rel: str = "", filter: Filter|None = None
+    self,
+    remote:str,
+    _rel:str = "",
+    filter:Filter|None = None,
   ) -> dict[str, "paramiko.SFTPAttributes"]:
     """
     Recursively build `{rel_path: SFTPAttributes}` for remote dir, pruning filtered paths.
 
-    Sets `_index_partial` when a listing fails,
-    so callers can refuse to delete on a partial view.
+    Sets `_index_partial` when a listing fails, so callers can refuse to delete on a partial view.
     A missing root yields `{}`: a push then creates it.
     """
     if not _rel: self._index_partial = False
@@ -479,7 +449,7 @@ class SFTP:
       attr = self._resolve(path, attr)
       if attr is None: continue
       if _is_dir(attr):
-        if filter and not (filter(rel) and filter(f"{rel}/")): continue  # prune excluded dir
+        if filter and not (filter(rel) and filter(f"{rel}/")): continue
         idx.update(self._index_remote(path, rel, filter))
       else:
         if filter and not filter(rel): continue
@@ -488,11 +458,11 @@ class SFTP:
 
   def _get_dir_rec(
     self,
-    remote_root: str,
-    remote: str,
-    local: Path,
-    filter: Filter|None,
-    callback: Progress|None,
+    remote_root:str,
+    remote:str,
+    local:Path,
+    filter:Filter|None,
+    callback:Progress|None,
   ):
     for attr in self.ls(remote):
       rpath = f"{remote}/{attr.filename}"
@@ -506,7 +476,7 @@ class SFTP:
         if filter and not filter(rel): continue
         self.get(rpath, str(lpath), callback=callback, _label=rel)
 
-  def _log_sync(self, op: str, actions: list[Action], dry_run: bool):
+  def _log_sync(self, op:str, actions:list[Action], dry_run:bool):
     if not self.log: return
     counts = {k: sum(1 for a, _ in actions if a == k) for k in ("put", "get", "skip", "delete")}
     hue = {"put": c.LIME, "skip": c.MAGNTA}
@@ -514,7 +484,7 @@ class SFTP:
     suffix = f" {c.GREY}(dry){c.END}" if dry_run else ""
     self.log.inf(f"{op} {' '.join(parts)}{suffix}")
 
-#-------------------------------------------------------------------------------------- Helpers
+#------------------------------------------------------------------------------------------ Helpers
 
-def _is_dir(attr: "paramiko.SFTPAttributes") -> bool:
+def _is_dir(attr:"paramiko.SFTPAttributes") -> bool:
   return stat.S_ISDIR(attr.st_mode or 0)

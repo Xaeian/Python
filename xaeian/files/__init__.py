@@ -3,17 +3,9 @@
 """
 File operations with context-based path resolution.
 
-Provides namespace classes for common file operations:
-- `PATH`: path manipulation and resolution
-- `DIR`: directory operations (create, remove, list, zip)
-- `FILE`: file read/write/append
-- `INI`: INI config files
-- `CSV`: CSV data files
-- `JSON`: JSON data files
-- `YAML`: YAML data files (requires `pyyaml`)
-
-Global configuration via context manager `file_context()`.
-Object-oriented access via `Files(root_path=...)`.
+Namespace classes `PATH`, `DIR`, `FILE`, `INI`, `CSV`, `JSON` and `YAML` (needs `pyyaml`).
+Paths resolve against the global context set by `file_context()`, or against an isolated
+root held by an instance of `Files(root_path=...)`.
 """
 
 from .config import Config, get_context, set_context, file_context
@@ -37,7 +29,7 @@ try:
 except ImportError:
   pass
 
-#---------------------------------------------------------------------------------------- Tests
+#-------------------------------------------------------------------------------------------- Tests
 
 if __name__ == "__main__":
   import tempfile

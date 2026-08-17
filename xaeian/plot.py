@@ -3,20 +3,14 @@
 """
 Minimal fluent matplotlib wrapper for CLI time-series plotting.
 
-Deferred rendering: traces stored as dicts, figure built on
-`show()`/`save()`. Stacked panels with shared x-axis.
-Auto datetime formatting. Escape hatch to raw matplotlib.
+Traces are stored as dicts, the figure is built on `show()`/`save()`. Stacked panels share the
+x-axis, datetime axes format themselves, `.fig`/`.axes` escape to raw matplotlib.
 
 Requires: `pip install xaeian[plot]`
 
 Example:
-  >>> from xaeian.plot import Plot
-  >>> Plot().line(t, temp, "Temperature [°C]").show()
-
   >>> (Plot(theme="dark")
   ...   .line(t, temp, "Temperature [°C]")
-  ...   .panel()
-  ...   .line(t, hum, "Humidity [%]")
   ...   .panel(height=0.5)
   ...   .line(t, volt, "Voltage [V]")
   ...   .title("Sensor Dashboard")
@@ -39,7 +33,7 @@ try:
 except ImportError as e:
   raise ImportError("Install with: pip install xaeian[plot]  (matplotlib + numpy)") from e
 
-#-------------------------------------------------------------------------------------- Helpers
+#------------------------------------------------------------------------------------------ Helpers
 
 # Paul Tol colorblind-safe: bright (1-7), vibrant (8-10), muted (11-20)
 PALETTE = [
@@ -66,7 +60,7 @@ def _fmt_label(name:str, unit:str) -> str:
   return f"{name} [{unit}]" if unit else name
 
 def _is_datetime(x) -> bool:
-  """Check if x contains datetime-like values (scalar, list, or ndarray)."""
+  """True for datetime-like scalars, sequences and ndarrays."""
   if x is None: return False
   if isinstance(x, (datetime, date, np.datetime64)): return True
   if isinstance(x, np.ndarray): return np.issubdtype(x.dtype, np.datetime64)
@@ -74,30 +68,26 @@ def _is_datetime(x) -> bool:
   v = x[0] if hasattr(x, "__getitem__") else next(iter(x), None)
   return isinstance(v, (datetime, date, np.datetime64))
 
-#------------------------------------------------------------------------------- Date formatter
+#----------------------------------------------------------------------------------- Date formatter
 
 class _SmartDateFormatter(matplotlib.ticker.Formatter):
-  """Auto date format based on visible time span.
+  """
+  Tick format chosen from the visible time span.
 
-  Adapts tick labels to data density: shows only what's needed:
-    < 10 min → `16:30:15`          (seconds matter)
-    < 24h    → `16:30`             (time only, date implied)
-    1-60 d   → `12:00` normally,   (date appears on day boundary)
-               `12:00\\n25-03-01`  (time on top, date below)
-    60d-2y   → `25-03-01`          (days only)
-    > 2y     → `2025-03`           (months only)
+  < 10 min → `16:30:15`
+  < 24 h → `16:30`
+  1-60 d → `16:30`, with `25-03-01` on a second line under the first tick of each day
+  60 d-2 y → `25-03-01`
+  > 2 y → `2025-03`
   """
   def __call__(self, x, pos=None):
     dt = mdates.num2date(x)
     span = abs(self.axis.get_view_interval()[1]
-      - self.axis.get_view_interval()[0])  # span in days
-    # Wide ranges: date only
+      - self.axis.get_view_interval()[0]) # span in days
     if span >= 365 * 2: return dt.strftime("%Y-%m")
     if span >= 60: return dt.strftime("%y-%m-%d")
-    # Narrow ranges: time only
     if span < 10 / 60 / 24: return dt.strftime("%H:%M:%S")
     if span < 1.0: return dt.strftime("%H:%M")
-    # Multi-day: time on top, date below only when day changes
     locs = self.axis.get_majorticklocs()
     is_first = (pos == 0) or (len(locs) < 2)
     prev_date = None
@@ -108,21 +98,19 @@ class _SmartDateFormatter(matplotlib.ticker.Formatter):
     return dt.strftime("%H:%M")
 
 def _setup_date_axis(ax):
-  """Apply `_SmartDateFormatter` with `AutoDateLocator` to x-axis."""
   loc = mdates.AutoDateLocator()
   ax.xaxis.set_major_locator(loc)
   ax.xaxis.set_major_formatter(_SmartDateFormatter())
 
-#--------------------------------------------------------------------------------------- Themes
+#------------------------------------------------------------------------------------------- Themes
 
-# Shared rcParams: avoids duplication between clean/dark
 _COMMON = {
   "axes.grid": True,
   "axes.spines.top": False,
   "axes.spines.right": False,
-  "legend.frameon": True, # rounded box with transparency
+  "legend.frameon": True,
   "legend.fancybox": True,
-  "legend.framealpha": 0.88, # slight transparency: data peeks through
+  "legend.framealpha": 0.88, # data peeks through
   "legend.fontsize": 9,
   "axes.labelsize": 10,
   "axes.labelpad": 6, # ylabel ↔ axis gap (pt)
@@ -160,25 +148,17 @@ THEMES = {
   },
 }
 
-#----------------------------------------------------------------------------------------- Plot
+#--------------------------------------------------------------------------------------------- Plot
 
 class Plot:
-  """Fluent matplotlib wrapper with deferred rendering.
+  """
+  Fluent matplotlib wrapper with deferred rendering.
 
   Args:
-    theme: `"clean"` (default) or `"dark"`.
-    size: Figure size `(width, height)` in inches.
-    dpi: Display DPI (save DPI via `save(dpi=)`).
-
-  Example:
-    >>> (Plot()
-    ...   .line(t, temp, "Temperature [°C]")
-    ...   .hline(30, color="red", ls="--", label="Alarm")
-    ...   .panel()
-    ...   .scatter(t, hum, "Humidity [%]")
-    ...   .save("sensors.png", dpi=200))
+    theme: `"clean"` or `"dark"`.
+    size: `(width, height)` in inches.
+    dpi: display only, save DPI comes from `save(dpi=)`.
   """
-
   def __init__(self, theme:str="clean", size:tuple=(14, 7), dpi:int=100):
     self._theme = theme
     self._size = size
@@ -191,7 +171,7 @@ class Plot:
     self._axes: list[plt.Axes] = []
     self._rendered = False
 
-  #--------------------------------------------------------------------------- Panel management
+  #------------------------------------------------------------------------------- Panel management
 
   @staticmethod
   def _empty_panel() -> dict:
@@ -200,16 +180,16 @@ class Plot:
       "xlim": None, "ylim": None,
       "logx": False, "logy": False,
       "grid": None, "legend": None,
-      "twin": None, # when set: dict with traces/ylabel/ylim/logy
+      "twin": None, # when set: dict of traces/ylabel/ylim/logy
     }
 
   @property
   def _target(self) -> dict:
-    """Current target for traces/config: twin if active, else main panel."""
+    """Twin if active, else the main panel."""
     return self._cur["twin"] if self._cur["twin"] is not None else self._cur
 
   def panel(self, height:float=1.0) -> Plot:
-    """Finalize current panel, start new subplot below."""
+    """Finalize current panel, start new subplot below. `height` is a ratio between panels."""
     self._panels.append(self._cur)
     self._cur = self._empty_panel()
     self._cur["height"] = height
@@ -223,10 +203,9 @@ class Plot:
       }
     return self
 
-  #------------------------------------------------------------------------------ Trace methods
+  #---------------------------------------------------------------------------------- Trace methods
 
   def _add(self, kind:str, x, y, label, kw) -> Plot:
-    """Append trace spec to current target (main panel or twin)."""
     name, unit = _parse_label(label)
     self._target["traces"].append(
       {"kind": kind, "x": x, "y": y, "name": name, "unit": unit, "kw": kw}
@@ -234,47 +213,39 @@ class Plot:
     return self
 
   def line(self, x, y, label:str|tuple|None=None, **kw) -> Plot:
-    """Add line trace. All `**kw` forwarded to `ax.plot()`."""
+    """Line trace. `**kw` → `ax.plot()`."""
     return self._add("line", x, y, label, kw)
 
   def scatter(self, x, y, label:str|tuple|None=None, **kw) -> Plot:
-    """Add scatter trace. `**kw` → `ax.scatter()`."""
+    """Scatter trace. `**kw` → `ax.scatter()`."""
     return self._add("scatter", x, y, label, kw)
 
   def step(self, x, y, label:str|tuple|None=None, where:str="post", **kw) -> Plot:
-    """Add step trace: ideal for digital signals, FSM states."""
+    """Step trace: digital signals, FSM states."""
     kw["where"] = where
     return self._add("step", x, y, label, kw)
 
   def bar(self, x, y, label:str|tuple|None=None, **kw) -> Plot:
-    """Add bar trace. `**kw` → `ax.bar()`."""
+    """Bar trace. `**kw` → `ax.bar()`."""
     return self._add("bar", x, y, label, kw)
 
-  def fill(self, x, y1, y2=0, label:str|tuple|None=None,
-           alpha:float=0.3, **kw) -> Plot:
-    """Add filled region between y1 and y2 (confidence bands, envelopes)."""
+  def fill(self, x, y1, y2=0, label:str|tuple|None=None, alpha:float=0.3, **kw) -> Plot:
+    """Filled region between y1 and y2: confidence bands, envelopes."""
     kw["alpha"] = alpha
     name, unit = _parse_label(label)
     self._target["traces"].append(
-      {"kind": "fill", "x": x, "y": y1, "y2": y2,
-       "name": name, "unit": unit, "kw": kw}
+      {"kind": "fill", "x": x, "y": y1, "y2": y2, "name": name, "unit": unit, "kw": kw}
     )
     return self
 
-  def family(self, data:dict, x:str, y:str,
-             fmt:str="{key}", **kw) -> Plot:
-    """Plot family of curves from sweep/parametric results.
+  def family(self, data:dict, x:str, y:str, fmt:str="{key}", **kw) -> Plot:
+    """
+    Plot family of curves from sweep/parametric results.
 
     Args:
-      data: Dict keyed by label → dict with column arrays.
-        Typically from `Simulation.sweep()` or manual grouping.
-      x: Key for x-axis data in each result dict.
-      y: Key for y-axis data in each result dict.
-      fmt: Label format with `{key}` placeholder.
-      **kw: Extra kwargs forwarded to `line()`.
-
-    Returns:
-      Self for chaining.
+      data: label → dict of column arrays, as returned by `Simulation.sweep()`.
+      x, y: column keys inside each result dict.
+      fmt: label template, `{key}` is the outer dict key.
 
     Example:
       >>> results = sim.sweep(RLOAD=["1k", "2.2k", "4.7k"])
@@ -285,19 +256,19 @@ class Plot:
     return self
 
   def hline(self, y:float, label:str|None=None, **kw) -> Plot:
-    """Horizontal reference line (threshold, alarm level)."""
+    """Horizontal reference line: threshold, alarm level."""
     kw.setdefault("ls", "--")
     kw.setdefault("alpha", 0.7)
     kw.setdefault("lw", 1.0)
     name, unit = _parse_label(label)
-    # hline/vline always go to main panel, not twin
+    # reference lines land on the main panel even while a twin is active
     self._cur["traces"].append(
       {"kind": "hline", "x": None, "y": y, "name": name, "unit": unit, "kw": kw}
     )
     return self
 
   def vline(self, x, label:str|None=None, **kw) -> Plot:
-    """Vertical reference line (event marker, timestamp)."""
+    """Vertical reference line: event marker, timestamp."""
     kw.setdefault("ls", "--")
     kw.setdefault("alpha", 0.7)
     kw.setdefault("lw", 1.0)
@@ -315,7 +286,7 @@ class Plot:
     )
     return self
 
-  #------------------------------------------------------------------------------ Configuration
+  #---------------------------------------------------------------------------------- Configuration
 
   def title(self, text:str) -> Plot:
     """Figure suptitle (above all panels)."""
@@ -367,21 +338,15 @@ class Plot:
     self._size = (w, h)
     return self
 
-  #---------------------------------------------------------------------------------- Rendering
+  #-------------------------------------------------------------------------------------- Rendering
 
   def _finalize_panels(self) -> list[dict]:
-    """Collect all panels (including current), skip empty ones."""
+    """Panels holding traces, the unfinished current one included."""
     panels = self._panels + [self._cur]
-    return [p for p in panels
-      if p["traces"] or (p["twin"] and p["twin"]["traces"])]
+    return [p for p in panels if p["traces"] or (p["twin"] and p["twin"]["traces"])]
 
   def _render(self):
-    """Build matplotlib figure from stored trace/panel specs.
-
-    Called lazily on `show()`, `save()`, or `.fig`/`.axes` access.
-    Creates subplots with `sharex`, applies theme via `rc_context`,
-    draws all traces, configures axes, and sets up date formatting.
-    """
+    """Build the figure from stored specs, once, on `show()`/`save()`/`.fig`/`.axes`."""
     if self._rendered: return
     panels = self._finalize_panels()
     if not panels:
@@ -403,7 +368,7 @@ class Plot:
         gridspec_kw={"height_ratios": ratios, "hspace": 0.06 if n > 1 else 0.2},
         layout="constrained",
       )
-      # Constrained layout padding: w_pad/h_pad in inches (/72 = points)
+      # w_pad/h_pad in inches, so /72 reads as points
       fig.get_layout_engine().set(
         w_pad=7/72, h_pad=7/72, wspace=0.02, hspace=0.06,
       )
@@ -412,19 +377,17 @@ class Plot:
       for pi, (panel, ax) in enumerate(zip(panels, axes)):
         is_last = (pi == n - 1)
         color_idx = self._draw_traces(ax, panel, color_idx)
-        # Twin axis: separate y-scale, merged legend
         if panel["twin"] and panel["twin"]["traces"]:
           tax = ax.twinx()
-          tax.spines["right"].set_visible(True)  # theme hides it
+          tax.spines["right"].set_visible(True) # theme hides it
           color_idx = self._draw_traces(tax, panel["twin"], color_idx)
           self._apply_axis(tax, panel["twin"], is_twin=True)
-          # Legend on tax: twin renders on top so legend must be there
+          # twin draws on top, so the merged legend has to live on it
           self._apply_legend(ax, panel, merge_from=tax)
         else:
           self._apply_legend(ax, panel)
         self._apply_axis(ax, panel)
         if panel["grid"] is not None: ax.grid(panel["grid"])
-        # Auto-detect datetime x-data → smart date formatting
         all_traces = panel["traces"]
         if panel["twin"]:
           all_traces = all_traces + panel["twin"]["traces"]
@@ -432,7 +395,7 @@ class Plot:
           if tr["x"] is not None and _is_datetime(tr["x"]):
             _setup_date_axis(ax)
             break
-        # Inner panels: hide x-tick labels (shared x shows on bottom)
+        # shared x: only the bottom panel keeps tick labels
         if not is_last and n > 1:
           ax.tick_params(labelbottom=False)
           ax.set_xlabel("")
@@ -446,7 +409,6 @@ class Plot:
     show, lkw = True, {}
     if panel["legend"] is not None: show, lkw = panel["legend"]
     if merge_from:
-      # Merge handles from both axes into one legend on twin
       h1, l1 = ax.get_legend_handles_labels()
       h2, l2 = merge_from.get_legend_handles_labels()
       if (h1 or h2) and show:
@@ -462,24 +424,21 @@ class Plot:
         if leg: leg.remove()
 
   def _draw_traces(self, ax:plt.Axes, panel:dict, color_idx:int) -> int:
-    """Draw all traces on axis. Returns updated global color index."""
+    """Draw traces, return the palette index to continue from."""
     for tr in panel["traces"]:
       kind = tr["kind"]
       kw = tr["kw"].copy()
-      # Build legend label from name + unit
       label = _fmt_label(tr["name"], tr["unit"]) if tr["name"] else None
       if label: kw["label"] = label
-      # Auto-assign color from palette (skip for hline/vline/text)
       if kind in ("line", "scatter", "step", "fill", "bar"):
         if "color" not in kw and "c" not in kw:
           kw["color"] = PALETTE[color_idx % len(PALETTE)]
-          tr["kw"]["color"] = kw["color"]  # persist for `_apply_axis`
+          tr["kw"]["color"] = kw["color"] # persist for `_apply_axis`
         color_idx += 1
-      # Dispatch to matplotlib primitives
       if kind == "line": ax.plot(tr["x"], tr["y"], **kw)
       elif kind == "scatter":
         c = kw.pop("color", None)
-        if c: kw["c"] = c  # scatter uses `c` not `color`
+        if c: kw["c"] = c # scatter uses `c` not `color`
         ax.scatter(tr["x"], tr["y"], **kw)
       elif kind == "step":
         ax.step(tr["x"], tr["y"], where=kw.pop("where", "post"), **kw)
@@ -493,9 +452,9 @@ class Plot:
     return color_idx
 
   def _apply_axis(self, ax:plt.Axes, panel:dict, is_twin:bool=False):
-    """Configure ylabel (auto-color for single series), limits, log scale."""
+    """Set ylabel, limits and log scale. `is_twin` skips x config: the twin shares that axis."""
     ylabel = panel.get("ylabel")
-    # Single data series → auto ylabel colored to match line
+    # lone series → derive the ylabel from it and color it to match
     if ylabel is None and len(panel["traces"]) == 1:
       t = panel["traces"][0]
       if t["name"] and t["kind"] not in ("hline", "vline", "text"):
@@ -504,16 +463,14 @@ class Plot:
         if color:
           ax.set_ylabel(ylabel, color=color)
           ax.tick_params(axis="y", colors=color)
-          ylabel = None  # already set with color
+          ylabel = None # already set with color
     if ylabel: ax.set_ylabel(ylabel)
-    # Y limits
     ylim = panel.get("ylim")
     if ylim:
       lo, hi = ylim
       if lo is not None and hi is not None: ax.set_ylim(lo, hi)
       elif lo is not None: ax.set_ylim(bottom=lo)
       elif hi is not None: ax.set_ylim(top=hi)
-    # X limits (main axis only)
     if not is_twin:
       xlim = panel.get("xlim")
       if xlim:
@@ -521,20 +478,19 @@ class Plot:
         if lo is not None and hi is not None: ax.set_xlim(lo, hi)
         elif lo is not None: ax.set_xlim(left=lo)
         elif hi is not None: ax.set_xlim(right=hi)
-    # Log scale
     if panel.get("logy"): ax.set_yscale("log")
     if not is_twin and panel.get("logx"): ax.set_xscale("log")
 
-  #---------------------------------------------------------------------------------- Terminals
+  #-------------------------------------------------------------------------------------- Terminals
 
   def show(self) -> Plot:
-    """Render and display (blocks until window closed)."""
+    """Render and display, blocks until the window is closed."""
     self._render()
     plt.show()
     return self
 
   def save(self, path:str, dpi:int=150, **kw) -> Plot:
-    """Save to file. DPI ignored for vector formats (.pdf, .svg, .eps)."""
+    """Save to file; parent dirs created, DPI ignored for vector formats (.pdf, .svg, .eps)."""
     self._render()
     ext = os.path.splitext(path)[1].lower()
     if ext not in (".pdf", ".svg", ".eps"): kw.setdefault("dpi", dpi)
@@ -545,28 +501,28 @@ class Plot:
     return self
 
   def close(self):
-    """Close figure, free memory. Safe to call multiple times."""
+    """Close the figure and free its memory. Idempotent."""
     if self._fig:
       plt.close(self._fig)
       self._fig = None
       self._axes = []
       self._rendered = False
 
-  #----------------------------------------------------------------------------- Escape hatches
+  #--------------------------------------------------------------------------------- Escape hatches
 
   @property
   def fig(self) -> plt.Figure:
-    """Raw matplotlib Figure (triggers render on first access)."""
+    """Raw matplotlib Figure, renders on first access."""
     self._render()
     return self._fig
 
   @property
   def axes(self) -> list[plt.Axes]:
-    """Raw matplotlib Axes list (triggers render on first access)."""
+    """One raw matplotlib Axes per panel, top to bottom."""
     self._render()
     return self._axes
 
-  #------------------------------------------------------------------------------------ Special
+  #---------------------------------------------------------------------------------------- Special
 
   def __repr__(self):
     panels = self._finalize_panels()
@@ -577,13 +533,13 @@ class Plot:
   def __del__(self):
     self.close()
 
-#---------------------------------------------------------------------------------- Convenience
+#-------------------------------------------------------------------------------------- Convenience
 
 def quick(x, y, label:str|tuple|None=None, **kw) -> Plot:
-  """One-liner: `quick(x, y, "Data [V]").show()`"""
+  """Single-trace shortcut: `quick(x, y, "Data [V]").show()`."""
   return Plot().line(x, y, label, **kw)
 
-#----------------------------------------------------------------------------------------- Demo
+#--------------------------------------------------------------------------------------------- Demo
 
 def demo():
   """Stacked sensor dashboard: alarm, twinx, multi-series, datetime."""
@@ -615,11 +571,11 @@ def demo():
 def demo_family():
   """Family of curves: simulated parametric sweep."""
   t = np.linspace(0, 1e-3, 200)
-  # Simulate sweep results: Simulation.sweep() returns this structure
+  # same shape `Simulation.sweep()` returns
   results = {}
   for r in ["1k", "2.2k", "4.7k", "10k"]:
     rv = float(r.replace("k", "")) * 1e3
-    tau = rv * 100e-9  # RC time constant
+    tau = rv * 100e-9
     results[r] = {
       "TIME": t,
       "V(OUT)": 5.0 * (1 - np.exp(-t / tau)),

@@ -8,7 +8,7 @@ from xaeian import (
   ensure_prefix, ensure_suffix,
   split_str, split_sql,
   strip_comments_c, strip_comments_sql, strip_comments_py,
-  generate_password,
+  generate_password, generate_token,
 )
 
 @pytest.mark.parametrize("text, sep, expected", [
@@ -104,3 +104,14 @@ def generate_password_covers_all_classes():
 def generate_password_rejects_short_length():
   with pytest.raises(ValueError):
     generate_password(3)
+
+def generate_token_uses_letters_and_digits():
+  t = generate_token(40)
+  assert len(t) == 40 and t.isalnum()
+
+def generate_token_respects_alphabet():
+  assert set(generate_token(64, alphabet="ab")) <= {"a", "b"}
+
+def generate_token_rejects_bad_input():
+  with pytest.raises(ValueError): generate_token(0)
+  with pytest.raises(ValueError): generate_token(8, alphabet="")

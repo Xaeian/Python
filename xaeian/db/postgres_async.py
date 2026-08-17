@@ -1,6 +1,6 @@
 # xaeian/db/postgres_async.py
 
-"""PostgreSQL async implementation with connection pooling."""
+"""PostgreSQL async implementation."""
 from __future__ import annotations
 
 import asyncio
@@ -10,46 +10,25 @@ from ..log import Logger, Print
 
 from .abstract_async import AbstractAsyncDatabase
 from .utils import (
-  ident, serialize_params, serialize_dict,
-  split_sql, parse_json, parse_row, _upsert_sql,
+  ident, serialize_params, split_sql, parse_json, parse_row, _insert_sql, _upsert_sql,
 )
 
 class PostgresAsyncDatabase(AbstractAsyncDatabase):
   """
   PostgreSQL async database (asyncpg) with connection pooling.
 
-  Pool is created lazily on first query or explicitly via `start()`.
-  Use `close()` for clean shutdown.
-
-  Args:
-    db_name: Database name.
-    host: Server hostname.
-    user: Username.
-    password: Password.
-    port: Server port.
-    log: Logger instance.
-    min_pool: Minimum pool connections (created on start).
-    max_pool: Maximum pool connections.
-
-  Example:
-    >>> db = PostgresAsyncDatabase("mydb", user="postgres", password="secret")
-    >>> await db.start()
-    >>> user_id = await db.insert("users", {"name": "Jan"}, returning="id")
-    >>> await db.close()
-    >>> # or as context manager:
-    >>> async with PostgresAsyncDatabase("mydb", ...) as db:
-    ...   await db.insert("users", {"name": "Jan"})
+  `start()` opens `min_pool` connections up front, otherwise the pool is built on first query.
   """
   def __init__(
     self,
-    db_name: str|None = None,
-    host: str = "localhost",
-    user: str = "postgres",
-    password: str = "",
-    port: int = 5432,
-    log: Logger|Print|None = None,
-    min_pool: int = 1,
-    max_pool: int = 10,
+    db_name:str|None = None,
+    host:str = "localhost",
+    user:str = "postgres",
+    password:str = "",
+    port:int = 5432,
+    log:Logger|Print|None = None,
+    min_pool:int = 1,
+    max_pool:int = 10,
   ):
     super().__init__()
     self.host = host
@@ -65,7 +44,12 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
     self._max_pool = max_pool
 
   def _pg(self, sql:str) -> str:
-    """Convert `?` or `%s` placeholders to `$1`, `$2`, ... (quoted literals untouched)."""
+    """
+    Convert `?` or `%s` placeholders to `$1`, `$2`, ... (quoted literals untouched).
+
+    Every `?` outside a single-quoted literal counts as a placeholder, so the jsonb `?` operator
+    has to be written as `jsonb_exists()`.
+    """
     result, idx, i = [], 1, 0
     n = len(sql)
     quoted = False
@@ -92,15 +76,15 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
     return "".join(result)
 
   async def conn(self):
-    """Create standalone connection (outside pool)."""
+    """Standalone connection, outside the pool."""
     import asyncpg
     return await asyncpg.connect(
       host=self.host, port=self.port,
       user=self.user, password=self.password,
-      database=self.db_name
+      database=self.db_name,
     )
 
-  #---------------------------------------------------------------------------------- Lifecycle
+  #-------------------------------------------------------------------------------------- Lifecycle
 
   async def _ensure_pool(self):
     if self._pool is not None:
@@ -138,7 +122,7 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
       await self._pool.close()
       self._pool = None
 
-  #-------------------------------------------------------------------------------- Transaction
+  #------------------------------------------------------------------------------------ Transaction
 
   @asynccontextmanager
   async def transaction(self):
@@ -158,7 +142,7 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
       self._conn = None
       await pool.release(conn)
 
-  #------------------------------------------------------------------------------------ Execute
+  #---------------------------------------------------------------------------------------- Execute
 
   async def exec(self, sql:str, params=None) -> int:
     import asyncpg
@@ -186,6 +170,7 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
     return 0
 
   async def exec_many(self, sql:str, params_list:list) -> int:
+    """Execute once per parameter tuple, returning their count: asyncpg reports no row counts."""
     import asyncpg
     sql2 = self._pg(sql)
     pl = [serialize_params(p) for p in params_list]
@@ -232,7 +217,7 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
     except asyncpg.PostgresError as e:
       self._err("exec_batch", e)
 
-  #-------------------------------------------------------------------------------------- Query
+  #------------------------------------------------------------------------------------------ Query
 
   async def get_rows(self, sql:str, params=None, json:list[int]|None=None) -> list[list]:
     import asyncpg
@@ -258,7 +243,13 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
     except asyncpg.PostgresError as e:
       self._err("get_rows", e, sql2, p)
 
-  async def get_dicts(self, sql:str, params=None, cols:list[str]|None=None, json:list[str]|None=None) -> list[dict]:
+  async def get_dicts(
+    self,
+    sql:str,
+    params=None,
+    cols:list[str]|None = None,
+    json:list[str]|None = None,
+  ) -> list[dict]:
     import asyncpg
     sql2 = self._pg(sql)
     p = serialize_params(params)
@@ -288,25 +279,22 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
 
   async def _insert_returning(self, table:str, data:dict, ret:str) -> Any:
     import asyncpg
-    d = serialize_dict(data)
-    t = ident(table)
-    cols = ", ".join(ident(k) for k in d.keys())
-    vals = ", ".join(f"${i+1}" for i in range(len(d)))
-    sql = f"INSERT INTO {t} ({cols}) VALUES ({vals}) RETURNING {ident(ret)}"
+    sql, params = _insert_sql(table, data, self.ph)
+    sql = f"{sql} RETURNING {ident(ret)}"
     if self.in_transaction():
       try:
-        row = await self._conn.fetchrow(sql, *d.values())
+        row = await self._conn.fetchrow(sql, *params)
         return row[0] if row else None
       except asyncpg.PostgresError as e:
-        self._err("insert", e, sql, tuple(d.values()))
+        self._err("insert", e, sql, params)
     try:
       async with self._connect() as conn:
-        row = await conn.fetchrow(sql, *d.values())
+        row = await conn.fetchrow(sql, *params)
         return row[0] if row else None
     except asyncpg.PostgresError as e:
-      self._err("insert", e, sql, tuple(d.values()))
+      self._err("insert", e, sql, params)
 
-  #------------------------------------------------------------------------------------- Schema
+  #----------------------------------------------------------------------------------------- Schema
 
   async def has_table(self, name:str) -> bool:
     return await self.get_value(
@@ -328,16 +316,23 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
     finally:
       self.db_name = backup
 
-  #------------------------------------------------------------------------------------- Upsert
+  #----------------------------------------------------------------------------------------- Upsert
 
-  async def upsert(self, table:str, data:dict, on:str|list[str], update:list[str]|None=None) -> int:
-    """INSERT ON CONFLICT (PostgreSQL 9.5+)."""
+  async def upsert(
+    self,
+    table:str,
+    data:dict,
+    on:str|list[str],
+    update:list[str]|None = None,
+  ) -> int:
+    """INSERT ON CONFLICT (PostgreSQL 9.5+). `on` must be a UNIQUE or PRIMARY KEY column set."""
     sql, params = _upsert_sql(table, data, on, update, self.ph, "EXCLUDED")
     return await self.exec(sql, params)
 
-  #------------------------------------------------------------------------ Database Management
+  #---------------------------------------------------------------------------- Database Management
 
   async def create_database(self, name:str|None=None) -> bool:
+    """Create database. Returns `False` if it already exists."""
     if self.in_transaction(): raise RuntimeError("create_database() not allowed in transaction")
     import asyncpg
     name = name or self.db_name
@@ -356,6 +351,7 @@ class PostgresAsyncDatabase(AbstractAsyncDatabase):
       self.db_name = backup
 
   async def drop_database(self, name:str|None=None) -> bool:
+    """Drop database and everything in it. Returns `False` if it does not exist."""
     if self.in_transaction(): raise RuntimeError("drop_database() not allowed in transaction")
     import asyncpg
     name = name or self.db_name

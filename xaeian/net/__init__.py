@@ -3,9 +3,7 @@
 """
 Network clients: SFTP and FTP with unified interface.
 
-Modules:
-  - `xaeian.net.ftp`: FTP client (stdlib `ftplib`, no extra deps)
-  - `xaeian.net.sftp`: SFTP client (requires `paramiko`)
+`xaeian.net.ftp` runs on stdlib `ftplib`, `xaeian.net.sftp` needs `paramiko`.
 
 Example:
   >>> from xaeian.net import Remote
@@ -24,41 +22,30 @@ except ImportError:
 _PORTS = {"sftp": 22, "ftp": 21}
 
 def Remote(
-  type: str,
-  host: str,
-  user: str,
-  port: int|None = None,
+  type:str,
+  host:str,
+  user:str,
+  port:int|None = None,
   *,
-  password: str|None = None,
-  key: str|None = None,
-  passphrase: str|None = None,
-  agent: bool = False,
-  strict: bool = False,
-  log=None,
+  password:str|None = None,
+  key:str|None = None,
+  passphrase:str|None = None,
+  agent:bool = False,
+  strict:bool = False,
+  log = None,
 ) -> "SFTP|FTP": # type: ignore
   """
-  Create remote client instance.
+  Build a remote client. Not connected yet: use `with` or call `connect()`.
+
+  `key`, `passphrase`, `agent` and `strict` are SFTP-only.
 
   Args:
-    type: Protocol (`"sftp"` or `"ftp"`).
-    host: Remote hostname or IP.
-    user: Username.
-    port: Port (default: 22 for SFTP, 21 for FTP).
-    password: Password (SFTP: optional if `key` set).
-    key: SSH private key path (SFTP only).
-    passphrase: Key passphrase (SFTP only).
-    agent: Use SSH agent (SFTP only).
-    strict: Reject unknown host keys (SFTP only).
+    type: `"sftp"` or `"ftp"`.
+    port: Defaults to 22 for SFTP, 21 for FTP.
+    password: Optional for SFTP when `key` is set.
+    key: SSH private key path.
+    strict: Reject an unknown host key instead of trusting it on first use.
     log: `Print`, `Logger`, or `None`.
-
-  Returns:
-    `SFTP` or `FTP` instance (use as context manager).
-
-  Example:
-    >>> with Remote("sftp", "host", "pi", key="~/.ssh/id_rsa", log=Print()) as r:
-    ...   r.sync_push("./dist", "/srv/app")
-    >>> with Remote("ftp", "host", "user", password="pass") as r:
-    ...   r.sync_pull("/srv/data", "./data")
   """
   t = type.lower()
   if t not in _PORTS: raise ValueError(f"Unknown remote type: {type!r}")

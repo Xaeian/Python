@@ -1,17 +1,16 @@
 # xaeian/cli/_args.py
 
-"""Shared argparse bootstrap for `xn` subcommands: a terse parser preset and a
-size formatter, kept identical across all CLI mains."""
+"""Shared argparse bootstrap for `xn` subcommands."""
 
 import argparse
 
-#--------------------------------------------------------------------------------------- Parser
+#------------------------------------------------------------------------------------------- Parser
 
 def _fmt(prog:str) -> argparse.RawDescriptionHelpFormatter:
   return argparse.RawDescriptionHelpFormatter(prog, max_help_position=34, width=90)
 
 class _Parser(argparse.ArgumentParser):
-  # leading blank line + trailing gap for `xn` output
+  """Parser whose help is padded with a leading blank line and a trailing gap."""
   def format_help(self): return "\n" + super().format_help().rstrip() + "\n\n"
 
 def _make_parser(description:str, epilog:str) -> _Parser:
@@ -28,10 +27,10 @@ def _add_help(parser:argparse.ArgumentParser) -> None:
   """Standard `-h`, added last so it lands at the bottom of the options list."""
   parser.add_argument("-h", "--help", action="help", help="Show this help message and exit")
 
-#----------------------------------------------------------------------------------------- Size
+#--------------------------------------------------------------------------------------------- Size
 
 def _fmt_size(b:int, units:tuple[str, str, str, str]=(" B", " kB", " MB", " GB")) -> str:
-  """Human-readable byte size; `units` are full suffixes (incl. any leading space)."""
+  """Human-readable byte size, 1024-based; each `units` suffix is appended verbatim."""
   if b < 1024: return f"{b}{units[0]}"
   if b < 1024**2: return f"{b/1024:.1f}{units[1]}"
   if b < 1024**3: return f"{b/1024**2:.1f}{units[2]}"

@@ -35,7 +35,7 @@ CATALOG = [
   (crc32_autosar, 0x1697D06A),
   (crc32_cksum, 0x765E7680),
   (crc16_kermit, 0x2189),
-  (crc16_modbus, 0x374B), # 0x4B37 byte-swapped by invertOut
+  (crc16_modbus, 0x374B), # 0x4B37 byte-swapped by invert_out
   (crc16_buypass, 0xFEE8),
   (crc8_maxim, 0xA1),
   (crc8_smbus, 0xF4),
@@ -115,7 +115,7 @@ def reflect_in_out_change_the_result():
   assert plain.checksum(CHECK) != reflected.checksum(CHECK)
 
 def invert_out_byte_swaps_the_crc():
-  # crc16_modbus differs from the same spec without invertOut only by byte order
+  # crc16_modbus differs from the same spec without invert_out only by byte order
   straight = CRC(16, 0x8005, 0xFFFF, True, True, 0x0000, False)
   assert crc16_modbus.checksum(CHECK) == straight.checksum(CHECK) << 8 & 0xFF00 \
     | straight.checksum(CHECK) >> 8

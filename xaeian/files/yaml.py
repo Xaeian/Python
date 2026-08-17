@@ -1,14 +1,9 @@
 # xaeian/files/yaml.py
 
 """
-YAML file operations.
+YAML file operations. Requires `pyyaml`.
 
-Requires: `pyyaml`
-
-Example:
-  >>> from xaeian import YAML
-  >>> YAML.save("config", {"debug": True, "port": 8080})
-  >>> data = YAML.load("config")
+Loading goes through `safe_load`, so tags that would construct Python objects are rejected.
 """
 
 __extras__ = ("yaml", ["pyyaml"])
@@ -18,28 +13,29 @@ from typing import Any
 from .config import get_context
 from .path import PATH
 from .dir import DIR
+from .file import FILE
 
 try:
   import yaml
 except ImportError:
   raise ImportError("Install with: pip install xaeian[yaml]")
 
-#------------------------------------------------------------------------------- YAML namespace
+#----------------------------------------------------------------------------------- YAML namespace
 
 class YAML:
-  """YAML file operations. Auto `.yaml` extension, `.yml` accepted as-is."""
+  """YAML read/write, auto `.yaml` extension, `.yml` accepted."""
   EXTS = (".yaml", ".yml")
 
   @staticmethod
   def _ensure_ext(path:str) -> str:
-    """Keep official YAML extension (`EXTS`), else append `.yaml`."""
+    """Keep an `EXTS` extension, else append `.yaml`."""
     ext = os.path.splitext(path)[1].lower()
     if ext in YAML.EXTS: return path
     return path + ".yaml"
 
   @staticmethod
   def _resolve_read(path:str) -> str:
-    """Resolve read path: explicit YAML extension wins, else try `.yaml` then `.yml`."""
+    """Explicit YAML extension wins, else try `.yaml` then `.yml`."""
     ext = os.path.splitext(path)[1].lower()
     if ext in YAML.EXTS: return PATH.resolve(path, read=True)
     for e in YAML.EXTS:
@@ -49,7 +45,7 @@ class YAML:
 
   @staticmethod
   def load(path:str, otherwise:Any=None) -> Any:
-    """Load YAML file. Tries `.yaml` then `.yml`."""
+    """Load YAML file, `otherwise` when missing or empty."""
     cfg = get_context()
     resolved = YAML._resolve_read(path)
     if not os.path.isfile(resolved): return otherwise
@@ -59,7 +55,7 @@ class YAML:
 
   @staticmethod
   def load_all(path:str) -> list[Any]:
-    """Load multi-document YAML file."""
+    """Load multi-document YAML, `[]` when missing."""
     cfg = get_context()
     resolved = YAML._resolve_read(path)
     if not os.path.isfile(resolved): return []
@@ -68,35 +64,33 @@ class YAML:
 
   @staticmethod
   def save(path:str, content:Any, flow:bool=False) -> None:
-    """Save data to YAML file (block style by default)."""
-    cfg = get_context()
+    """Save YAML, block style unless `flow`, key order preserved."""
     path = DIR._resolve_write(YAML._ensure_ext(path), "")
-    with open(path, "w", encoding=cfg.encoding) as file:
-      yaml.safe_dump(
-        content, file, default_flow_style=flow,
-        allow_unicode=True, sort_keys=False,
-      )
+    FILE.save(path, yaml.safe_dump(
+      content, default_flow_style=flow,
+      allow_unicode=True, sort_keys=False,
+    ))
 
   @staticmethod
-  def save_pretty(path:str, content:Any, indent:int=2,
-                  sort_keys:bool=False, flow:bool=False) -> None:
-    """Save YAML with explicit formatting options."""
-    cfg = get_context()
+  def save_pretty(
+    path:str,
+    content:Any,
+    indent:int = 2,
+    sort_keys:bool = False,
+    flow:bool = False,
+  ) -> None:
+    """Save YAML with an explicit indent, keys in insertion order unless `sort_keys`."""
     path = DIR._resolve_write(YAML._ensure_ext(path), "")
-    with open(path, "w", encoding=cfg.encoding) as file:
-      yaml.safe_dump(
-        content, file, indent=indent, sort_keys=sort_keys,
-        default_flow_style=flow, allow_unicode=True,
-      )
+    FILE.save(path, yaml.safe_dump(
+      content, indent=indent, sort_keys=sort_keys,
+      default_flow_style=flow, allow_unicode=True,
+    ))
 
   @staticmethod
-  def save_all(path:str, documents:list[Any],
-               flow:bool=False) -> None:
-    """Save multiple documents to YAML file (separated by `---`)."""
-    cfg = get_context()
+  def save_all(path:str, documents:list[Any], flow:bool=False) -> None:
+    """Save documents separated by `---`."""
     path = DIR._resolve_write(YAML._ensure_ext(path), "")
-    with open(path, "w", encoding=cfg.encoding) as file:
-      yaml.safe_dump_all(
-        documents, file, default_flow_style=flow,
-        allow_unicode=True, sort_keys=False,
-      )
+    FILE.save(path, yaml.safe_dump_all(
+      documents, default_flow_style=flow,
+      allow_unicode=True, sort_keys=False,
+    ))

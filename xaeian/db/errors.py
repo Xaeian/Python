@@ -5,34 +5,18 @@ from __future__ import annotations
 
 class DatabaseError(RuntimeError):
   """
-  Database operation failed.
+  Database operation failed, wrapping the driver exception.
 
-  Wraps driver-specific exceptions with operation context.
-
-  Args:
-    op: Operation name (`"exec"`, `"insert"`, `"get_dicts"`).
-    cause: Original exception from database driver.
-    sql: SQL statement that failed.
-    params: Parameters passed to statement.
-
-  Attributes:
-    op: Operation name.
-    cause: Original exception.
-    sql: Failed SQL statement.
-    params: Statement parameters.
-
-  Example:
-    >>> try:
-    ...   db.exec("INVALID SQL")
-    ... except DatabaseError as e:
-    ...   print(e.op, e.cause)
+  Keeps `op` (method name), `cause`, `sql` and `params` of the failing call as attributes.
+  The message carries `op`, `cause` and the SQL clipped to 200 chars, never `params`, so
+  logging it cannot leak values.
   """
   def __init__(
     self,
-    op: str,
-    cause: Exception,
-    sql: str|None = None,
-    params: tuple|None = None,
+    op:str,
+    cause:Exception,
+    sql:str|None = None,
+    params:tuple|None = None,
   ):
     self.op = op
     self.cause = cause

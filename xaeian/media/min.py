@@ -1,13 +1,6 @@
 # xaeian/media/min.py
 
-"""
-Compression for PDFs and images.
-
-Example:
-  >>> from xaeian.media.min import compress
-  >>> compress("report.pdf", pdf_settings="/ebook")
-  >>> compress("photo.jpg", max_px=1280, quality=85)
-"""
+"""Compression for PDFs and images."""
 
 import os, sys
 from typing import Sequence
@@ -16,40 +9,42 @@ from .utils import PDF_EXTS, IMG_EXTS, require_file
 
 p = Print()
 
+#---------------------------------------------------------------------------------------------- API
+
 def compress(
-  src: str,
-  dst: str|None = None,
-  inplace: bool = False,
-  # PDF
-  pdf_level: str = "1.7",
-  pdf_settings: str = "/ebook",
-  pdf_programs: Sequence[str] = ("gswin64c", "gswin32c", "gs"),
+  src:str,
+  dst:str|None = None,
+  inplace:bool = False,
+  pdf_level:str = "1.7",
+  pdf_settings:str = "/ebook",
+  pdf_programs:Sequence[str] = ("gswin64c", "gswin32c", "gs"),
   # Image
-  max_px: int = 1920,
-  img_format: str = "keep",
-  quality: int = 80,
-  target_kB: int|None = None,
-  avif_speed: int = 6,
-  recursive: bool = True,
+  max_px:int = 1920,
+  img_format:str = "keep",
+  quality:int = 80,
+  target_kB:int|None = None,
+  avif_speed:int = 6,
+  recursive:bool = True,
 ):
-  """Compress file: auto-detects PDF vs image.
+  """
+  Compress a PDF, an image, or a directory of images: auto-detects PDF vs image.
+
+  With `dst` None: overwrite source when `inplace`, else write `<base>-min<ext>`, or a
+  `<dir>-min/` sibling tree for a directory. PDF compression needs Ghostscript on PATH.
 
   Args:
-    src: Input file or directory.
-    dst: Output path. None = auto (see `inplace`).
-    inplace: If True and dst is None, overwrite source.
-    pdf_level: PDF compatibility level.
-    pdf_settings: Ghostscript preset.
-    pdf_programs: Candidate Ghostscript executables.
-    max_px: Max image width/height in pixels.
-    img_format: Image format strategy ("keep", "auto", "avif", "webp", "jpg", "png").
-    quality: Image starting quality 1-100.
-    target_kB: Target image file size in KB.
-    avif_speed: AVIF encoder speed 0-10.
-    recursive: Walk subdirectories for image directories.
+    pdf_level: PDF compatibility version written out (1.2-1.7).
+    pdf_settings: Ghostscript preset (/screen /ebook /printer /prepress /default).
+    pdf_programs: Ghostscript executable candidates, first one found is used.
+    max_px: Long-side cap, only ever downscales.
+    img_format: "keep", "auto", "avif", "webp", "jpg", "png".
+    quality: 1-100 starting point, stepped down until `target_kB` fits.
+    avif_speed: 0-10, lower is slower and smaller.
+    recursive: Walk subdirectories when `src` is a directory.
 
   Returns:
-    str for single PDF, list[dict] for image(s).
+    Output path for a PDF, else one dict per image (`src`, `dst`, `orig_size`, `new_size`,
+    `orig_kB`, `new_kB`, `format`), where `*_size` is a (width, height) pixel pair.
   """
   if os.path.isdir(src):
     from .img import img_compress
@@ -65,6 +60,8 @@ def compress(
     return img_compress(src, dst, max_px, img_format, quality, target_kB, avif_speed,
       recursive, inplace)
   raise ValueError(f"Unsupported format: {ext} (expected PDF, image, or directory)")
+
+#---------------------------------------------------------------------------------------------- CLI
 
 EXAMPLES = """
 examples:
@@ -135,7 +132,7 @@ def main():
       f"{c.GREY}({ratio:.0f}%){c.END}")
   elif isinstance(result, list):
     if not result:
-      p.wrn(f"No images found in {c.ORANGE}{name}{c.END}")
+      p.wrn(f"No images compressed in {c.ORANGE}{name}{c.END}")
       sys.exit(0)
     total_orig, total_new = 0, 0
     for r in result:

@@ -97,7 +97,7 @@ def sql_create_declares_kv_schema():
     "CREATE TABLE IF NOT EXISTS kv ("
     f"key VARCHAR({KEY_MAX}) PRIMARY KEY, "
     "value TEXT NOT NULL, "
-    "updated_at INTEGER NOT NULL)"
+    "updated_at BIGINT NOT NULL)"
   )
 
 def sql_get_value_selects_single_value():

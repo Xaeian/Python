@@ -1,34 +1,16 @@
 # xaeian/table.py
 
 """
-Lightweight tabular operations on `list[dict]`: pandas-free.
+Lightweight tabular operations on `list[dict]`: pandas-free, zero dependencies.
 
-Zero dependencies. Works with data from `CSV.load()`, `JSON.load()`
-or any other source that produces `list[dict]`.
-
-Filtering and lookup:
-  `where`, `first`, `take`
-
-Column operations:
-  `select`, `exclude`, `rename`, `add_column`, `pluck`, `set_defaults`
-
-Sorting and deduplication:
-  `sort_by`, `unique`
-
-Grouping and aggregation:
-  `group_by`, `count_by`, `aggregate`
-
-Joining and combining:
-  `join`, `concat`
-
-Value mapping:
-  `replace_values`, `map_column`
-
-Inspection:
-  `columns`, `describe`
+Takes anything that produces `list[dict]`, such as `CSV.load()` or `JSON.load()`. Filter
+(`where`, `first`, `take`), shape (`select`, `exclude`, `rename`, `add_column`, `pluck`,
+`set_defaults`), order (`sort_by`, `unique`), group (`group_by`, `count_by`, `aggregate`),
+combine (`join`, `concat`), map (`replace_values`, `map_column`), inspect (`columns`,
+`describe`), render (`markdown`, `markdown_raw`).
 
 Example:
-  >>> from xaeian.table import where, select, sort_by, aggregate
+  >>> from xaeian.table import where, aggregate
   >>> rows = CSV.load("data")
   >>> active = where(rows, lambda r: r["status"] == "active")
   >>> summary = aggregate(active, "dept", {"salary": "sum"})
@@ -41,7 +23,6 @@ Rows = list[dict[str, Any]]
 Key = str | Callable[[dict], Any]
 
 def _all_cols(rows:Rows) -> set[str]:
-  """Collect all keys across all rows."""
   out: set[str] = set()
   for r in rows:
     out.update(r.keys())
@@ -54,39 +35,28 @@ def _safe_sort_key(v:Any) -> Any:
   return (type(v).__name__, v)
 
 def _getter(key:Key) -> Callable[[dict], Any]:
-  """Resolve string key to row accessor."""
   if isinstance(key, str):
     k = key
     return lambda r: r.get(k)
   return key
 
-#----------------------------------------------------------------------------- Filtering lookup
+#--------------------------------------------------------------------------------- Filtering lookup
 
 def where(rows:Rows, predicate:Callable[[dict], bool]) -> Rows:
-  """
-  Filter rows by predicate function.
-
-  Example:
-    >>> where(rows, lambda r: r["age"] > 30)
-  """
+  """Filter rows by predicate."""
   return [r for r in rows if predicate(r)]
 
-def first(rows:Rows, predicate:Callable[[dict], bool]) -> dict | None:
+def first(rows:Rows, predicate:Callable[[dict], bool]) -> dict|None:
   """Return first row matching predicate, or `None`."""
   for r in rows:
     if predicate(r): return r
   return None
 
 def take(rows:Rows, n:int, *, offset:int=0) -> Rows:
-  """
-  Return up to `n` rows starting from `offset`.
-
-  Example:
-    >>> take(rows, 10, offset=20)  # rows 20..29
-  """
+  """Return up to `n` rows starting from `offset`."""
   return rows[offset:offset + n]
 
-#---------------------------------------------------------------------------- Column operations
+#-------------------------------------------------------------------------------- Column operations
 
 def columns(rows:Rows) -> list[str]:
   """Extract ordered column names from first row."""
@@ -94,68 +64,42 @@ def columns(rows:Rows) -> list[str]:
   return list(rows[0].keys())
 
 def select(rows:Rows, *cols:str) -> Rows:
-  """
-  Keep only specified columns.
-
-  Example:
-    >>> select(rows, "name", "age", "email")
-  """
+  """Keep only the given columns, missing ones become `None`."""
   return [{k: r.get(k) for k in cols} for r in rows]
 
 def exclude(rows:Rows, *cols:str) -> Rows:
-  """Drop specified columns, keep everything else."""
+  """Drop the given columns."""
   drop = set(cols)
   return [{k: v for k, v in r.items() if k not in drop} for r in rows]
 
 def rename(rows:Rows, mapping:dict[str, str]) -> Rows:
-  """
-  Rename columns. `mapping` is `{old_name: new_name}`.
-
-  Example:
-    >>> rename(rows, {"Ref": "Designator", "Pacage": "Footprint"})
-  """
+  """Rename columns, `mapping` is `{old: new}`."""
   return [{mapping.get(k, k): v for k, v in r.items()} for r in rows]
 
 def add_column(rows:Rows, name:str, fn:Callable[[dict], Any]) -> Rows:
-  """
-  Add computed column to each row (in-place, returns same list).
-
-  Example:
-    >>> add_column(rows, "full", lambda r: f'{r["first"]} {r["last"]}')
-  """
+  """Add a computed column to each row, in-place."""
   for r in rows:
     r[name] = fn(r)
   return rows
 
 def pluck(rows:Rows, col:str) -> list[Any]:
-  """
-  Extract single column as flat list.
-
-  Example:
-    >>> pluck(rows, "email")
-    ['a@b.com', 'c@d.com', ...]
-  """
+  """Extract a single column as a flat list."""
   return [r.get(col) for r in rows]
 
 def set_defaults(rows:Rows, **defaults:Any) -> Rows:
-  """
-  Fill missing keys with default values (in-place).
-
-  Example:
-    >>> set_defaults(rows, Count=1, DNP=False, Code="")
-  """
+  """Fill missing keys with default values, in-place."""
   for r in rows:
     for k, v in defaults.items():
       if k not in r: r[k] = v
   return rows
 
-#-------------------------------------------------------------------- Sorting and deduplication
+#------------------------------------------------------------------------ Sorting and deduplication
 
 def sort_by(rows:Rows, key:Key, *, reverse:bool=False) -> Rows:
   """
-  Sort rows by column or callable. `None` values always sort last.
+  Sort rows by column or callable, `None` values always land last.
 
-  For multi-key: `sort_by(rows, lambda r: (r["dept"], -r["salary"]))`
+  Multi-key: `sort_by(rows, lambda r: (r["dept"], -r["salary"]))`
   """
   fn = _getter(key)
   has = [r for r in rows if fn(r) is not None]
@@ -166,16 +110,7 @@ def sort_by(rows:Rows, key:Key, *, reverse:bool=False) -> Rows:
     return sorted(has, key=lambda r: _safe_sort_key(fn(r)), reverse=reverse) + nah
 
 def unique(rows:Rows, key:Key|None=None) -> Rows:
-  """
-  Deduplicate rows, keeping first occurrence.
-
-  Args:
-    key: Column or callable to deduplicate on.
-      `None` deduplicates on full row content.
-
-  Example:
-    >>> unique(rows, "id")
-  """
+  """Deduplicate rows keeping first occurrence, `key=None` compares the full row."""
   seen = set()
   result = []
   fn = _getter(key) if key else lambda r: tuple(sorted(r.items()))
@@ -191,17 +126,10 @@ def unique(rows:Rows, key:Key|None=None) -> Rows:
       result.append(r)
   return result
 
-#--------------------------------------------------------------------- Grouping and aggregation
+#------------------------------------------------------------------------- Grouping and aggregation
 
 def group_by(rows:Rows, key:Key) -> dict[Any, Rows]:
-  """
-  Group rows by column or callable. No pre-sorting required.
-
-  Example:
-    >>> groups = group_by(rows, "dept")
-    >>> groups["engineering"]
-    [{"dept": "engineering", "name": "Alice"}, ...]
-  """
+  """Group rows by column or callable, no pre-sorting required."""
   fn = _getter(key)
   groups: dict[Any, Rows] = {}
   for r in rows:
@@ -210,13 +138,7 @@ def group_by(rows:Rows, key:Key) -> dict[Any, Rows]:
   return groups
 
 def count_by(rows:Rows, key:Key) -> dict[Any, int]:
-  """
-  Count occurrences per key value (like `value_counts`).
-
-  Example:
-    >>> count_by(rows, "status")
-    {"active": 42, "inactive": 7}
-  """
+  """Count occurrences per key value, like pandas `value_counts`."""
   fn = _getter(key)
   return dict(Counter(fn(r) for r in rows))
 
@@ -229,19 +151,9 @@ def aggregate(
   Group rows by keys and aggregate columns.
 
   Args:
-    keys: Column name(s) to group by.
-    agg: `{column: aggregation}` where aggregation is one of:
-      `"first"`, `"last"`, `"sum"`, `"count"`,
-      `"min"`, `"max"`, `"mean"`,
-      `"join"` or `"join:<sep>"`,
-      or `callable(values_list) → value`.
-
-  Example:
-    >>> aggregate(rows, ["Manufacturer", "Code"], {
-    ...   "Value": "first",
-    ...   "Count": "sum",
-    ...   "Reference": "join",
-    ... })
+    agg: `{column: aggregation}`, aggregation being `"first"`, `"last"`, `"sum"`, `"count"`,
+      `"min"`, `"max"`, `"mean"`, `"join"`/`"join:<sep>"` (default separator `,`),
+      or `callable(values) → value`.
   """
   if isinstance(keys, str): keys = [keys]
   groups: dict[tuple, Rows] = {}
@@ -288,29 +200,25 @@ def aggregate(
     result.append(out)
   return result
 
-#------------------------------------------------------------------------ Joining and combining
+#---------------------------------------------------------------------------- Joining and combining
 
 def join(
   left:Rows,
   right:Rows,
-  on:str, *,
+  on:str,
+  *,
   right_on:str|None = None,
   how:Literal["inner", "left", "right", "outer"] = "inner",
   lsuffix:str = "_l",
   rsuffix:str = "_r",
 ) -> Rows:
   """
-  Join two tables on key column(s). Hash-based, O(n+m).
+  Join two tables on a key column. Hash-based, O(n+m).
 
-  Args:
-    on: Key column in left table.
-    right_on: Key column in right table (defaults to `on`).
-    how: Join type: `"inner"`, `"left"`, `"right"`, `"outer"`.
-    lsuffix: Suffix for overlapping left columns.
-    rsuffix: Suffix for overlapping right columns.
-
-  Example:
-    >>> join(orders, products, on="product_id", how="left")
+  `on` names the left key, `right_on` the right one and defaults to `on`. `lsuffix`/`rsuffix`
+  rename only the columns present in both tables. A key value repeated on both sides yields
+  every pair, so rows can multiply. Matched rows carry the left key column, right-only rows
+  from a `right`/`outer` join carry `right_on`.
   """
   rk = right_on or on
   index: dict[Any, list[dict]] = {}
@@ -348,12 +256,7 @@ def join(
   return result
 
 def concat(*tables:Rows) -> Rows:
-  """
-  Vertically stack tables. Missing columns filled with `None`.
-
-  Example:
-    >>> concat(batch_1, batch_2, batch_3)
-  """
+  """Vertically stack tables, missing columns filled with `None`."""
   if not tables: return []
   all_cols: list[str] = []
   seen: set[str] = set()
@@ -369,45 +272,31 @@ def concat(*tables:Rows) -> Rows:
       result.append({c: r.get(c) for c in all_cols})
   return result
 
-#-------------------------------------------------------------------------------- Value mapping
+#------------------------------------------------------------------------------------ Value mapping
 
 def replace_values(rows:Rows, column:str, mapping:dict) -> Rows:
-  """
-  Replace values in column by mapping (in-place).
-
-  Example:
-    >>> replace_values(rows, "Side", {"top": "T", "bottom": "B"})
-  """
+  """Replace values in a column through `mapping`, in-place."""
   for r in rows:
     if column in r and r[column] in mapping:
       r[column] = mapping[r[column]]
   return rows
 
 def map_column(rows:Rows, column:str, fn:Callable[[Any], Any]) -> Rows:
-  """
-  Apply function to every value in column (in-place).
-
-  Example:
-    >>> map_column(rows, "price", lambda v: round(v, 2))
-  """
+  """Apply a function to every value in a column, in-place."""
   for r in rows:
     if column in r:
       r[column] = fn(r[column])
   return rows
 
-#----------------------------------------------------------------------------------- Inspection
+#--------------------------------------------------------------------------------------- Inspection
 
 def describe(rows:Rows, col:str) -> dict[str, Any]:
   """
   Summary statistics for a single column.
 
-  Returns:
-    Dict with `count`, `nulls`, `unique`, `min`, `max`,
-    and `mean` (for numeric columns, else `None`).
-
-  Example:
-    >>> describe(rows, "salary")
-    {"count": 50, "nulls": 2, "unique": 45, ...}
+  Keys: `count` (all rows, nulls included), `nulls`, `unique` (distinct non-null values),
+  `min`, `max`, `mean`. `mean` is `None` for non-numeric columns, `min`/`max` are `None` when
+  the values cannot be compared with each other.
   """
   values = pluck(rows, col)
   non_null = [v for v in values if v is not None]
@@ -430,15 +319,13 @@ def describe(rows:Rows, col:str) -> dict[str, Any]:
     "mean": (sum(nums) / len(nums)) if nums else None,
   }
 
-#------------------------------------------------------------------------------------- Markdown
+#----------------------------------------------------------------------------------------- Markdown
 
 def _md_esc(v:Any) -> str:
-  """Escape value for markdown cell."""
   if v is None: return ""
   return str(v).replace("|", r"\|").replace("\n", "<br>")
 
 def _md_auto_aligns(data:list[list[str]], ncols:int) -> list[str]:
-  """Auto-detect column alignment: >=70% numeric → right, else left."""
   aligns = []
   for col in range(ncols):
     vals = [r[col] for r in data if col < len(r) and r[col]]
@@ -462,7 +349,7 @@ _MD_ALIGN = {
 }
 
 def _md_render(hdr:list[str], data:list[list[str]], aligns:list[str]|None) -> str:
-  """Render markdown table from escaped header + data cells."""
+  """Render markdown table, cells must already be escaped."""
   if not hdr: return ""
   ncols = len(hdr)
   for r in data:
@@ -497,38 +384,30 @@ def _md_render(hdr:list[str], data:list[list[str]], aligns:list[str]|None) -> st
   return "\n".join(lines)
 
 def markdown(
-  rows: Rows,
-  cols: list[str]|None = None,
-  header: list[str]|None = None,
-  aligns: list[str]|None = None,
-  exclude: list[str]|None = None,
+  rows:Rows,
+  cols:list[str]|None = None,
+  header:list[str]|None = None,
+  aligns:list[str]|None = None,
+  exclude:list[str]|None = None,
 ) -> str:
   """
   Render `list[dict]` as markdown table.
 
-  Args:
-    rows: Row dicts.
-    cols: Column keys to include (default: all from first row).
-    header: Display names for columns (default: same as `cols`).
-    aligns: Per-column alignment: `"<"`/`">"`/`"^"` or
-      `"left"`/`"right"`/`"center"`. `None` = auto-detect.
-    exclude: Column keys to drop.
+  Cells escape `|` and turn newlines into `<br>`, `None` renders as an empty cell.
 
-  Returns:
-    Markdown table string.
+  Args:
+    cols: Keys to include, default all keys of the first row.
+    header: Display names, default `cols`; must line up with what is left after `exclude`.
+    aligns: Per column `"<"`/`"^"`/`">"` or `"left"`/`"center"`/`"right"`, `None` right-aligns
+      columns whose values are at least 70% numeric and left-aligns the rest.
+    exclude: Keys to drop, applied after `cols` is resolved.
 
   Example:
-    >>> rows = [{"name": "R1", "value": 10}, {"name": "R2", "value": 22}]
-    >>> print(markdown(rows))
+    >>> print(markdown([{"name": "R1", "value": 10}, {"name": "R2", "value": 22}]))
     | name | value |
     | :--- | ----: |
     | R1   |    10 |
     | R2   |    22 |
-    >>> print(markdown(rows, cols=["value", "name"], header=["Val", "Ref"]))
-    | Val | Ref |
-    | --: | :-- |
-    |  10 | R1  |
-    |  22 | R2  |
   """
   if not rows: return ""
   if cols is None: cols = list(rows[0].keys())
@@ -541,30 +420,15 @@ def markdown(
   return _md_render(hdr[:len(cols)], data, aligns)
 
 def markdown_raw(
-  rows: list[list],
-  header: bool = True,
-  aligns: list[str]|None = None,
+  rows:list[list],
+  header:bool = True,
+  aligns:list[str]|None = None,
 ) -> str:
   """
-  Render `list[list]` as markdown table.
+  Render `list[list]` as markdown table, for raw data from `CSV.load_raw()`.
 
-  For raw data from `CSV.load_raw()` or similar sources.
-
-  Args:
-    rows: List of rows (each row is a list of values).
-    header: When `True`, first row is used as column headers.
-    aligns: Per-column alignment (see `markdown`). `None` = auto-detect.
-
-  Returns:
-    Markdown table string.
-
-  Example:
-    >>> raw = [["Name", "Ohm"], ["R1", "10k"], ["R2", "22k"]]
-    >>> print(markdown_raw(raw))
-    | Name | Ohm |
-    | :--- | :-- |
-    | R1   | 10k |
-    | R2   | 22k |
+  `header=True` takes the first row as column names, `False` numbers them from `0`.
+  `aligns` as in `markdown`.
   """
   if not rows: return ""
   if header:

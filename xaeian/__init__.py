@@ -3,32 +3,15 @@
 """
 Xaeian - Python utilities library.
 
-Modules:
-  - `xaeian.xstring`: String manipulation utilities
-  - `xaeian.files`: File/directory operations with context
-  - `xaeian.table`: Tabular operations on list[dict]
-  - `xaeian.crc`: CRC-8/16/32 checksums
-  - `xaeian.colors`: ANSI terminal colors
-  - `xaeian.log`: Colored logging with rotation
-  - `xaeian.cmd`: Shell command helpers
-  - `xaeian.xtime`: Datetime parsing and arithmetic
-  - `xaeian.cstruct`: Binary struct serialization
-  - `xaeian.serial`: Serial communication (port, recorders, shell client)
-  - `xaeian.net`: SFTP/FTP clients for deployment and data collection
-  - `xaeian.plot`: Fluent matplotlib wrapper
-  - `xaeian.dsp`: Signal processing (filter, FFT, vibration metrics)
-  - `xaeian.db`: Database abstraction (SQLite, MySQL, PostgreSQL)
-  - `xaeian.media`: PDF and image compression, conversion, metadata
-  - `xaeian.eda`: E-series, KiCad export, NgSpice runner
-  - `xaeian.cli`: Utility scripts (tree, dupes, wifi, fonts)
+Not re-exported here, import directly: `table` (list[dict] ops), `files_async`, `cmd`,
+`cstruct` (binary structs), `net` (SFTP/FTP), `db` (SQLite, MySQL, PostgreSQL), `media` (PDF,
+image), `eda` (E-series, KiCad, NgSpice), `cli` (tree, dupes, wifi, fonts).
 
 Example:
   >>> from xaeian import logger, JSON, split_sql, Files, Plot
-  >>> from xaeian.serial import Shell, MultiRecorder
-  >>> from xaeian.db import Database
 """
 
-__version__ = "0.7.5"
+__version__ = "0.8.0"
 __repo__ = "Xaeian/Python"
 __python__ = ">=3.12"
 __description__ = (
@@ -51,11 +34,11 @@ from .xstring import (
   split_str, split_sql,
   strip_comments, strip_comments_c,
   strip_comments_sql, strip_comments_py,
-  generate_password,
+  generate_password, generate_token,
 )
 
 from .files import (
-  file_context, Files,
+  file_context, set_context, get_context, Files,
   PATH, DIR, FILE, INI, CSV, JSON,
 )
 from .crc import CRC
@@ -69,13 +52,14 @@ __all__ = [
   "split_str", "split_sql",
   "strip_comments", "strip_comments_c",
   "strip_comments_sql", "strip_comments_py",
-  "generate_password",
-  "file_context", "Files",
+  "generate_password", "generate_token",
+  "file_context", "set_context", "get_context", "Files",
   "PATH", "DIR", "FILE", "INI", "CSV", "JSON",
   "CRC",
   "logger", "Logger", "Print", "Color", "Ico",
 ]
 
+# Extras: exported only where the optional dependency is installed
 try:
   from .files import YAML
   __all__ += ["YAML"]

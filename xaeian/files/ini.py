@@ -2,40 +2,51 @@
 
 """INI configuration file operations."""
 
-import os
+import io, os
 from typing import Any
 from .config import get_context
 from .path import PATH
 from .dir import DIR
+from .file import FILE
 
-#-------------------------------------------------------------------------------- INI namespace
+#------------------------------------------------------------------------------------ INI namespace
 
 class INI:
-  """INI configuration file operations. Auto `.ini` extension, `.conf`/`.cfg` accepted."""
+  """INI read/write, auto `.ini` extension, `.conf`/`.cfg` accepted."""
   EXTS = (".ini", ".conf", ".cfg")
 
   @staticmethod
   def _ensure_ext(path:str) -> str:
-    """Keep official INI-family extension (`EXTS`), else append `.ini`."""
+    """Keep an `EXTS` extension, else append `.ini`."""
     ext = os.path.splitext(path)[1].lower()
     if ext in INI.EXTS: return path
     return path + ".ini"
 
   @staticmethod
   def format(value:Any) -> str:
-    """Convert Python value to INI-safe string."""
+    """
+    Convert a Python value to an INI-safe string.
+
+    `None` → empty, bool → `true`/`false`, numbers bare, str → quoted with escapes.
+    Other types raise, and so does a newline in a string: INI has no multiline syntax.
+    """
     if value is None: return ""
     if isinstance(value, bool): return "true" if value else "false"
     if isinstance(value, int): return str(value)
     if isinstance(value, float): return repr(value)
     if isinstance(value, str):
+      if "\n" in value or "\r" in value: raise ValueError("Newline in INI value")
       s = value.replace("\\", r"\\").replace('"', r'\"')
       return f'"{s}"'
     raise ValueError(f"Unsupported value type: {type(value).__name__}")
 
   @staticmethod
   def parse(text:str) -> Any:
-    """Parse INI value string to Python type."""
+    """
+    Parse an INI value: empty → `None`, quoted text unescaped, else bool, int, float or str.
+
+    Ints go through `base=0`, so `0x`, `0o` and `0b` prefixes are accepted.
+    """
     if not text: return None
     text = text.strip()
     if not text: return None
@@ -63,15 +74,20 @@ class INI:
 
   @staticmethod
   def _strip_inline_comment(text:str) -> str:
-    """Strip inline comment from unquoted INI value."""
+    """Strip a `;` or `#` inline comment from an unquoted INI value."""
     for i, ch in enumerate(text):
-      if ch in ";#":
-        return text[:i].rstrip()
+      if ch in ";#": return text[:i].rstrip()
     return text
 
   @staticmethod
   def load(path:str) -> dict:
-    """Load an INI file into a nested dict."""
+    """
+    Load an INI file into a nested dict, `{}` when missing.
+
+    Keys before the first `[section]` land at the top level, each section becomes a sub-dict.
+    Values pass through `parse`: an unquoted value loses its `;`/`#` inline comment, a quoted
+    value ends at its closing quote with the rest of the line dropped.
+    """
     cfg = get_context()
     path = INI._ensure_ext(path)
     path = PATH.resolve(path, read=True)
@@ -100,15 +116,20 @@ class INI:
 
   @staticmethod
   def save(
-    path: str,
-    data: dict,
-    comment_section: dict|None = None,
-    comment_field: dict|None = None,
-    comment_section_char: str = "# ",
-    comment_field_char: str = " # ",
+    path:str,
+    data:dict,
+    comment_section:dict|None = None,
+    comment_field:dict|None = None,
+    comment_section_char:str = "# ",
+    comment_field_char:str = " # ",
   ) -> None:
-    """Save a dict to an INI file with optional comments."""
-    cfg = get_context()
+    """
+    Save a dict as INI: scalar keys first, then dict values as `[section]` blocks.
+
+    A value given as a `(value, comment)` pair gets a trailing comment. `comment_section` maps
+    section → text written above the header, `comment_field` maps section → `{key: comment}`
+    and wins over pair comments, its `None` key holding the top-level fields.
+    """
     path = DIR._resolve_write(INI._ensure_ext(path), "")
     comment_section = comment_section or {}
     comment_field = comment_field or {}
@@ -117,37 +138,39 @@ class INI:
       for line in str(text).splitlines():
         line = line.strip()
         if line: f.write(f"{comment_section_char}{line}\n")
-    with open(path, "w", encoding=cfg.encoding) as file:
-      wrote_anything = False
-      top_field_comments = comment_field.get(None, {}) or {}
-      for key, value in list(data.items()):
-        if isinstance(value, dict): continue
+    # built whole, then handed to the atomic FILE.save: a failure here cannot touch the target
+    file = io.StringIO()
+    wrote_anything = False
+    top_field_comments = comment_field.get(None, {}) or {}
+    for key, value in list(data.items()):
+      if isinstance(value, dict): continue
+      inline_comment = None
+      val = value
+      if isinstance(value, tuple) and len(value) == 2:
+        val, inline_comment = value
+      if key in top_field_comments:
+        inline_comment = top_field_comments[key]
+      line = f"{key} = {INI.format(val)}"
+      if inline_comment:
+        line += f"{comment_field_char}{inline_comment}"
+      file.write(line + "\n")
+      wrote_anything = True
+    for section, content in data.items():
+      if not isinstance(content, dict): continue
+      if wrote_anything: file.write("\n")
+      write_comment_lines(file, comment_section.get(section, ""))
+      file.write(f"[{section}]\n")
+      section_comment_map = comment_field.get(section, {}) or {}
+      for key, value in content.items():
         inline_comment = None
         val = value
         if isinstance(value, tuple) and len(value) == 2:
           val, inline_comment = value
-        if key in top_field_comments:
-          inline_comment = top_field_comments[key]
+        if key in section_comment_map:
+          inline_comment = section_comment_map[key]
         line = f"{key} = {INI.format(val)}"
         if inline_comment:
           line += f"{comment_field_char}{inline_comment}"
         file.write(line + "\n")
-        wrote_anything = True
-      for section, content in data.items():
-        if not isinstance(content, dict): continue
-        if wrote_anything: file.write("\n")
-        write_comment_lines(file, comment_section.get(section, ""))
-        file.write(f"[{section}]\n")
-        section_comment_map = comment_field.get(section, {}) or {}
-        for key, value in content.items():
-          inline_comment = None
-          val = value
-          if isinstance(value, tuple) and len(value) == 2:
-            val, inline_comment = value
-          if key in section_comment_map:
-            inline_comment = section_comment_map[key]
-          line = f"{key} = {INI.format(val)}"
-          if inline_comment:
-            line += f"{comment_field_char}{inline_comment}"
-          file.write(line + "\n")
-        wrote_anything = True
+      wrote_anything = True
+    FILE.save(path, file.getvalue())

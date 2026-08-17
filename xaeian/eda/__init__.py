@@ -14,6 +14,7 @@ __all__ = [
   "clean_step", "clean_footprint",
 ]
 
+# KiCad needs `sexpdata`, so it joins the public API only when the extra is installed
 try:
   from .kicad import KiCad
   __all__ += ["KiCad"]

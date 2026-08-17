@@ -1,13 +1,6 @@
 # xaeian/media/meta.py
 
-"""
-Metadata removal for PDFs and images.
-
-Example:
-  >>> from xaeian.media.meta import scrub_metadata
-  >>> scrub_metadata("report.pdf")
-  >>> scrub_metadata("photo.jpg", inplace=True)
-"""
+"""Metadata removal for PDFs and images."""
 
 import os, sys
 from xaeian import Print, Color as c
@@ -15,16 +8,13 @@ from .utils import PDF_EXTS, IMG_EXTS, require_file
 
 p = Print()
 
+#---------------------------------------------------------------------------------------------- API
+
 def scrub_metadata(src:str, dst:str|None=None, inplace:bool=False) -> str:
-  """Remove metadata from file: auto-detects PDF vs image.
+  """
+  Remove metadata from a file: auto-detects PDF vs image.
 
-  Args:
-    src: Input file path.
-    dst: Output path. None = auto (see `inplace`).
-    inplace: If True and dst is None, overwrite source. Otherwise add -nometa suffix.
-
-  Returns:
-    Output file path.
+  With `dst` None: overwrite source when `inplace`, else write `<base>-nometa<ext>`.
   """
   src = require_file(src, "Input")
   ext = os.path.splitext(src)[1].lower()
@@ -36,6 +26,8 @@ def scrub_metadata(src:str, dst:str|None=None, inplace:bool=False) -> str:
     return img_scrub_metadata(src, dst, inplace)
   raise ValueError(f"Unsupported format: {ext} (expected PDF or image)")
 
+#---------------------------------------------------------------------------------------------- CLI
+
 EXAMPLES = """
 examples:
   xn meta report.pdf             Strip PDF metadata → report-nometa.pdf
@@ -46,7 +38,8 @@ examples:
 
 def main():
   from ..cli._args import _make_parser, _add_help
-  parser = _make_parser("Remove metadata from PDFs and images (auto-detects by extension)", EXAMPLES)
+  parser = _make_parser("Remove metadata from PDFs and images (auto-detects by extension)",
+    EXAMPLES)
   parser.add_argument("src", help="Input file path")
   parser.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
     help="Output path (default: <n>-nometa.<ext>)")
@@ -66,10 +59,10 @@ def main():
   except Exception as e:
     p.err(f"Failed to scrub {c.ORANGE}{name}{c.END} | {e}")
     sys.exit(1)
-  out_name = os.path.basename(result)
-  if args.inplace:
+  if os.path.abspath(result) == os.path.abspath(args.src):
     p.ok(f"Scrubbed {c.ORANGE}{name}{c.END} {c.GREY}(in-place){c.END}")
   else:
+    out_name = os.path.basename(result)
     p.ok(f"Scrubbed {c.ORANGE}{name}{c.END} → {c.BLUE}{out_name}{c.END}")
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-#---------------------------------------------------------------------------------- Core config
+#-------------------------------------------------------------------------------------- Core config
 
 def _default_root_path() -> str:
   if getattr(sys, "frozen", False): return os.path.dirname(sys.executable)
@@ -17,15 +17,15 @@ def _default_root_path() -> str:
 @dataclass
 class Config:
   """
-  Global path and IO configuration.
+  Path and IO configuration.
 
   Attributes:
     bundle: Use PyInstaller bundle (`_MEIPASS`) when available.
-    root_path: Base directory for resolving relative paths.
+    root_path: Base for relative paths, defaults to the executable dir when frozen, else cwd.
     auto_resolve: Join relative paths with `root_path` when `True`.
     posix_slash: Normalize backslashes to `"/"` when `True`.
     clean: Collapse `"//"` and `"/./"` segments when `True`.
-    encoding: Default text encoding for file operations.
+    encoding: Text encoding for reads and writes, ignored in binary mode.
   """
   bundle: bool = False
   root_path: str|None = None
@@ -40,16 +40,15 @@ class Config:
     elif not os.path.isabs(self.root_path):
       self.root_path = os.path.abspath(self.root_path)
 
-_context: ContextVar[Config] = ContextVar(
-  "xaeian_files_config", default=Config()
-)
+# The default Config is built at import, so its `root_path` snapshots the cwd at import time.
+_context: ContextVar[Config] = ContextVar("xaeian_files_config", default=Config())
 
 def get_context() -> Config:
-  """Get current configuration for this context/thread."""
+  """Configuration active for this context/thread."""
   return _context.get()
 
 def set_context(**overrides) -> Config:
-  """Set global file context configuration."""
+  """Apply config overrides to this context/thread; `file_context()` scopes them to a block."""
   cfg = get_context()
   new_cfg = replace(cfg, **overrides)
   _context.set(new_cfg)

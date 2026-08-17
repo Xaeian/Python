@@ -1,11 +1,11 @@
 # xaeian/db/abstract_async.py
 
-"""Async database base class."""
+"""Driver-independent async interface behind `AsyncDatabase`."""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from ..log import Logger, Print
 from typing import NoReturn, Any
+from ..log import Logger, Print
 
 from .errors import DatabaseError
 from .utils import (
@@ -13,18 +13,7 @@ from .utils import (
 )
 
 class AbstractAsyncDatabase(ABC):
-  """
-  Async database base class.
-
-  Auto-commits per call, or batch operations in `transaction()`.
-
-  Example:
-    >>> await db.exec("INSERT INTO users (name) VALUES (?)", ("Jan",))
-    >>> async with db.transaction():
-    ...   await db.insert("orders", {"user_id": 1, "total": 99.50})
-    ...   await db.update("users", {"balance": 0}, "id = ?", user_id)
-  """
-
+  """Auto-commits per call unless inside `transaction()`; driver errors raise `DatabaseError`."""
   def __init__(self):
     self.db_name: str|None = None
     self.log: Logger|Print|None = None
@@ -49,9 +38,10 @@ class AbstractAsyncDatabase(ABC):
 
   def _debug(self, op:str, sql:str, params:tuple):
     s = " ".join(sql.split())[:100]
-    print(f"[{self.db_name or 'db'}] {op}: {s} {params if params else ''}")
+    print(f"[{self.db_name or 'db'}] {op}: {s} {params or ''}")
 
   def _rowcount(self, cur) -> int:
+    """Row count clamped to 0, since drivers report -1 when it is unknown."""
     return max(0, cur.rowcount) if cur.rowcount is not None else 0
 
   def _err(self, op:str, exc:Exception, sql:str|None=None, params:tuple|None=None) -> NoReturn:
@@ -61,15 +51,20 @@ class AbstractAsyncDatabase(ABC):
 
   @abstractmethod
   async def conn(self):
-    """Create new standalone connection (outside pool)."""
+    """Create new connection outside the pool or persistent connection."""
     raise NotImplementedError
 
   @abstractmethod
   def transaction(self):
-    """Transaction context manager."""
+    """
+    Commit on exit, roll back on exception. Nesting raises `RuntimeError`.
+
+    The active connection is instance state, so tasks sharing the instance run their queries
+    inside the transaction as well.
+    """
     raise NotImplementedError
 
-  #---------------------------------------------------------------------------------- Lifecycle
+  #-------------------------------------------------------------------------------------- Lifecycle
 
   @property
   def pool(self):
@@ -77,16 +72,11 @@ class AbstractAsyncDatabase(ABC):
     return None
 
   async def start(self):
-    """Initialize connection pool or persistent connection.
+    """
+    Initialize connection pool or persistent connection.
 
-    Called automatically on first query (lazy init), or explicitly
-    for eager initialization (e.g. in FastAPI lifespan).
-
-    Example:
-      >>> await db.start()
-      >>> # or
-      >>> async with db:
-      ...   await db.get_dicts("SELECT * FROM users")
+    Happens lazily on the first query; call it, or use `async with db:`, for eager setup
+    (FastAPI lifespan).
     """
     pass
 
@@ -101,7 +91,7 @@ class AbstractAsyncDatabase(ABC):
   async def __aexit__(self, *exc):
     await self.close()
 
-  #------------------------------------------------------------------------------------ Execute
+  #---------------------------------------------------------------------------------------- Execute
 
   @abstractmethod
   async def exec(self, sql:str, params=None) -> int:
@@ -110,24 +100,34 @@ class AbstractAsyncDatabase(ABC):
 
   @abstractmethod
   async def exec_many(self, sql:str, params_list:list) -> int:
-    """Execute statement with multiple parameter sets."""
+    """Execute the statement once per parameter tuple. Returns affected row count."""
     raise NotImplementedError
 
   @abstractmethod
   async def exec_batch(self, sqls:list[tuple[str, Any]]|list[str]|str) -> int:
-    """Execute multiple statements in one transaction."""
+    """
+    Execute multiple statements in one transaction, returning total affected rows.
+
+    `sqls`: semicolon-separated string, list of statements, or list of `(sql, params)` tuples.
+    """
     raise NotImplementedError
 
-  #-------------------------------------------------------------------------------------- Query
+  #------------------------------------------------------------------------------------------ Query
 
   @abstractmethod
   async def get_rows(self, sql:str, params=None, json:list[int]|None=None) -> list[list]:
-    """Fetch all rows as lists."""
+    """Fetch all rows as lists, parsing the column indices listed in `json`."""
     raise NotImplementedError
 
   @abstractmethod
-  async def get_dicts(self, sql:str, params=None, cols:list[str]|None=None, json:list[str]|None=None) -> list[dict]:
-    """Fetch all rows as dicts."""
+  async def get_dicts(
+    self,
+    sql:str,
+    params=None,
+    cols:list[str]|None = None,
+    json:list[str]|None = None,
+  ) -> list[dict]:
+    """Fetch all rows as dicts, `cols` overriding cursor names, `json` naming JSON columns."""
     raise NotImplementedError
 
   async def get_row(self, sql:str, params=None, json:list[int]|None=None) -> list|None:
@@ -141,22 +141,22 @@ class AbstractAsyncDatabase(ABC):
     return rows[0] if rows else None
 
   async def get_column(self, sql:str, params=None, json:bool=False) -> list:
-    """Fetch first column of all rows."""
+    """Fetch first column of all rows, `json=True` parsing each value as JSON."""
     rows = await self.get_rows(sql, params)
     if not rows: return []
     col = [r[0] for r in rows]
     return [parse_json(v) for v in col] if json else col
 
   async def get_value(self, sql:str, params=None, json:bool=False) -> Any:
-    """Fetch single value."""
+    """Fetch first value of first row, `None` when no row; `json=True` parses it as JSON."""
     row = await self.get_row(sql, params)
     if not row: return None
     return parse_json(row[0]) if json else row[0]
 
-  #--------------------------------------------------------------------------------------- CRUD
+  #------------------------------------------------------------------------------------------- CRUD
 
   async def insert(self, table:str, data:dict, returning:str|None=None) -> int|Any:
-    """Insert single row. Returns row count or returned column value."""
+    """Insert single row. With `returning` yields that column's value instead of the row count."""
     if returning: return await self._insert_returning(table, data, returning)
     sql, params = _insert_sql(table, data, self.ph)
     return await self.exec(sql, params)
@@ -186,12 +186,25 @@ class AbstractAsyncDatabase(ABC):
 
   async def exists(self, table:str, where:str, params=None) -> bool:
     """Check if any row matches WHERE clause."""
-    return await self.get_value(f"SELECT 1 FROM {ident(table)} WHERE {where} LIMIT 1", params) is not None
+    return await self.get_value(
+      f"SELECT 1 FROM {ident(table)} WHERE {where} LIMIT 1", params
+    ) is not None
 
-  #------------------------------------------------------------------------------ Query Builder
+  #---------------------------------------------------------------------------------- Query Builder
 
-  async def find(self, table:str, order:str|None=None, limit:int|None=None, json:list[str]|None=None, **where) -> list[dict]:
-    """Simple query builder with kwargs."""
+  async def find(
+    self,
+    table:str,
+    order:str|None = None,
+    limit:int|None = None,
+    json:list[str]|None = None,
+    **where,
+  ) -> list[dict]:
+    """
+    Query builder, `**where` being `column=value` conditions joined with AND.
+
+    `order` is raw SQL appended after ORDER BY, never place user input there.
+    """
     sql, params = _find_sql(table, order, limit, self.ph, where)
     return await self.get_dicts(sql, params, json=json)
 
@@ -200,19 +213,40 @@ class AbstractAsyncDatabase(ABC):
     rows = await self.find(table, limit=1, json=json, **where)
     return rows[0] if rows else None
 
-  async def paginate(self, sql:str, params=None, page:int=1, per_page:int=20, json:list[str]|None=None) -> dict:
-    """Paginate query results."""
+  async def paginate(
+    self,
+    sql:str,
+    params=None,
+    page:int = 1,
+    per_page:int = 20,
+    json:list[str]|None = None,
+  ) -> dict:
+    """
+    Paginate a SELECT written without LIMIT/OFFSET.
+
+    `page` is 1-based. Returns `{"items", "total", "page", "pages"}`.
+    """
     offset = (page - 1) * per_page
     items = await self.get_dicts(f"{sql} LIMIT {per_page} OFFSET {offset}", params, json=json)
     total = await self.get_value(f"SELECT COUNT(*) FROM ({sql}) _c", params) or 0
     pages = (total + per_page - 1) // per_page if total else 0
     return {"items": items, "total": total, "page": page, "pages": pages}
 
-  async def upsert(self, table:str, data:dict, on:str|list[str], update:list[str]|None=None) -> int:
-    """Insert or update on conflict. Override in subclasses."""
+  async def upsert(
+    self,
+    table:str,
+    data:dict,
+    on:str|list[str],
+    update:list[str]|None = None,
+  ) -> int:
+    """
+    Insert, or update the columns in `update` when `on` conflicts. Dialect-specific.
+
+    `update` defaults to every column of `data` except those named in `on`.
+    """
     raise NotImplementedError(f"upsert not implemented for {self.__class__.__name__}")
 
-  #------------------------------------------------------------------------------------- Schema
+  #----------------------------------------------------------------------------------------- Schema
 
   @abstractmethod
   async def has_table(self, name:str) -> bool:

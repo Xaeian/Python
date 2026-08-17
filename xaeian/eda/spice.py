@@ -3,21 +3,13 @@
 """
 NgSpice simulation runner with template-based netlists.
 
-Run SPICE simulations from Python: template substitution,
-batch execution, ASCII output parsing, CSV caching,
-and parallel parametric sweeps.
-
-Requires: `ngspice` binary on PATH (or explicit path).
+Template substitution, batch execution, ASCII output parsing, CSV caching and parallel
+parametric sweeps. Requires the `ngspice` binary on PATH or an explicit path.
 
 Example:
-  >>> from xaeian.eda.spice import Simulation
   >>> sim = Simulation("inverter", lib="C:/Kicad/Spice")
   >>> data = sim.run(RLOAD="2.2k")
-  >>> data["V(OUT)"]  # list[float]
-
   >>> results = sim.sweep(RLOAD=["1k", "2.2k", "4.7k"])
-  >>> for label, d in results.items():
-  ...   print(label, len(d["TIME"]))
 """
 
 import os, re, glob
@@ -28,46 +20,27 @@ from ..files import FILE, DIR, CSV
 from ..xstring import replace_map
 from ..log import Print
 
-#-------------------------------------------------------------------------------- Output parser
+#------------------------------------------------------------------------------------ Output parser
 
 def parse_output(path:str) -> dict[str, list[float]]:
-  """Parse ngspice ASCII wrdata/print output → `{column: [values]}`.
+  """
+  Parse ngspice ASCII wrdata/print output → `{column: [values]}`.
 
-  Handles two formats:
-    - **nutmeg**: header block with variable names → `{"TIME": [...], "V(OUT)": [...]}`
-    - **wrdata**: positional columns → `{"x": [...], "col0": [...], "col1": [...]}`
-      Signal names are not in wrdata format; use `Simulation.run()`
-      for automatic name remapping from template.
-
-  Args:
-    path: Path to ngspice output file.
-
-  Returns:
-    Dict mapping column names to value lists.
-
-  Raises:
-    FileNotFoundError: Output file missing (simulation likely failed).
-    ValueError: Cannot parse output format.
-
-  Example:
-    >>> data = parse_output("result.out")  # nutmeg
-    >>> data["V(OUT)"][:3]
-    [0.0, 0.0012, 0.0025]
-    >>> data = parse_output("wrdata.out")  # wrdata
-    >>> data["x"], data["col0"]
+  nutmeg carries variable names in its header → `{"TIME": [...], "V(OUT)": [...]}`.
+  wrdata is positional only → `{"x": [...], "col0": [...]}`; use `Simulation.run()`
+  to remap those keys onto the signal names taken from the template.
   """
   text = FILE.load(path)
   if not text: raise FileNotFoundError(f"Empty or missing: {path}")
-  # Detect format by looking for nutmeg header
   if "Variables:" in text and "Values:" in text:
     return _parse_nutmeg(text)
   return _parse_wrdata(text)
 
 def _parse_wrdata(text:str) -> dict[str, list[float]]:
-  """Parse wrdata format: `x  y` per line, blocks separated by blanks.
+  """
+  Parse wrdata format: `x y` per line, blocks separated by blanks.
 
-  First column (x/sweep var) captured from first block.
-  Y-values keyed as `col0`, `col1`, ... - remapped by `Simulation`.
+  The x column is taken from the first block only, each block's y-values keyed `col{block}`.
   """
   lines = text.strip().splitlines()
   blocks: list[list[str]] = []
@@ -142,25 +115,19 @@ def _parse_nutmeg(text:str) -> dict[str, list[float]]:
           idx = 0
   return data
 
-#----------------------------------------------------------------------------- Template loading
+#--------------------------------------------------------------------------------- Template loading
 
 def _load_template(name:str, path:str, lib:str) -> str:
-  """Load .cir template, inline .include directives, append .sp commands.
+  """
+  Load `{path}/{name}.cir`, inline its `.include` directives, append `{name}.sp` commands.
 
-  Args:
-    name: Circuit base name (without extension).
-    path: Directory containing circuit files.
-    lib: Spice library path (replaces `{LIB}` and `{LSM}`).
-
-  Returns:
-    Complete netlist string ready for placeholder substitution.
+  `lib` fills the `{LIB}` and `{LSM}` placeholders. A trailing `.end` is stripped so the
+  appended commands stay inside the netlist.
   """
   cir_file = os.path.join(path, f"{name}.cir")
   cir = FILE.load(cir_file).rstrip()
   if cir.endswith(".end"): cir = cir[:-4]
-  # Replace library path placeholders
   cir = cir.replace("{LSM}", lib).replace("{LIB}", lib)
-  # Inline .include directives
   for line in cir.splitlines():
     if line.strip().lower().startswith(".include"):
       inc_path = line.split(None, 1)[1].strip('"').strip("'")
@@ -168,41 +135,32 @@ def _load_template(name:str, path:str, lib:str) -> str:
         inc = FILE.load(inc_path).strip()
         cir = cir.replace(line, inc)
       except FileNotFoundError:
-        pass  # leave original .include if file not found
-  # Append simulation commands (.sp file)
+        pass # missing include stays as-is, ngspice may still resolve it
   sp_file = os.path.join(path, f"{name}.sp")
   if os.path.exists(sp_file):
     cir += "\n" + FILE.load(sp_file)
   return cir
 
-#----------------------------------------------------------------------------- Simulation class
+#--------------------------------------------------------------------------------- Simulation class
 
 class Simulation:
-  """NgSpice simulation runner with template substitution and caching.
+  """
+  Runner bound to one circuit template, with optional CSV caching.
 
-  Loads `{name}.cir` + `{name}.sp` from `path`, substitutes
-  placeholders like `{RLOAD}`, runs ngspice in batch mode,
-  parses output → `dict[str, list[float]]`.
+  Loads `{name}.cir` + `{name}.sp` from `path`, substitutes placeholders like `{RLOAD}`,
+  runs ngspice in batch mode, parses output → `dict[str, list[float]]`.
 
   Args:
-    name: Circuit name. If `None`, auto-detected from `.cir` in `path`.
-    path: Directory with `.cir` and `.sp` files.
-    lib: Spice model library path (replaces `{LIB}` in netlist).
-    params: Default placeholder values (overridable per run).
-    ngspice: Path to ngspice binary (auto-detected if `None`).
-    work_dir: Directory for temp files and cache.
-    rename: Column rename mapping applied to results.
-    scale: Column scale factors applied to results.
-    timeout: Simulation timeout in seconds.
-    verbose: Print status messages.
-
-  Example:
-    >>> sim = Simulation("buck", lib="/opt/spice/lib",
-    ...   params={"RLOAD": "10", "CIN": "100u"})
-    >>> data = sim.run(RLOAD="22")
-    >>> sim.sweep(RLOAD=["10", "22", "47"], cache=True)
+    name: Circuit name, taken from the first `.cir` found in `path` when `None`.
+    path: Directory holding `{name}.cir` and the optional `{name}.sp`.
+    lib: Spice model library path, fills `{LIB}` and `{LSM}` in the netlist.
+    params: Default placeholder values, overridable per run.
+    ngspice: Binary path, resolved from PATH when `None`.
+    work_dir: Temp files and cache, defaults to `path`.
+    rename: Old → new column names applied to every result.
+    scale: Per-column multipliers applied to every result.
+    timeout: Seconds per simulation.
   """
-
   def __init__(
     self,
     name:str|None = None,
@@ -224,34 +182,25 @@ class Simulation:
     self.timeout = timeout
     self.verbose = verbose
     self._print = Print()
-    # Auto-detect circuit name from .cir file
     if name is None:
       cir_files = glob.glob(os.path.join(path, "*.cir"))
       if not cir_files: raise FileNotFoundError(f"No .cir files in {path}")
       name = os.path.splitext(os.path.basename(cir_files[0]))[0]
     self.name = name
-    # Find ngspice binary
     self._ngspice = ngspice or which("ngspice")
     if not self._ngspice:
       raise RuntimeError("ngspice not found on PATH. Install or pass ngspice= path.")
-    # Work directory for temp files
     self.work_dir = work_dir or path
     DIR.ensure(self.work_dir)
-    # Load and prepare template
     self._template = _load_template(name, path, lib)
 
-  #--------------------------------------------------------------------------- Internal methods
+  #------------------------------------------------------------------------------- Internal methods
 
   def _render(self, run_id:str, **overrides) -> str:
-    """Render netlist with placeholder substitution.
-
-    Merges default params with overrides, replaces `{KEY}` patterns,
-    and injects output file path as `{FILE}`.
-    """
+    """Render netlist: defaults merged with `overrides`, output path injected as `{FILE}`."""
     merged = {**self.params, **overrides}
     out_path = os.path.join(self.work_dir, f"{self.name}_{run_id}.out")
     merged["FILE"] = out_path
-    # Build prefix/suffix-free replacement (bare {KEY} style)
     cir = replace_map(self._template, merged, "{", "}")
     return cir
 
@@ -281,10 +230,8 @@ class Simulation:
   def _remap_wrdata(self, data:dict[str, list[float]]) -> dict[str, list[float]]:
     """Remap wrdata `x`/`col0`/`col1` keys to proper signal names."""
     if "col0" not in data: return data
-    # Remap x → sweep variable
     if "x" in data:
       data[self._sweep_var()] = data.pop("x")
-    # Remap col0, col1, ... → variable names from template
     vars = self._wrdata_vars()
     for i, var_name in enumerate(vars):
       key = f"col{i}"
@@ -299,78 +246,57 @@ class Simulation:
     return os.path.join(self.work_dir, f"#{run_id}.cir")
 
   def _apply_transforms(self, data:dict[str, list[float]]) -> dict[str, list[float]]:
-    """Apply rename and scale transforms to result columns."""
-    # Rename
+    """Apply `rename` (its keys uppercased to match parsed columns) then `scale`."""
     for old, new in self.rename.items():
       old_upper = old.upper()
       if old_upper in data:
         data[new] = data.pop(old_upper)
-    # Scale
     for col, factor in self.scale.items():
       if col in data:
         data[col] = [v * factor for v in data[col]]
     return data
 
-  #--------------------------------------------------------------------------------- Public API
+  #------------------------------------------------------------------------------------- Public API
 
   def run(self, cache:bool=False, **overrides) -> dict[str, list[float]]:
-    """Run single simulation with given parameter overrides.
+    """
+    Run one simulation with `overrides` applied on top of the default params.
 
-    Args:
-      cache: Reuse cached CSV if available.
-      **overrides: Parameter values overriding defaults.
-
-    Returns:
-      Dict mapping column names to value lists.
-
-    Raises:
-      RuntimeError: If ngspice fails or output cannot be parsed.
-
-    Example:
-      >>> data = sim.run(RLOAD="2.2k", CIN="47u")
-      >>> len(data["TIME"])
-      1000
+    `cache` both reads and writes a CSV keyed by the merged parameter values.
+    Raises `RuntimeError` when ngspice produces no output or the output cannot be parsed.
     """
     merged = {**self.params, **overrides}
     csv_path = self._cache_path(merged)
-    # Check cache
     if cache and os.path.exists(csv_path):
       if self.verbose: self._print.inf(f"Cache hit: {csv_path}")
       rows = CSV.load(csv_path, types={})
       if rows:
         # CSV.load → list[dict] → transpose to dict[str, list]
         result = {k: [r[k] for r in rows] for k in rows[0]}
-        # Cast to float
         for k in result:
           result[k] = [float(v) for v in result[k]]
         return result
-    # Generate unique run id from params
     run_id = "_".join(f"{k}{v}" for k, v in sorted(merged.items()))
     run_id = re.sub(r'[^\w]', '', run_id)[:80] or "run"
-    # Render netlist
     cir_text = self._render(run_id, **overrides)
     cir_path = self._cir_path(run_id)
     out_path = self._out_path(run_id)
-    # Clean previous outputs
     FILE.remove(cir_path)
     FILE.remove(out_path)
-    # Write netlist
     FILE.save(cir_path, cir_text)
     if self.verbose:
       label = ", ".join(f"{k}={v}" for k, v in sorted(merged.items()) if k != "FILE")
       self._print.run(f"ngspice {self.name} ({label})")
-    # Run ngspice in batch mode
     result = cmd_run(
       [self._ngspice, "-b", cir_path],
       capture=True, timeout=self.timeout,
     )
     if result.returncode != 0:
       stderr = (result.stderr or "").strip()
-      # Don't fail on warnings - ngspice returns non-zero for warnings too
+      # ngspice returns non-zero on warnings too, so the output file decides success
       if not os.path.exists(out_path):
         FILE.remove(cir_path)
         raise RuntimeError(f"ngspice failed (exit {result.returncode}):\n{stderr}")
-    # Parse output
     if not os.path.exists(out_path):
       FILE.remove(cir_path)
       raise RuntimeError(
@@ -382,13 +308,12 @@ class Simulation:
     except (ValueError, FileNotFoundError) as e:
       raise RuntimeError(f"Failed to parse output: {e}")
     finally:
-      # Cleanup temp files
       FILE.remove(cir_path)
       FILE.remove(out_path)
     data = self._remap_wrdata(data)
     data = self._apply_transforms(data)
-    if self.verbose: self._print.ok(f"{self.name} done ({sum(len(v) for v in data.values())} values)")
-    # Cache result
+    if self.verbose:
+      self._print.ok(f"{self.name} done ({sum(len(v) for v in data.values())} values)")
     if cache and data:
       keys = list(data.keys())
       n = len(next(iter(data.values())))
@@ -403,38 +328,22 @@ class Simulation:
     max_workers:int|None = None,
     **param_lists,
   ) -> dict[str, dict[str, list[float]]]:
-    """Run parametric sweep over one or more parameters.
+    """
+    Run one simulation per value of `param_lists`, results keyed by label.
 
-    Each parameter gets a list of values. Runs all combinations
-    (single param) or zipped values (multiple params).
-
-    Args:
-      cache: Reuse cached CSV files.
-      parallel: Run simulations in parallel threads.
-      max_workers: Thread pool size (`None` = auto).
-      **param_lists: Parameter name → list of values.
-
-    Returns:
-      Dict keyed by parameter value (or combo string) → result dict.
-
-    Example:
-      >>> results = sim.sweep(RLOAD=["1k", "2.2k", "4.7k"])
-      >>> results["2.2k"]["V(OUT)"]
-      [0.0, 0.12, ...]
-
-      >>> results = sim.sweep(R=["1k", "2k"], C=["10u", "100u"])
-      >>> results["R=1k_C=10u"]["V(OUT)"]
+    Several parameters are zipped, not combined cartesian, so the shortest list wins.
+    The label is the bare value for a single parameter, `"R=1k_C=10u"` for several.
+    A job that raises is stored as an empty dict, the sweep never aborts.
+    `cache` is on here and off in `run()`, so a repeated sweep replays CSVs instead of
+    re-simulating; pass `cache=False` after editing the netlist.
     """
     if not param_lists: raise ValueError("No parameters to sweep")
-    # Build list of (label, overrides) pairs
     keys = list(param_lists.keys())
     values_lists = list(param_lists.values())
-    # Single param → simple labels; multi param → combo labels
     if len(keys) == 1:
       key = keys[0]
       jobs = [(str(v), {key: v}) for v in values_lists[0]]
     else:
-      # Zip values (all lists must be same length)
       zipped = list(zip(*values_lists))
       jobs = []
       for combo in zipped:
@@ -470,7 +379,7 @@ class Simulation:
     params = ", ".join(f"{k}={v}" for k, v in self.params.items())
     return f"<Simulation {self.name} ({params})>"
 
-#----------------------------------------------------------------------------------------- Demo
+#--------------------------------------------------------------------------------------------- Demo
 
 if __name__ == "__main__":
   print("xaeian.eda.spice - NgSpice simulation runner")
@@ -480,7 +389,6 @@ if __name__ == "__main__":
   print('  data = sim.run(RLOAD="2.2k")')
   print('  results = sim.sweep(RLOAD=["1k", "2.2k", "4.7k"])')
   print()
-  # Test parser with synthetic data
   test_nutmeg = """Title: Test
 Date: Mon Jan 01 00:00:00 2025
 Plotname: Transient
@@ -510,7 +418,6 @@ Values:
   for k, v in data.items():
     print(f"  {k}: {v}")
   print()
-  # Test wrdata parser
   test_wrdata = """0  0.0
 1  1.2
 2  2.4

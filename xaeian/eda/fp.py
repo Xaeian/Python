@@ -1,30 +1,29 @@
 # xaeian/eda/fp.py
 
-"""KiCad footprint generator.
+"""
+KiCad `.kicad_mod` footprint generator.
 
-Provides `Footprint` builder class for generating `.kicad_mod` files
-with properties, drawing primitives, pads, and 3D model references.
-Output is compact single-line S-expressions for minimal file size.
-
-Presets: `XS`, `S`, `M`, `L`, `XL` size tiers with line/font standards.
-Ref designators: `REF["connector"]` → `"J**"`.
+`Footprint` emits compact single-line S-expressions, all dimensions in mm. Style presets `XXS`
+to `XL` set line widths and font per component size, `REF["connector"]` → `"J**"`.
 
 Example:
-  >>> from xaeian.eda.fp import Footprint, REF, S
   >>> fp = Footprint("SOT-23", ref=REF["transistor"], style=S)
   >>> fp.properties()
   >>> fp.pad_smd(1, -0.95, 0, 0.9, 0.8)
   >>> fp.model("${L3D}/SOT/SOT-23.step")
   >>> fp.save("./SOT.pretty")
 """
+
 import uuid
 from dataclasses import dataclass
 from ..files import FILE
 
+# `.kicad_mod` format date and the KiCad version claimed in the header
 FORMAT_VERSION = "20260206"
 GENERATOR_VERSION = "10.0"
 
 def uid() -> str:
+  """UUID4 string for KiCad element identity."""
   return str(uuid.uuid4())
 
 def fmt_number(v:float) -> str:
@@ -32,19 +31,19 @@ def fmt_number(v:float) -> str:
   if v == int(v): return str(int(v))
   return f"{v:g}"
 
-#-------------------------------------------------------------------------------------- Presets
+#------------------------------------------------------------------------------------------ Presets
 
 @dataclass
 class Style:
-  """Line widths and font settings for a size tier."""
-  silk: float         # SilkS outline width
-  silk_detail: float  # SilkS inner detail width
-  crtyd: float        # CrtYd width
-  fab: float          # Fab width
-  font_size: float    # Reference/Value font size
-  font_thick: float   # Reference/Value font thickness
+  """Line widths and the Reference/Value font for a size tier, in mm."""
+  silk: float
+  silk_detail: float # SilkS inner detail, `silk` is the body outline
+  crtyd: float
+  fab: float
+  font_size: float
+  font_thick: float
 
-# Size tiers: XXS (<1.5mm) → XS (1.5-3mm) → S (3-6mm) → M (6-15mm) → L (15-30mm) → XL (>30mm)
+# Body size per tier: XXS <1.5mm, XS 1.5-3mm, S 3-6mm, M 6-15mm, L 15-30mm, XL >30mm
 XXS = Style(silk=0.08, silk_detail=0.05, crtyd=0.05, fab=0.06, font_size=0.4, font_thick=0.06)
 XS = Style(silk=0.1, silk_detail=0.06, crtyd=0.05, fab=0.08, font_size=0.6, font_thick=0.08)
 S = Style(silk=0.12, silk_detail=0.08, crtyd=0.05, fab=0.1, font_size=0.8, font_thick=0.1)
@@ -52,7 +51,6 @@ M = Style(silk=0.15, silk_detail=0.1, crtyd=0.05, fab=0.12, font_size=1.0, font_
 L = Style(silk=0.2, silk_detail=0.12, crtyd=0.05, fab=0.15, font_size=1.2, font_thick=0.14)
 XL = Style(silk=0.25, silk_detail=0.15, crtyd=0.05, fab=0.2, font_size=1.5, font_thick=0.16)
 
-# Reference designators
 REF = {
   "connector": "J**",
   "resistor": "R**",
@@ -70,14 +68,11 @@ REF = {
   "motor": "M**",
 }
 
-#------------------------------------------------------------------------------------ Footprint
+#---------------------------------------------------------------------------------------- Footprint
 
 class Footprint:
-  """KiCad `.kicad_mod` footprint builder."""
-
-  def __init__(self, name:str, ref:str="REF**",
-    layer:str="F.Cu", style:Style=L,
-  ):
+  """Emits lines in call order, `build()` wraps them with the header and 3D models."""
+  def __init__(self, name:str, ref:str="REF**", layer:str="F.Cu", style:Style=L):
     self.name = name
     self.ref = ref
     self.layer = layer
@@ -88,9 +83,10 @@ class Footprint:
   def _add(self, line:str):
     self._lines.append(line)
 
-  #--------------------------------------------------------------------------------- Properties
+  #------------------------------------------------------------------------------------- Properties
 
-  def properties(self,
+  def properties(
+    self,
     ref_at:tuple = (0, 0, 0),
     ref_layer:str = "F.Fab",
     ref_font:tuple|None = None,
@@ -100,7 +96,12 @@ class Footprint:
     datasheet:str = "",
     description:str = "",
   ):
-    """Add Reference, Value, Datasheet, Description properties."""
+    """
+    Add Reference, Value, Datasheet, Description properties.
+
+    `*_at` is `(x, y, angle)`, `*_font` is `(size_x, size_y, thickness)` falling back to the
+    style. Datasheet and Description are always hidden and keep KiCad's default font.
+    """
     s = self.style
     font = ref_font or (s.font_size, s.font_size, s.font_thick)
     self._prop("Reference", self.ref, ref_at, ref_layer, font)
@@ -113,9 +114,7 @@ class Footprint:
         f' (effects (font (size 1.27 1.27) (thickness 0.15))))'
       )
 
-  def _prop(self, name:str, value:str,
-    at:tuple, layer:str, font:tuple,
-  ):
+  def _prop(self, name:str, value:str, at:tuple, layer:str, font:tuple):
     x, y, angle = at
     s1, s2, th = font
     self._add(
@@ -127,45 +126,39 @@ class Footprint:
     )
 
   def attr(self, kind:str = "through_hole"):
-    """Set footprint attribute."""
+    """Set footprint attribute: `through_hole` or `smd`."""
     self._add(f'\t(attr {kind})')
     self._add(f'\t(duplicate_pad_numbers_are_jumpers no)')
 
-  #------------------------------------------------------------------------- Drawing primitives
+  #----------------------------------------------------------------------------- Drawing primitives
 
-  def line(self, x1:float, y1:float, x2:float, y2:float,
-    width:float, layer:str,
-  ):
+  def line(self, x1:float, y1:float, x2:float, y2:float, width:float, layer:str):
     """Add `fp_line`."""
     self._add(
-      f'\t(fp_line (start {fmt_number(x1)} {fmt_number(y1)}) (end {fmt_number(x2)} {fmt_number(y2)})'
+      f'\t(fp_line (start {fmt_number(x1)} {fmt_number(y1)})'
+      f' (end {fmt_number(x2)} {fmt_number(y2)})'
       f' (stroke (width {fmt_number(width)}) (type solid))'
       f' (layer "{layer}") (uuid "{uid()}"))'
     )
 
-  def rect(self, x1:float, y1:float, x2:float, y2:float,
-    width:float, layer:str,
-  ):
+  def rect(self, x1:float, y1:float, x2:float, y2:float, width:float, layer:str):
     """Add rectangle as 4 `fp_line` segments."""
     self.line(x1, y1, x2, y1, width, layer)
     self.line(x2, y1, x2, y2, width, layer)
     self.line(x2, y2, x1, y2, width, layer)
     self.line(x1, y2, x1, y1, width, layer)
 
-  def filled_rect(self, x1:float, y1:float, x2:float, y2:float,
-    width:float, layer:str,
-  ):
+  def filled_rect(self, x1:float, y1:float, x2:float, y2:float, width:float, layer:str):
     """Add `fp_rect` with fill."""
     self._add(
-      f'\t(fp_rect (start {fmt_number(x1)} {fmt_number(y1)}) (end {fmt_number(x2)} {fmt_number(y2)})'
+      f'\t(fp_rect (start {fmt_number(x1)} {fmt_number(y1)})'
+      f' (end {fmt_number(x2)} {fmt_number(y2)})'
       f' (stroke (width {fmt_number(width)}) (type solid))'
       f' (fill yes) (layer "{layer}") (uuid "{uid()}"))'
     )
 
-  def circle(self, cx:float, cy:float, radius:float,
-    width:float, layer:str,
-  ):
-    """Add `fp_circle`."""
+  def circle(self, cx:float, cy:float, radius:float, width:float, layer:str):
+    """Add `fp_circle` from centre and radius."""
     self._add(
       f'\t(fp_circle (center {fmt_number(cx)} {fmt_number(cy)})'
       f' (end {fmt_number(cx + radius)} {fmt_number(cy)})'
@@ -173,8 +166,16 @@ class Footprint:
       f' (layer "{layer}") (uuid "{uid()}"))'
     )
 
-  def arc(self, sx:float, sy:float, mx:float, my:float,
-    ex:float, ey:float, width:float, layer:str,
+  def arc(
+    self,
+    sx:float,
+    sy:float,
+    mx:float,
+    my:float,
+    ex:float,
+    ey:float,
+    width:float,
+    layer:str,
   ):
     """Add `fp_arc` (3-point: start, midpoint, end)."""
     self._add(
@@ -194,10 +195,17 @@ class Footprint:
       f' (fill {"yes" if fill else "no"}) (layer "{layer}") (uuid "{uid()}"))'
     )
 
-  def text(self, txt:str, x:float, y:float, layer:str,
-    size:float = 1, thickness:float = 0.15, angle:float = 0,
+  def text(
+    self,
+    txt:str,
+    x:float,
+    y:float,
+    layer:str,
+    size:float = 1,
+    thickness:float = 0.15,
+    angle:float = 0,
   ):
-    """Add `fp_text`."""
+    """Add free `fp_text user`, unrelated to the Reference and Value properties."""
     self._add(
       f'\t(fp_text user "{txt}" (at {fmt_number(x)} {fmt_number(y)} {fmt_number(angle)})'
       f' (layer "{layer}") (uuid "{uid()}")'
@@ -205,14 +213,26 @@ class Footprint:
       f' (thickness {fmt_number(thickness)}))))'
     )
 
-  #--------------------------------------------------------------------------------------- Pads
+  #------------------------------------------------------------------------------------------- Pads
 
-  def pad_tht(self, num:int|str, x:float, y:float,
-    w:float, h:float, drill:float,
-    shape:str = "oval", rratio:float|None = None,
+  def pad_tht(
+    self,
+    num:int|str,
+    x:float,
+    y:float,
+    w:float,
+    h:float,
+    drill:float,
+    shape:str = "oval",
+    rratio:float|None = None,
     drill_offset:tuple|None = None,
   ):
-    """Add through-hole pad. Shape: `circle`, `oval`, `rect`, `roundrect`."""
+    """
+    Add through-hole pad. Shape: `circle`, `oval`, `rect`, `roundrect`.
+
+    `rratio` is the roundrect corner ratio, `drill_offset` is `(dx, dy)` of the hole relative to
+    the pad centre; both are omitted from the output when `None`.
+    """
     rr = f' (roundrect_rratio {rratio})' if rratio is not None else ""
     if drill_offset:
       dx, dy = drill_offset
@@ -226,12 +246,18 @@ class Footprint:
       f'{rr} (uuid "{uid()}"))'
     )
 
-  def pad_smd(self, num:int|str, x:float, y:float,
-    w:float, h:float,
-    shape:str = "roundrect", rratio:float = 0.25,
+  def pad_smd(
+    self,
+    num:int|str,
+    x:float,
+    y:float,
+    w:float,
+    h:float,
+    shape:str = "roundrect",
+    rratio:float = 0.25,
     layers:list[str]|None = None,
   ):
-    """Add SMD pad."""
+    """Add SMD pad, layers default to `F.Cu`, `F.Paste`, `F.Mask`."""
     if layers is None: layers = ["F.Cu", "F.Paste", "F.Mask"]
     rr = f' (roundrect_rratio {rratio})' if rratio is not None else ""
     ly = " ".join(f'"{l}"' for l in layers)
@@ -242,21 +268,23 @@ class Footprint:
     )
 
   def pad_npth(self, x:float, y:float, drill:float):
-    """Add non-plated through hole."""
+    """Add non-plated through hole, unnumbered and with no copper ring."""
     self._add(
       f'\t(pad "" np_thru_hole circle (at {fmt_number(x)} {fmt_number(y)})'
       f' (size {fmt_number(drill)} {fmt_number(drill)}) (drill {fmt_number(drill)})'
       f' (layers "*.Cu" "*.Mask") (uuid "{uid()}"))'
     )
 
-  #----------------------------------------------------------------------------------- 3D model
+  #--------------------------------------------------------------------------------------- 3D model
 
-  def model(self, path:str,
+  def model(
+    self,
+    path:str,
     offset:tuple = (0, 0, 0),
     scale:tuple = (1, 1, 1),
     rotate:tuple = (0, 0, 0),
   ):
-    """Add 3D model reference."""
+    """Add 3D model reference: `offset` in mm, `rotate` in degrees, all `(x, y, z)`."""
     ox, oy, oz = offset
     sx, sy, sz = scale
     rx, ry, rz = rotate
@@ -267,7 +295,7 @@ class Footprint:
       f' (rotate (xyz {fmt_number(rx)} {fmt_number(ry)} {fmt_number(rz)})))'
     )
 
-  #------------------------------------------------------------------------------------- Output
+  #----------------------------------------------------------------------------------------- Output
 
   def raw(self, text:str):
     """Add raw S-expression line."""
@@ -290,7 +318,7 @@ class Footprint:
     return "\n".join(header + self._lines + footer)
 
   def save(self, directory:str) -> str:
-    """Save `.kicad_mod` file to directory. Returns filepath."""
+    """Save as `<name>.kicad_mod` in `directory`, returns the path."""
     path = f"{directory}/{self.name}.kicad_mod"
     FILE.save(path, self.build())
     return path

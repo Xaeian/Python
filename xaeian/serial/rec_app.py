@@ -1,6 +1,11 @@
 # xaeian/serial/rec_app.py
 
-"""Multimeter recorder: continuous CSV log + space/enter capture, all-in-one."""
+"""
+Multimeter recorder: CSV row every `PERIOD_MS` plus space/enter capture to a second CSV.
+
+Writes `series-<date>.csv`, `capture-<date>.csv` and the raw console log `console-<date>.ansi`.
+Edit `recs` for your ports. The hotkeys need `keyboard`, which is not a package dependency.
+"""
 
 import threading, time
 from time import sleep
@@ -17,11 +22,13 @@ recs = [
 stop = threading.Event()
 
 def make_row() -> dict:
+  """Timestamp plus one column per recorder, keyed by `Recorder.name`."""
   row = {"time": Time().to("%Y-%m-%d %H:%M:%S.%f")}
   for r in recs: row[r.name] = r.value
   return row
 
 def reap():
+  """Append a row every `PERIOD_MS`, the write time subtracted so the period does not drift."""
   while not stop.is_set():
     t0 = time.time()
     if any(r.value is not None for r in recs):
@@ -30,6 +37,7 @@ def reap():
     if stop.wait(max(0, PERIOD_MS / 1000 - drift)): return
 
 def capture():
+  """Hotkey handler: append one row to the capture CSV, skipped while no recorder has a value."""
   if not any(r.value is not None for r in recs):
     print(f"{Color.YELLOW}No measurement, capture skipped{Color.END}")
     return
@@ -37,7 +45,7 @@ def capture():
   CSV.add_row(f"capture-{DATE}.csv", make_row())
 
 if __name__ == "__main__":
-  import keyboard  # type: ignore
+  import keyboard # type: ignore
   keyboard.add_hotkey("space", capture)
   keyboard.add_hotkey("enter", capture)
   for r in recs: r.start()

@@ -11,46 +11,27 @@ from .kv_common import (
 )
 from .utils import ph_list
 
-#------------------------------------------------------------------------------------- KeyValue
+#----------------------------------------------------------------------------------------- KeyValue
 
 class KeyValue:
-  """JSON-canonical sync key-value store backed by database table.
+  """
+  JSON-canonical sync key-value store backed by a database table.
 
-  Values are stored as canonical JSON text. Reads return native Python
-  types. `None` is a legitimate value (stored as JSON `null`); use
-  `has()` to distinguish missing keys from `None` values.
+  Values are stored as canonical JSON text, reads return native Python types. `None` is a
+  legitimate value (JSON `null`), so use `has()` to tell a missing key from a stored `None`.
 
-  Key naming policy is left to the caller. The library only enforces
-  that keys are non-empty strings within `KEY_MAX`.
-
-  Initialization is lazy: the table is created on first operation,
-  thread-safe via internal lock.
-
-  Caveats:
-    - The instance assumes exclusive ownership of its table for its
-      lifetime. External schema changes (e.g. another connection
-      dropping the table) are not detected; `_ready` does not retry.
-    - Constructing two `KeyValue` instances against the same `(db, table)`
-      and calling them concurrently before either has finished init
-      may run `CREATE TABLE IF NOT EXISTS` in parallel. The DDL is
-      idempotent so this is harmless, but it is your responsibility
-      not to construct duplicate instances for the same table.
+  The table is created on the first operation, under a lock so concurrent threads create it
+  once. Its existence is then assumed for the life of the instance: a table dropped afterwards
+  is never recreated.
 
   Example:
-    >>> from xaeian.db import Database, KeyValue
-    >>> db = Database("sqlite", "app.db")
-    >>> kv = KeyValue(db, table="vars")
-    >>> kv.set("maintenance", True)
-    >>> kv.get("maintenance")
-    True
+    >>> kv = KeyValue(Database("sqlite", "app.db"), table="vars")
     >>> kv.set("limits", {"max": 100, "min": 1})
     >>> kv.get("limits")
     {'max': 100, 'min': 1}
     >>> kv.set("nothing", None)
-    >>> kv.has("nothing"), kv.get("nothing")
-    (True, None)
-    >>> kv.has("missing"), kv.get("missing")
-    (False, None)
+    >>> kv.has("nothing"), kv.has("missing")
+    (True, False)
   """
   def __init__(self, db:AbstractDatabase, table:str="_config"):
     check_table(table)
@@ -66,13 +47,14 @@ class KeyValue:
     self._where = where_key(ph)
 
   def _ensure(self):
+    """Create the table once, double-checked so later calls skip the lock."""
     if self._ready: return
     with self._lock:
       if self._ready: return
       self.db.exec(sql_create(self.table))
       self._ready = True
 
-  #--------------------------------------------------------------------------------------- Read
+  #------------------------------------------------------------------------------------------- Read
 
   def has(self, key:str) -> bool:
     """Check if key exists. Distinct from `get(key) is None`."""
@@ -81,17 +63,14 @@ class KeyValue:
     return self.db.exists(self.table, self._where, key)
 
   def get(self, key:str, default:Any=None) -> Any:
-    """Get value by key. Returns `default` if key not found."""
+    """Get value by key, `default` when the key is missing."""
     check_key(key)
     self._ensure()
     raw = self.db.get_value(self._sql_get, key)
     return default if raw is None else loads(raw, key)
 
   def meta(self, key:str) -> KvEntry|None:
-    """Get value with metadata. Returns `None` if key not found.
-
-    Metadata `updated_at` is epoch milliseconds.
-    """
+    """Get value with its `updated_at` epoch milliseconds."""
     check_key(key)
     self._ensure()
     row = self.db.get_dict(self._sql_meta, key)
@@ -99,13 +78,13 @@ class KeyValue:
     return {"value": loads(row["value"], key), "updated_at": int(row["updated_at"])}
 
   def read_all(self) -> dict[str, JsonValue]:
-    """Load entire table into memory as `{key: value}`. Use only for small stores."""
+    """Load entire table as `{key: value}`, ordered by key. Use only for small stores."""
     self._ensure()
     rows = self.db.get_dicts(self._sql_all)
     return {r["key"]: loads(r["value"], r["key"]) for r in rows}
 
   def read_all_meta(self) -> dict[str, KvEntry]:
-    """Load entire table into memory with metadata. Use only for small stores."""
+    """Load entire table with `updated_at`, ordered by key. Use only for small stores."""
     self._ensure()
     rows = self.db.get_dicts(self._sql_all_meta)
     return {
@@ -116,15 +95,10 @@ class KeyValue:
       for r in rows
     }
 
-  #-------------------------------------------------------------------------------------- Write
+  #------------------------------------------------------------------------------------------ Write
 
   def set(self, key:str, value:JsonValue) -> int:
-    """Upsert value. Returns the write timestamp (epoch milliseconds).
-
-    Raises:
-      TypeError: When value contains non-JSON-serializable types.
-      ValueError: When serialized value exceeds `VALUE_MAX_BYTES`.
-    """
+    """Upsert value, returning the write timestamp in epoch milliseconds."""
     check_key(key)
     self._ensure()
     serialized = dumps(value)
@@ -137,7 +111,7 @@ class KeyValue:
     return ts
 
   def delete(self, key:str) -> bool:
-    """Delete entry by key. Returns `True` if a row was removed."""
+    """Delete entry, `True` when a row was actually removed."""
     check_key(key)
     self._ensure()
     return self.db.delete(self.table, self._where, key) > 0

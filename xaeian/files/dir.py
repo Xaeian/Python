@@ -2,47 +2,27 @@
 
 """Directory operations."""
 
-import os, stat, shutil, zipfile
+import io, os, stat, shutil, zipfile
 from typing import Iterator
 from .path import PATH
 from ..xstring import ensure_suffix
 
-#-------------------------------------------------------------------------------- DIR namespace
+#------------------------------------------------------------------------------------ DIR namespace
 
 class DIR:
-  """
-  Directory operations.
-
-  Example:
-    >>> DIR.ensure("data/subdir")
-    >>> DIR.file_list("data", exts=[".txt"])
-    ['data/file1.txt', 'data/file2.txt']
-  """
-
+  """Static directory helpers; paths resolve against the active `Config`."""
   @staticmethod
   def ensure(path:str, is_file:bool|None=None) -> str:
     """
     Create directory if it doesn't exist.
 
-    Args:
-      path: Directory or file path.
-      is_file: If `True`, create parent dir. If `None`, auto-detect:
-        path ending with `/` is always a directory; otherwise treated
-        as a file when the last segment contains a dot (e.g. `data.csv`).
-        Extensionless names like `Makefile` need explicit `is_file=True`.
-
-    Example:
-      >>> DIR.ensure("data/subdir/")     # creates data/subdir/
-      >>> DIR.ensure("data/config.json") # creates data/
-      >>> DIR.ensure("data/Makefile", is_file=True) # creates data/
+    `is_file=True` creates the parent dir instead. When `None` it is auto-detected: a trailing
+    `/` is always a directory, otherwise an extension on the last segment means file, so names
+    without one - `Makefile`, `.gitignore` - need an explicit `is_file=True`.
     """
     trailing = path.endswith("/") or path.endswith("\\")
     path = PATH.resolve(path, read=False)
-    if is_file is None:
-      if trailing:
-        is_file = False
-      else:
-        is_file = bool(PATH.ext(path))
+    if is_file is None: is_file = not trailing and bool(PATH.ext(path))
     if is_file:
       path = os.path.dirname(path)
     if path:
@@ -51,7 +31,7 @@ class DIR:
 
   @staticmethod
   def _resolve_write(path:str, ext:str) -> str:
-    """Resolve a save path: add suffix, make absolute, ensure parent dir."""
+    """Append `ext`, resolve for writing and create the parent directory."""
     path = ensure_suffix(path, ext)
     path = PATH.resolve(path, read=False)
     DIR.ensure(path, is_file=True)
@@ -59,7 +39,11 @@ class DIR:
 
   @staticmethod
   def remove(path:str, force:bool=False):
-    """Recursively remove directory tree."""
+    """
+    Recursively remove directory tree. `force` clears the read-only bit and retries.
+
+    Raises `NotADirectoryError` when the path is missing, unlike `FILE.remove`.
+    """
     path = PATH.resolve(path, read=False)
     if not os.path.isdir(path):
       raise NotADirectoryError(f"Not a directory: {path}")
@@ -83,7 +67,7 @@ class DIR:
 
   @staticmethod
   def copy(src:str, dst:str):
-    """Copy file or directory tree."""
+    """Copy file or directory tree, overwriting files and merging into existing directories."""
     src = PATH.resolve(src, read=False)
     dst = PATH.resolve(dst, read=False)
     if not os.path.exists(src):
@@ -96,19 +80,16 @@ class DIR:
 
   @staticmethod
   def folder_list(
-    path: str,
-    deep: bool = False,
-    basename: bool = False,
-    blacklist: list[str]|None = None,
+    path:str,
+    deep:bool = False,
+    basename:bool = False,
+    blacklist:list[str]|None = None,
   ) -> list[str]:
     """
     List subdirectories under given path.
 
-    Args:
-      path: Base directory to scan.
-      deep: Walk recursively when True.
-      basename: Return only folder name when True.
-      blacklist: Folder names/paths to skip.
+    `deep` walks recursively, `basename` returns bare names. A `blacklist` entry without `/`
+    skips that folder name at any depth, one with `/` a path relative to `path`.
     """
     path = PATH.resolve(path, read=True)
     if not os.path.isdir(path): return []
@@ -119,14 +100,10 @@ class DIR:
     if deep:
       for root, dirs, _ in os.walk(path):
         root_rel = PATH.normalize(os.path.relpath(root, path))
-        def _keep(d, root_rel=root_rel):
-          if d in bl_names: return False
-          rel = d if root_rel == "." else root_rel + "/" + d
-          return rel not in bl_rels
-        dirs[:] = [d for d in dirs if _keep(d)]
+        prefix = "" if root_rel == "." else root_rel + "/"
+        dirs[:] = [d for d in dirs if d not in bl_names and prefix + d not in bl_rels]
         for d in dirs:
-          full = PATH.normalize(os.path.join(root, d))
-          folders.append(d if basename else full)
+          folders.append(d if basename else PATH.normalize(os.path.join(root, d)))
     else:
       for name in os.listdir(path):
         if name in bl: continue
@@ -137,22 +114,18 @@ class DIR:
 
   @staticmethod
   def iter_files(
-    path: str,
-    exts: list[str]|None = None,
-    match: str|None = None,
-    blacklist: list[str]|None = None,
+    path:str,
+    exts:list[str]|None = None,
+    match:str|None = None,
+    blacklist:list[str]|None = None,
+    deep:bool = True,
   ) -> Iterator[str]:
     """
-    Iterate files under directory (memory efficient).
+    Iterate files under directory (memory efficient), yielding absolute paths.
 
-    Args:
-      path: Base directory to scan.
-      exts: Extensions to include (e.g. `[".py", ".txt"]`).
-      match: Glob pattern for filename (e.g. `"test_*.py"`).
-      blacklist: Paths to skip (files or directories, relative to path).
-
-    Yields:
-      Absolute file paths.
+    `exts` carry the leading dot and match case-insensitively (`[".py", ".txt"]`), `match` is a
+    glob on the filename (`"test_*.py"`), `blacklist` holds names or paths relative to `path`,
+    `deep=False` stays on the top level.
     """
     path = PATH.resolve(path, read=True)
     if not os.path.isdir(path): return
@@ -168,16 +141,16 @@ class DIR:
       if "/" not in b.rstrip("/"):
         bl_names.add(b.rstrip("/"))
     ext_tuple = tuple(ext.lower() for ext in (exts or []))
-    for root, dirs, files in os.walk(path):
+    if deep:
+      walker = os.walk(path)
+    else:
+      names = [n for n in os.listdir(path) if os.path.isfile(os.path.join(path, n))]
+      walker = [(path, [], names)]
+    for root, dirs, files in walker:
       root_norm = PATH.normalize(root)
-      dirs[:] = [
-        d for d in dirs
-        if root_norm + "/" + d not in bl_dirs and d not in bl_names
-      ]
+      dirs[:] = [d for d in dirs if root_norm + "/" + d not in bl_dirs and d not in bl_names]
       for name in files:
-        rel = PATH.normalize(
-          os.path.relpath(root_norm + "/" + name, path)
-        )
+        rel = PATH.normalize(os.path.relpath(root_norm + "/" + name, path))
         if rel in bl_files or name in bl_files: continue
         if ext_tuple and not name.lower().endswith(ext_tuple): continue
         if match and not PATH.match(name, match): continue
@@ -185,33 +158,22 @@ class DIR:
 
   @staticmethod
   def file_list(
-    path: str,
-    exts: list[str]|None = None,
-    match: str|None = None,
-    blacklist: list[str]|None = None,
-    basename: bool = False,
-    local: bool = False,
+    path:str,
+    exts:list[str]|None = None,
+    match:str|None = None,
+    blacklist:list[str]|None = None,
+    basename:bool = False,
+    local:bool = False,
+    deep:bool = True,
   ) -> list[str]:
     """
-    List files under directory with filters.
+    List files under directory, filtered as in `iter_files`.
 
-    Args:
-      path: Base directory to scan.
-      exts: Extensions to include (e.g. `[".py", ".txt"]`).
-      match: Glob pattern for filename (e.g. `"test_*.py"`).
-      blacklist: Paths to skip (files or directories, relative to path).
-      basename: Return only filename when True.
-      local: Return paths relative to `path` when True.
-
-    Example:
-      >>> DIR.file_list("src", exts=[".py"], blacklist=["__pycache__"])
-      ['src/main.py', 'src/utils/helper.py']
+    Paths come back absolute, as bare names under `basename`, relative to `path` under `local`.
     """
     path = PATH.resolve(path, read=True)
     result: list[str] = []
-    for f in DIR.iter_files(
-      path, exts=exts, match=match, blacklist=blacklist,
-    ):
+    for f in DIR.iter_files(path, exts=exts, match=match, blacklist=blacklist, deep=deep):
       if basename:
         result.append(PATH.basename(f))
       elif local:
@@ -221,18 +183,11 @@ class DIR:
     return result
 
   @staticmethod
-  def zip(path:str, zip_output:str|None=None,
-          blacklist:list[str]|None=None) -> str:
+  def zip(path:str, zip_output:str|None=None, blacklist:list[str]|None=None) -> str:
     """
-    Create ZIP archive from a directory.
+    Create ZIP archive from a directory, entries stored relative to it.
 
-    Args:
-      path: Source directory path.
-      zip_output: Output archive path (default: `"<folder>.zip"`).
-      blacklist: Paths to exclude from archive.
-
-    Returns:
-      Final ZIP archive path.
+    `zip_output` defaults to `"<folder>.zip"`, `blacklist` filters as in `iter_files`.
     """
     src = PATH.resolve(path, read=True)
     if not os.path.isdir(src):
@@ -253,16 +208,7 @@ class DIR:
 
   @staticmethod
   def unzip(path:str, output:str|None=None) -> str:
-    """
-    Extract ZIP archive to directory.
-
-    Args:
-      path: Source ZIP archive path.
-      output: Output directory (default: archive name without `.zip`).
-
-    Returns:
-      Output directory path.
-    """
+    """Extract ZIP archive. `output` defaults to the archive path without `.zip`."""
     src = PATH.resolve(path, read=True)
     if not os.path.isfile(src):
       raise FileNotFoundError(f"Archive not found: {src}")
@@ -276,17 +222,7 @@ class DIR:
 
   @staticmethod
   def unzip_bytes(data:bytes, output:str) -> str:
-    """
-    Extract ZIP archive from bytes to directory.
-
-    Args:
-      data: ZIP archive as bytes.
-      output: Output directory path.
-
-    Returns:
-      Output directory path.
-    """
-    import io
+    """Extract a ZIP archive held in memory into `output` directory."""
     output = PATH.resolve(output, read=False)
     os.makedirs(output, exist_ok=True)
     with zipfile.ZipFile(io.BytesIO(data), "r") as zf:

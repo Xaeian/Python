@@ -7,34 +7,18 @@ from typing import Any
 from ..log import Logger, Print
 
 from .abstract import AbstractDatabase
-from .utils import ident, ph, serialize_dict, _upsert_sql
+from .utils import _insert_sql, _upsert_sql
 
 class MysqlDatabase(AbstractDatabase):
-  """
-  MySQL database (pymysql).
-
-  Uses `lastrowid` for `insert(..., returning=)`.
-
-  Args:
-    db_name: Database name.
-    host: Server hostname.
-    user: Username.
-    password: Password.
-    port: Server port.
-    log: Logger instance.
-
-  Example:
-    >>> db = MysqlDatabase("mydb", user="root", password="secret")
-    >>> db.insert("users", {"name": "Jan"})
-  """
+  """MySQL database (pymysql)."""
   def __init__(
     self,
-    db_name: str|None = None,
-    host: str = "localhost",
-    user: str = "root",
-    password: str = "",
-    port: int = 3306,
-    log: Logger|Print|None = None,
+    db_name:str|None = None,
+    host:str = "localhost",
+    user:str = "root",
+    password:str = "",
+    port:int = 3306,
+    log:Logger|Print|None = None,
   ):
     super().__init__()
     self.host = host
@@ -50,28 +34,28 @@ class MysqlDatabase(AbstractDatabase):
     return pymysql.connect(
       host=self.host, port=self.port,
       user=self.user, password=self.password,
-      database=self.db_name
+      database=self.db_name,
     )
 
-  #------------------------------------------------------------------------------------- Insert
+  #----------------------------------------------------------------------------------------- Insert
 
   def insert(self, table:str, data:dict, returning:str|None=None) -> int|Any:
-    """Insert row. MySQL uses `lastrowid` for returning (ignores column name)."""
-    d = serialize_dict(data)
-    t = ident(table)
-    cols = ", ".join(ident(k) for k in d.keys())
-    vals = ph(len(d), self.ph)
-    sql = f"INSERT INTO {t} ({cols}) VALUES {vals}"
+    """
+    Insert single row.
+
+    MySQL has no RETURNING: any truthy `returning` yields `lastrowid`, its column name ignored.
+    """
+    sql, params = _insert_sql(table, data, self.ph)
     if returning:
       try:
-        with self._scope(commit=True) as (_, cur, __):
-          cur.execute(sql, tuple(d.values()))
+        with self._scope() as (_, cur, __):
+          cur.execute(sql, params)
           return cur.lastrowid
       except Exception as e:
-        self._err("insert", e, sql, tuple(d.values()))
-    return self.exec(sql, tuple(d.values()))
+        self._err("insert", e, sql, params)
+    return self.exec(sql, params)
 
-  #------------------------------------------------------------------------------------- Schema
+  #----------------------------------------------------------------------------------------- Schema
 
   def has_table(self, name:str) -> bool:
     return self.get_value(
@@ -90,16 +74,22 @@ class MysqlDatabase(AbstractDatabase):
     if not name: return False
     return name in self.get_column("SHOW DATABASES")
 
-  #------------------------------------------------------------------------------------- Upsert
+  #----------------------------------------------------------------------------------------- Upsert
 
   def upsert(self, table:str, data:dict, on:str|list[str], update:list[str]|None=None) -> int:
-    """INSERT ON DUPLICATE KEY UPDATE. `on` param ignored - uses table's unique keys."""
+    """
+    INSERT ON DUPLICATE KEY UPDATE.
+
+    MySQL matches on the table's own unique keys, so `on` names no conflict target here and
+    only decides which columns the default `update` list leaves alone.
+    """
     sql, params = _upsert_sql(table, data, on, update, self.ph, None)
     return self.exec(sql, params)
 
-  #------------------------------------------------------------------------ Database Management
+  #---------------------------------------------------------------------------- Database Management
 
   def create_database(self, name:str|None=None) -> bool:
+    """Create database. Returns `False` if it already exists."""
     if self.in_transaction(): raise RuntimeError("create_database() not allowed in transaction")
     name = name or self.db_name
     self._valid_db(name)
@@ -112,6 +102,7 @@ class MysqlDatabase(AbstractDatabase):
       self.db_name = backup
 
   def drop_database(self, name:str|None=None) -> bool:
+    """Drop database and everything in it. Returns `False` if it does not exist."""
     if self.in_transaction(): raise RuntimeError("drop_database() not allowed in transaction")
     name = name or self.db_name
     self._valid_db(name)

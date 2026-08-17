@@ -1,9 +1,6 @@
 # xaeian/__main__.py
-"""`xn` CLI dispatcher - routes subcommands to xaeian.cli/media modules.
 
-Example:
-  xn tree src
-"""
+"""`xn` CLI dispatcher, runs the mapped subcommand module as `__main__`."""
 
 COMMANDS = {
   "wifi": "xaeian.cli.wifi",

@@ -3,17 +3,9 @@
 """
 Binary struct serialization for C-like structures.
 
-Provides encoding/decoding of binary data with support for:
-- Numeric types: `int8`-`int64`, `uint8`-`uint64`, `float`, `double`
-- Strings (null-terminated) and byte arrays (length-prefixed)
-- Fixed-size arrays
-- Scaling, offset, and custom encode/decode transforms
-- CRC checksums and CRC-based authentication
-- Framing protocol for multiple struct types
-- Bitfields for compact flag storage
-- Padding and alignment
-- Optional fields and variants (tagged unions)
-- Schema export (C headers, Markdown documentation)
+Numeric, string and byte fields, fixed arrays, bitfields, padding, optionals and tagged variants,
+with scale/offset transforms, layered CRC, a multi-struct framing protocol and schema export
+to C headers or Markdown.
 
 Example:
   >>> from xaeian.cstruct import Struct, Field, Type, Endian
@@ -38,18 +30,7 @@ from numbers import Real
 from .crc import CRC, crc32_iso
 
 class Type(Enum):
-  """
-  Supported data types for struct fields.
-
-  Values are format characters for `struct` module
-  (except `string`, `bytes`, `pad`).
-
-  Example:
-    >>> Type.uint16.size
-    2
-    >>> Type.float.c_type
-    'float'
-  """
+  """Field data types; value is the `struct` format char, except `string`, `bytes`, `pad`."""
   uint8 = "B"
   int8 = "b"
   uint16 = "H"
@@ -72,10 +53,12 @@ class Type(Enum):
 
   @property
   def is_integer(self) -> bool:
+    """True for the integer types, whose values get truncated before packing."""
     return self.value not in ("f", "d", "str", "byte", "pad")
 
   @property
   def is_float(self) -> bool:
+    """True for float and double, the types decoding rounds to `precision`."""
     return self.value in ("f", "d")
 
   @property
@@ -87,12 +70,12 @@ class Type(Enum):
       "I": "uint32_t", "i": "int32_t",
       "Q": "uint64_t", "q": "int64_t",
       "f": "float", "d": "double",
-      "str": "char*", "byte": "uint8_t*", "pad": "uint8_t"
+      "str": "char*", "byte": "uint8_t*", "pad": "uint8_t",
     }
     return mapping.get(self.value, "unknown")
 
 def type_size(ctype:Type) -> int:
-  """Return size in bytes for a given type (0 for variable-size)."""
+  """Size in bytes, 0 for variable-size types."""
   return ctype.size
 
 class Endian(Enum):
@@ -102,45 +85,40 @@ class Endian(Enum):
   native = "="
   network = "!"
 
-#---------------------------------------------------------------------------------------- Field
+#-------------------------------------------------------------------------------------------- Field
 
 class Field:
   """
-  Describes a single field within a Struct.
-  Transforms applied during encoding: raw = (value * scale) + offset, then encoder()
-  Transforms applied during decoding: value = decoder((raw - offset) / scale)
+  Single field within a Struct.
+
+  Encode: raw = encoder((value * scale) + offset)
+  Decode: value = decoder((raw - offset) / scale)
   """
   _auto_id = 0
 
   def __init__(
     self,
-    ctype: Type,
-    name: str = "",
-    unit: str = "",
-    length: int = 1,
-    scale: float = 1,
-    point_shift: int = 0,
-    offset: float = 0,
-    encoder: Callable[[Real], Real]|None = None,
-    decoder: Callable[[Real], Real]|None = None,
-    precision: int = 3,
-    optional: bool = False,
-    default: Any = None,
+    ctype:Type,
+    name:str = "",
+    unit:str = "",
+    length:int = 1,
+    scale:float = 1,
+    point_shift:int = 0,
+    offset:float = 0,
+    encoder:Callable[[Real], Real]|None = None,
+    decoder:Callable[[Real], Real]|None = None,
+    precision:int = 3,
+    optional:bool = False,
+    default:Any = None,
   ) -> None:
     """
     Args:
-      ctype: Data type (Type enum)
-      name: Field name (auto-generated if empty)
-      unit: Unit string for documentation (e.g., "V", "Hz")
-      length: Array length (1 = scalar, >1 = fixed-size array)
-      scale: Multiply when encoding, divide when decoding
-      point_shift: If scale==1, sets scale = 10**point_shift
-      offset: Add when encoding, subtract when decoding
-      encoder: Custom transform applied after scale/offset during encoding
-      decoder: Custom transform applied after scale/offset during decoding
-      precision: Decimal places for rounding float values
-      optional: If True, field can be missing (uses default value)
-      default: Default value when optional field is missing
+      name: Auto-generated if empty
+      unit: Documentation only, e.g. "V", "Hz"
+      length: 1 = scalar, >1 = fixed-size array, ignored by string and bytes
+      point_shift: Honored only when scale == 1, then scale = 10 ** point_shift
+      precision: Decimal places when rounding decoded floats
+      optional: Missing key falls back to `default` instead of raising
     """
     self.type: Type = ctype
     if not name:
@@ -160,14 +138,16 @@ class Field:
 
   @property
   def is_array(self) -> bool:
+    """True for `length` > 1; length 1 is a scalar, not a one-element array."""
     return self.length > 1
 
   @property
   def is_variable_size(self) -> bool:
+    """True for string and bytes, whose encoded size depends on the value."""
     return self.type.value in ("str", "byte")
 
   def encode_value(self, value:Real, for_pack:bool=True) -> Real:
-    """Apply encoding transforms to a value."""
+    """Encode transform; `for_pack` truncates integer types to int."""
     if self.scale != 1: value *= self.scale
     if self.offset: value += self.offset
     if self.encoder: value = self.encoder(value)
@@ -175,7 +155,7 @@ class Field:
     return value
 
   def decode_value(self, value:Real) -> Real:
-    """Apply decoding transforms to a value."""
+    """Decode transform, rounding float types to `precision` places."""
     if self.offset: value -= self.offset
     if self.scale != 1: value /= self.scale
     if self.decoder: value = self.decoder(value)
@@ -193,12 +173,11 @@ class Field:
     parts.append(")")
     return "".join(parts)
 
-#------------------------------------------------------------------------------------- Bitfield
+#----------------------------------------------------------------------------------------- Bitfield
 
 class Bitfield:
   """
-  Packed bitfield for compact flag storage.
-  Multiple named bits packed into uint8/16/32.
+  Named bit groups packed into a single uint8/16/32/64, first group in the lowest bits.
 
   Example:
     flags = Bitfield("status", [
@@ -206,14 +185,13 @@ class Bitfield:
       ("error", 1),
       ("mode", 3),
       ("reserved", 3),
-    ])  # Total 8 bits = uint8
+    ]) # 8 bits total → uint8
   """
   def __init__(self, name:str, bits:list[tuple[str, int]], base_type:Type=None):
     """
     Args:
-      name: Bitfield name
-      bits: List of (bit_name, bit_width) tuples
-      base_type: Override auto-detected base type (uint8/16/32/64)
+      bits: (bit_name, bit_width) pairs
+      base_type: Overrides the width picked from the total bit count
     """
     self.name = name
     self.bits = bits
@@ -226,7 +204,6 @@ class Bitfield:
     elif total_bits <= 32: self.base_type = Type.uint32
     else: self.base_type = Type.uint64
     self.total_bits = total_bits
-    # Precompute bit positions
     self._offsets = {}
     self._masks = {}
     pos = 0
@@ -236,7 +213,7 @@ class Bitfield:
       pos += width
 
   def encode(self, values:dict[str, int]) -> int:
-    """Pack bit values into single integer."""
+    """Pack named bit values into one integer, a name missing from `values` packing as 0."""
     result = 0
     for bit_name in self.bit_names:
       value = values.get(bit_name, 0)
@@ -246,7 +223,7 @@ class Bitfield:
     return result
 
   def decode(self, packed:int) -> dict[str, int]:
-    """Unpack integer into bit values."""
+    """Unpack an integer into named bit values."""
     result = {}
     for bit_name in self.bit_names:
       mask = self._masks[bit_name]
@@ -256,21 +233,16 @@ class Bitfield:
 
   @property
   def size(self) -> int:
+    """Size of the packed base type in bytes, not bits."""
     return self.base_type.size
 
   def __str__(self):
     return f"Bitfield {self.name} ({self.total_bits} bits)"
 
-#-------------------------------------------------------------------------------------- Padding
+#------------------------------------------------------------------------------------------ Padding
 
 class Padding:
-  """
-  Padding for alignment. Ignored on decode.
-
-  Example:
-    Padding(4)            # 4 zero bytes
-    Padding(4, fill=0xFF) # 4 bytes of 0xFF
-  """
+  """Fixed run of filler bytes for alignment, skipped on decode."""
   def __init__(self, size:int, fill:int=0x00):
     self.name = f"_pad_{size}"
     self.size = size
@@ -278,17 +250,18 @@ class Padding:
     self.type = Type.pad
 
   def encode(self) -> bytes:
+    """Filler bytes emitted in place of this padding."""
     return bytes([self.fill] * self.size)
 
   def __str__(self):
     return f"Padding({self.size})"
 
-#-------------------------------------------------------------------------------------- Variant
+#------------------------------------------------------------------------------------------ Variant
 
 class Variant:
   """
-  Variant type (union) - one of multiple possible field layouts.
-  Selector field determines which variant is active.
+  Tagged union: the value of the `selector` field picks which field layout is active.
+  The selector field must be added to the Struct before the variant.
 
   Example:
     Variant("payload", "type", {
@@ -298,59 +271,46 @@ class Variant:
     })
   """
   def __init__(self, name:str, selector:str, variants:dict[int, list[Field]]):
-    """
-    Args:
-      name: Variant name
-      selector: Name of field that determines variant (must be defined before variant)
-      variants: Dict mapping selector values to field lists
-    """
     self.name = name
     self.selector = selector
     self.variants = variants
-    self.type = None  # marker for Struct to recognize
+    self.type = None
 
   def get_fields(self, selector_value:int) -> list[Field]:
-    """Get field list for given selector value."""
+    """Field layout for a selector value, empty for an unknown one."""
     return self.variants.get(selector_value, [])
 
   def __str__(self):
     return f"Variant {self.name} (selector={self.selector}, {len(self.variants)} variants)"
 
-#--------------------------------------------------------------------------------------- Struct
+#------------------------------------------------------------------------------------------- Struct
 
 class Struct:
   """
-  Binary struct composed of Fields.
+  Binary struct composed of Fields, usable standalone or inside a Frame.
 
-  Can be used standalone or as part of a Frame for multi-struct protocols.
-
-  CRC layers (applied in order during encoding, reverse during decoding):
-  - crc_frame: Per-record CRC
-  - crc_auth: Authentication CRC (use non-standard polynomial as shared secret)
-  - crc: Outer CRC for data integrity
+  CRC layers wrap in this order on encode and unwrap in reverse on decode:
+  crc_frame (per record) → crc_auth (non-standard polynomial as shared secret) → crc (outer).
   """
   _auto_id = 0
   _codes: dict[int, str] = {}
 
   def __init__(
     self,
-    code: int|None = None,
-    name: str|None = None,
-    endian: Endian|None = None,
-    crc: CRC|None = None,
-    crc_frame: CRC|None = None,
-    crc_auth: CRC|None = None,
-    align: int = 1,
+    code:int|None = None,
+    name:str|None = None,
+    endian:Endian|None = None,
+    crc:CRC|None = None,
+    crc_frame:CRC|None = None,
+    crc_auth:CRC|None = None,
+    align:int = 1,
   ) -> None:
     """
     Args:
-      code: Unique type code for Frame protocol (optional)
-      name: Struct name (auto-generated if empty)
-      endian: Default byte order (little-endian if not specified)
-      crc: Outer CRC for data integrity
-      crc_frame: Per-record CRC
-      crc_auth: Authentication CRC (non-standard params as shared secret)
-      align: Struct alignment (1 = no alignment, 4 = 32-bit aligned, etc.)
+      code: Unique across all Struct instances, required for Frame multiplexing
+      name: Auto-generated if empty
+      endian: Defaults to little
+      align: Pad each record up to this byte multiple, 1 = none
     """
     if code is not None:
       existing = Struct._codes.get(code)
@@ -375,10 +335,10 @@ class Struct:
     self._bitfields: dict[str, Bitfield] = {}
     self._unions: dict[str, Variant] = {}
     self._paddings: list[Padding] = []
-    self._members: list = []  # ordered list of all members
+    self._members: list = [] # declaration order, drives encode/decode
 
   def add(self, *members) -> "Struct":
-    """Add fields, bitfields, padding, or unions. Returns self for chaining."""
+    """Add fields, bitfields, padding or variants, chainable."""
     for member in members:
       if isinstance(member, Field):
         if member.name in self.fields_by_name:
@@ -400,7 +360,7 @@ class Struct:
     return self
 
   def get_field(self, name:str) -> Field|None:
-    """Get field by name, or None if not found."""
+    """Field by name."""
     return self.fields_by_name.get(name)
 
   def _get_endian(self, endian:Endian|None) -> Endian:
@@ -410,7 +370,6 @@ class Struct:
     return Endian.little
 
   def _encode_field(self, field:Field, value:Any, endian:Endian) -> bytes:
-    """Encode a single field value to bytes."""
     if field.type == Type.string:
       if not isinstance(value, str):
         raise TypeError(f"Field '{field.name}' expects str, got {type(value).__name__}")
@@ -429,20 +388,17 @@ class Struct:
         encoded = field.encode_value(v)
         result += pack(endian.value + field.type.value, encoded)
       return result
-    # Scalar numeric value
     if isinstance(value, (list, tuple)):
       raise TypeError(f"Field '{field.name}' expects scalar, got {type(value).__name__}")
     encoded = field.encode_value(value)
     return pack(endian.value + field.type.value, encoded)
 
   def _decode_field(self, field:Field, msg:bytes, offset:int, endian:Endian) -> tuple[Any, int]:
-    """Decode a single field from bytes. Returns (value, new_offset)."""
+    """Decode one field → (value, next_offset)."""
     if field.type == Type.string:
-      start = offset
-      while offset < len(msg) and msg[offset] != 0:
-        offset += 1
-      if offset >= len(msg): raise ValueError(f"Unterminated string in field '{field.name}'")
-      return msg[start:offset].decode("utf-8"), offset + 1
+      end = msg.find(0, offset)
+      if end < 0: raise ValueError(f"Unterminated string in field '{field.name}'")
+      return msg[offset:end].decode("utf-8"), end + 1
     if field.type == Type.bytes:
       if offset + 2 > len(msg):
         raise ValueError(f"Incomplete length prefix for field '{field.name}'")
@@ -461,7 +417,6 @@ class Struct:
         values.append(field.decode_value(raw))
         offset += field.type.size
       return values, offset
-    # Scalar numeric value
     if offset + field.type.size > len(msg):
       raise ValueError(f"Incomplete data for field '{field.name}'")
     raw = unpack_from(endian.value + field.type.value, msg, offset)[0]
@@ -469,16 +424,14 @@ class Struct:
     return value, offset + field.type.size
 
   def _encode_single(self, data:dict, endian:Endian|None=None) -> bytes:
-    """Encode a single record (without outer CRC layers)."""
+    """Encode one record: members, alignment padding and crc_frame, no outer CRC layers."""
     endian = self._get_endian(endian)
     message = b""
     for member in self._members:
       if isinstance(member, Field):
-        if member.name not in data:
-          if member.optional: value = member.default
-          else: raise KeyError(f"Field '{member.name}' not found in data for struct '{self.name}'")
-        else:
-          value = data[member.name]
+        if member.name in data: value = data[member.name]
+        elif member.optional: value = member.default
+        else: raise KeyError(f"Field '{member.name}' not found in data for struct '{self.name}'")
         message += self._encode_field(member, value, endian)
       elif isinstance(member, Bitfield):
         if member.name not in data:
@@ -494,13 +447,10 @@ class Struct:
         union_fields = member.get_fields(selector_value)
         union_data = data.get(member.name, {})
         for field in union_fields:
-          if field.name not in union_data:
-            if field.optional: value = field.default
-            else: raise KeyError(f"Variant field '{field.name}' not found in '{member.name}'")
-          else:
-            value = union_data[field.name]
+          if field.name in union_data: value = union_data[field.name]
+          elif field.optional: value = field.default
+          else: raise KeyError(f"Variant field '{field.name}' not found in '{member.name}'")
           message += self._encode_field(field, value, endian)
-    # Apply alignment padding
     if self.align > 1:
       remainder = len(message) % self.align
       if remainder: message += b"\x00" * (self.align - remainder)
@@ -508,7 +458,7 @@ class Struct:
     return message
 
   def _decode_single(self, msg:bytes, endian:Endian|None=None) -> tuple[dict, int]:
-    """Decode a single record (without outer CRC layers). Returns (data, bytes_consumed)."""
+    """Decode one record → (data, bytes_consumed), verifying crc_frame but no outer CRC."""
     endian = self._get_endian(endian)
     data = {}
     offset = 0
@@ -523,7 +473,7 @@ class Struct:
         data[member.name] = member.decode(packed)
         offset += member.size
       elif isinstance(member, Padding):
-        offset += member.size  # skip padding bytes
+        offset += member.size
       elif isinstance(member, Variant):
         selector_value = data.get(member.selector)
         if selector_value is None:
@@ -534,7 +484,7 @@ class Struct:
           value, offset = self._decode_field(field, msg, offset, endian)
           union_data[field.name] = value
         data[member.name] = union_data
-    # Skip the alignment padding appended during encode (mirror of _encode_single)
+    # mirrors the alignment padding added by _encode_single
     if self.align > 1:
       remainder = offset % self.align
       if remainder: offset += self.align - remainder
@@ -547,16 +497,7 @@ class Struct:
     return data, offset
 
   def encode(self, data_list:list[dict]|dict, endian:Endian|None=None) -> bytes:
-    """
-    Encode one or more records with all CRC layers.
-
-    Args:
-      data_list: Single dict or list of dicts with field values
-      endian: Byte order override
-
-    Returns:
-      Encoded bytes with CRC
-    """
+    """Encode one record or a list of records, wrapped in every configured CRC layer."""
     if isinstance(data_list, dict): data_list = [data_list]
     message = b""
     for data in data_list: message += self._encode_single(data, endian)
@@ -565,16 +506,7 @@ class Struct:
     return message
 
   def decode(self, message:bytes, endian:Endian|None=None) -> list[dict]|dict:
-    """
-    Decode one or more records with all CRC layers.
-
-    Args:
-      message: Encoded bytes with CRC
-      endian: Byte order override
-
-    Returns:
-      Single dict if one record, list of dicts if multiple
-    """
+    """Decode every record in the message, a bare dict when there is exactly one."""
     if self.crc:
       message = self.crc.decode(message)
       if message is None: raise ValueError(f"CRC check failed for struct '{self.name}'")
@@ -589,12 +521,7 @@ class Struct:
     return data_list[0] if len(data_list) == 1 else data_list
 
   def export_c_header(self, guard:str=None) -> str:
-    """
-    Export struct as C header file.
-
-    Args:
-      guard: Include guard name (auto-generated if None)
-    """
+    """Export as a C header, `guard` defaulting to `_NAME_H_`."""
     if guard is None: guard = f"_{self.name.upper()}_H_"
     lines = [
       f"#ifndef {guard}",
@@ -603,15 +530,13 @@ class Struct:
       "#include <stdint.h>",
       "",
     ]
-    # Bitfield typedefs
     for bf in self._bitfields.values():
-      lines.append(f"typedef struct {{")
+      lines.append("typedef struct {")
       for bit_name, width in bf.bits:
         lines.append(f"  {bf.base_type.c_type} {bit_name} : {width};")
       lines.append(f"}} {self.name}_{bf.name}_t;")
       lines.append("")
-    # Main struct
-    lines.append(f"typedef struct __attribute__((packed)) {{")
+    lines.append("typedef struct __attribute__((packed)) {")
     for member in self._members:
       if isinstance(member, Field):
         if member.is_array:
@@ -630,12 +555,12 @@ class Struct:
         lines.append(f"  uint8_t _pad[{member.size}];")
       elif isinstance(member, Variant):
         lines.append(f"  // Variant '{member.name}' - selector: {member.selector}")
-        lines.append(f"  union {{")
+        lines.append("  union {")
         for variant_id, variant_fields in member.variants.items():
           lines.append(f"    struct {{ // variant {variant_id}")
           for field in variant_fields:
             lines.append(f"      {field.type.c_type} {field.name};")
-          lines.append(f"    }};")
+          lines.append("    };")
         lines.append(f"  }} {member.name};")
     lines.append(f"}} {self.name}_t;")
     lines.append("")
@@ -643,7 +568,7 @@ class Struct:
     return "\n".join(lines)
 
   def export_doc(self) -> str:
-    """Export struct as markdown documentation."""
+    """Export as a Markdown field table."""
     lines = [f"# Struct: {self.name}", ""]
     if self.code is not None:
       lines.append(f"**Code:** 0x{self.code:04X}")
@@ -660,7 +585,7 @@ class Struct:
         desc = ""
         if member.scale != 1: desc += f"scale={member.scale} "
         if member.offset: desc += f"offset={member.offset} "
-        if member.optional: desc += f"optional "
+        if member.optional: desc += "optional "
         lines.append(f"| {member.name} | {type_str} | {unit} | {desc.strip() or '-'} |")
       elif isinstance(member, Bitfield):
         bits_desc = ", ".join([f"{n}:{w}" for n, w in member.bits])
@@ -688,29 +613,27 @@ class Struct:
   def __repr__(self):
     return f"Struct(code={self.code!r}, name={self.name!r}, fields={len(self.fields)})"
 
-#---------------------------------------------------------------------------------------- Frame
+#-------------------------------------------------------------------------------------------- Frame
 
 class Frame:
   """
-  Frame protocol for multiplexing multiple Struct types.
-  Multiple blocks can be concatenated. Outer CRC wraps entire frame.
-  | size-uint16 | type-uint16 |
-  |          message          |
-  |          ...              |
+  Multiplexes several Struct types into one message, outer CRC wrapping the whole frame.
+
+  Blocks concatenate, each one: | size-uint16 | code-uint16 | records |
+  `size` counts the payload bytes only, `code` is the Struct code.
+  A struct's own `crc` and `crc_auth` are unused here, only its `crc_frame` wraps each record.
   """
   def __init__(
     self,
-    *structs: Struct,
-    endian: Endian|None = Endian.little,
-    crc: CRC|None = crc32_iso,
-    crc_auth: CRC|None = None,
+    *structs:Struct,
+    endian:Endian|None = Endian.little,
+    crc:CRC|None = crc32_iso,
+    crc_auth:CRC|None = None,
   ) -> None:
     """
     Args:
-      structs: Struct definitions (must have code and name set)
-      endian: Byte order for frame headers
-      crc: Outer CRC for data integrity
-      crc_auth: Authentication CRC (non-standard params as shared secret)
+      structs: Each must have a `code` set
+      endian: Applied to frame headers and to every payload, overriding per-struct endian
     """
     self.structs: tuple[Struct, ...] = structs
     self.structs_by_code: dict[int, Struct] = {}
@@ -725,23 +648,13 @@ class Frame:
     self.crc_auth: CRC|None = crc_auth
 
   def encode(self, data_dict:dict[str, dict|list[dict]]) -> bytes:
-    """
-    Encode multiple struct types into a single frame.
-
-    Args:
-      data_dict: Dict mapping struct names to data (dict or list of dicts)
-
-    Returns:
-      Encoded frame bytes with headers and CRC
-    """
+    """Encode `{struct_name: record or records}` into one framed message."""
     message = b""
     for struct_name, data_list in data_dict.items():
-      if struct_name not in self.structs_by_name:
-        raise KeyError(f"Unknown struct: {struct_name}")
+      if struct_name not in self.structs_by_name: raise KeyError(f"Unknown struct: {struct_name}")
       if not isinstance(data_list, list): data_list = [data_list]
       struct = self.structs_by_name[struct_name]
       payload = b"".join([struct._encode_single(data, self.endian) for data in data_list])
-      # Frame header: size (uint16) + type code (uint16)
       message += pack(self.endian.value + Type.uint16.value, len(payload))
       message += pack(self.endian.value + Type.uint16.value, struct.code)
       message += payload
@@ -750,15 +663,7 @@ class Frame:
     return message
 
   def decode(self, frame:bytes) -> dict[str, dict|list[dict]]:
-    """
-    Decode a frame into multiple struct types.
-
-    Args:
-      frame: Encoded frame bytes
-
-    Returns:
-      Dict mapping struct names to decoded data
-    """
+    """Decode a frame → `{struct_name: data}`, a bare dict where a name holds one record."""
     if self.crc:
       frame = self.crc.decode(frame)
       if frame is None: raise ValueError("CRC check failed in Frame.decode()")
@@ -774,7 +679,6 @@ class Frame:
       if struct_code not in self.structs_by_code:
         raise KeyError(f"Unknown struct code: {struct_code}")
       struct = self.structs_by_code[struct_code]
-      # Decode all records of this struct type within the block
       remaining = size
       while remaining > 0:
         data, consumed = struct._decode_single(frame, self.endian)
@@ -789,7 +693,7 @@ class Frame:
     return data_dict
 
   def get_struct(self, tag:int|str) -> Struct:
-    """Get struct by code (int) or name (str)."""
+    """Struct by code (int) or name (str)."""
     if isinstance(tag, int): return self.structs_by_code[tag]
     return self.structs_by_name[tag]
 
@@ -802,7 +706,7 @@ class Frame:
   def __getitem__(self, key:int|str) -> Struct:
     return self.get_struct(key)
 
-#---------------------------------------------------------------------------------------- Tests
+#-------------------------------------------------------------------------------------------- Tests
 
 if __name__ == "__main__":
   sensor = Struct(name="sensor", endian=Endian.little, crc=crc32_iso)
@@ -811,7 +715,11 @@ if __name__ == "__main__":
     Bitfield("flags", [("enabled", 1), ("error", 1), ("mode", 6)]),
     Field(Type.float, "temperature", "°C"),
   )
-  data = {"timestamp": 1234567890, "flags": {"enabled": 1, "error": 0, "mode": 5}, "temperature": 23.5}
+  data = {
+    "timestamp": 1234567890,
+    "flags": {"enabled": 1, "error": 0, "mode": 5},
+    "temperature": 23.5,
+  }
   encoded = sensor.encode(data)
   decoded = sensor.decode(encoded)
   print("data:", data)

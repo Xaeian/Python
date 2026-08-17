@@ -1,12 +1,12 @@
 # xaeian/db/abstract.py
 
-"""Sync database base class."""
+"""Driver-independent sync implementation behind `Database`."""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from ..log import Logger, Print
 from typing import NoReturn, Iterator, Any
+from ..log import Logger, Print
 
 from .errors import DatabaseError
 from .utils import (
@@ -16,17 +16,11 @@ from .utils import (
 
 class AbstractDatabase(ABC):
   """
-  Sync database base class.
+  Auto-commits per call unless inside `transaction()`; driver errors raise `DatabaseError`.
 
-  Auto-commits per call, or batch operations in `transaction()`.
-
-  Example:
-    >>> db.exec("INSERT INTO users (name) VALUES (?)", ("Jan",))
-    >>> with db.transaction():
-    ...   db.insert("orders", {"user_id": 1, "total": 99.50})
-    ...   db.update("users", {"balance": 0}, "id = ?", user_id)
+  Every call outside a transaction opens and closes its own connection. A transaction pins one
+  connection to the instance, so an instance must not be shared across threads while it runs.
   """
-
   def __init__(self):
     self.db_name: str|None = None
     self.log: Logger|Print|None = None
@@ -55,49 +49,43 @@ class AbstractDatabase(ABC):
     """Create new database connection."""
     raise NotImplementedError
 
-  #-------------------------------------------------------------------------------- Transaction
+  #------------------------------------------------------------------------------------ Transaction
 
   @contextmanager
   def transaction(self):
-    """
-    Transaction context manager.
-
-    Commits on success, rolls back on exception.
-
-    Example:
-      >>> with db.transaction():
-      ...   db.insert("users", {"name": "Jan"})
-      ...   db.update("accounts", {"balance": 0}, "user_id = ?", 1)
-
-    Raises:
-      RuntimeError: When transaction already active.
-    """
+    """Commit on exit, roll back on exception. Nesting raises `RuntimeError`."""
     if self._conn is not None: raise RuntimeError("Transaction already active")
-    self._conn = self.conn()
-    self._cur = self._conn.cursor()
+    conn = self.conn()
+    cur = None
     try:
+      cur = conn.cursor()
+      self._conn, self._cur = conn, cur
       yield self
-      self._conn.commit()
+      conn.commit()
     except Exception:
-      self._conn.rollback()
+      conn.rollback()
       raise
     finally:
-      try: self._cur.close()
-      finally: self._conn.close()
       self._conn = None
       self._cur = None
+      try:
+        if cur is not None: cur.close()
+      finally:
+        conn.close()
 
   def _cursor(self) -> tuple:
+    """Get `(conn, cur, owned)`; `owned` is `False` inside a transaction, which owns cleanup."""
     if self._conn is not None: return self._conn, self._cur, False
     conn = self.conn()
     return conn, conn.cursor(), True
 
   @contextmanager
-  def _scope(self, commit:bool=False) -> Iterator[tuple]:
+  def _scope(self) -> Iterator[tuple]:
+    """Yield `(conn, cur, owned)`, committing and closing only outside a transaction."""
     conn, cur, owned = self._cursor()
     try:
       yield conn, cur, owned
-      if commit and owned: conn.commit()
+      if owned: conn.commit()
     except Exception:
       if owned:
         try: conn.rollback()
@@ -115,50 +103,30 @@ class AbstractDatabase(ABC):
 
   def _debug(self, op:str, sql:str, params:tuple):
     s = " ".join(sql.split())[:100]
-    print(f"[{self.db_name or 'db'}] {op}: {s} {params if params else ''}")
+    print(f"[{self.db_name or 'db'}] {op}: {s} {params or ''}")
 
   def _rowcount(self, cur) -> int:
+    """Row count clamped to 0, since drivers report -1 when it is unknown."""
     return max(0, cur.rowcount) if cur.rowcount is not None else 0
 
-  #------------------------------------------------------------------------------------ Execute
+  #---------------------------------------------------------------------------------------- Execute
 
   def exec(self, sql:str, params=None) -> int:
-    """
-    Execute SQL statement.
-
-    Args:
-      sql: SQL statement with placeholders.
-      params: Parameters for placeholders.
-
-    Returns:
-      Affected row count.
-
-    Raises:
-      DatabaseError: On SQL or driver error.
-    """
+    """Execute SQL statement. Returns affected row count."""
     p = serialize_params(params)
     if self.debug: self._debug("exec", sql, p)
     try:
-      with self._scope(commit=True) as (_, cur, __):
+      with self._scope() as (_, cur, __):
         cur.execute(sql, p)
         return self._rowcount(cur)
     except Exception as e:
       self._err("exec", e, sql, p)
 
   def exec_many(self, sql:str, params_list:list) -> int:
-    """
-    Execute statement with multiple parameter sets.
-
-    Args:
-      sql: SQL statement with placeholders.
-      params_list: List of parameter tuples.
-
-    Returns:
-      Affected row count.
-    """
+    """Execute the statement once per parameter tuple. Returns affected row count."""
     pl = [serialize_params(p) for p in params_list]
     try:
-      with self._scope(commit=True) as (_, cur, __):
+      with self._scope() as (_, cur, __):
         cur.executemany(sql, pl)
         return self._rowcount(cur)
     except Exception as e:
@@ -166,18 +134,16 @@ class AbstractDatabase(ABC):
 
   def exec_batch(self, sqls:list[tuple[str, Any]]|list[str]|str) -> int:
     """
-    Execute multiple statements in one transaction.
+    Execute multiple statements in one transaction, returning total affected rows.
 
-    Args:
-      sqls: SQL string with semicolons, list of SQL strings,
-            or list of `(sql, params)` tuples.
-
-    Returns:
-      Total affected rows.
+    `sqls`: semicolon-separated string, list of statements, or list of `(sql, params)` tuples.
     """
+    if not self.in_transaction():
+      with self.transaction():
+        return self.exec_batch(sqls)
     total = 0
     try:
-      with self._scope(commit=True) as (_, cur, __):
+      with self._scope() as (_, cur, __):
         if isinstance(sqls, str):
           for s in split_sql(sqls):
             cur.execute(s)
@@ -194,20 +160,10 @@ class AbstractDatabase(ABC):
     except Exception as e:
       self._err("exec_batch", e)
 
-  #-------------------------------------------------------------------------------------- Query
+  #------------------------------------------------------------------------------------------ Query
 
   def get_rows(self, sql:str, params=None, json:list[int]|None=None) -> list[list]:
-    """
-    Fetch all rows as lists.
-
-    Args:
-      sql: SELECT statement.
-      params: Query parameters.
-      json: Column indices to parse as JSON.
-
-    Returns:
-      List of row lists.
-    """
+    """Fetch all rows as lists, parsing the column indices listed in `json`."""
     p = serialize_params(params)
     try:
       with self._scope() as (_, cur, __):
@@ -220,19 +176,14 @@ class AbstractDatabase(ABC):
     except Exception as e:
       self._err("get_rows", e, sql, p)
 
-  def get_dicts(self, sql:str, params=None, cols:list[str]|None=None, json:list[str]|None=None) -> list[dict]:
-    """
-    Fetch all rows as dicts.
-
-    Args:
-      sql: SELECT statement.
-      params: Query parameters.
-      cols: Override column names.
-      json: Column names to parse as JSON.
-
-    Returns:
-      List of row dicts.
-    """
+  def get_dicts(
+    self,
+    sql:str,
+    params=None,
+    cols:list[str]|None = None,
+    json:list[str]|None = None,
+  ) -> list[dict]:
+    """Fetch all rows as dicts, `cols` overriding cursor names, `json` naming JSON columns."""
     p = serialize_params(params)
     try:
       with self._scope() as (_, cur, __):
@@ -254,37 +205,27 @@ class AbstractDatabase(ABC):
     return rows[0] if rows else None
 
   def get_column(self, sql:str, params=None, json:bool=False) -> list:
-    """Fetch first column of all rows."""
+    """Fetch first column of all rows, `json=True` parsing each value as JSON."""
     rows = self.get_rows(sql, params)
     if not rows: return []
     col = [r[0] for r in rows]
     return [parse_json(v) for v in col] if json else col
 
   def get_value(self, sql:str, params=None, json:bool=False) -> Any:
-    """Fetch single value."""
+    """Fetch first value of first row, `None` when no row; `json=True` parses it as JSON."""
     row = self.get_row(sql, params)
     if not row: return None
     return parse_json(row[0]) if json else row[0]
 
-  #--------------------------------------------------------------------------------------- CRUD
+  #------------------------------------------------------------------------------------------- CRUD
 
   def insert(self, table:str, data:dict, returning:str|None=None) -> int|Any:
-    """
-    Insert single row.
-
-    Args:
-      table: Table name.
-      data: Column-value dict.
-      returning: Column to return (e.g., `"id"`).
-
-    Returns:
-      Row count, or returned column value if `returning` specified.
-    """
+    """Insert single row. With `returning` yields that column's value instead of the row count."""
     sql, params = _insert_sql(table, data, self.ph)
     if returning:
       sql = f"{sql} RETURNING {ident(returning)}"
       try:
-        with self._scope(commit=True) as (_, cur, __):
+        with self._scope() as (_, cur, __):
           cur.execute(sql, params)
           row = cur.fetchone()
           return row[0] if row else None
@@ -313,27 +254,24 @@ class AbstractDatabase(ABC):
 
   def exists(self, table:str, where:str, params=None) -> bool:
     """Check if any row matches WHERE clause."""
-    return self.get_value(f"SELECT 1 FROM {ident(table)} WHERE {where} LIMIT 1", params) is not None
+    return self.get_value(
+      f"SELECT 1 FROM {ident(table)} WHERE {where} LIMIT 1", params
+    ) is not None
 
-  #------------------------------------------------------------------------------ Query Builder
+  #---------------------------------------------------------------------------------- Query Builder
 
-  def find(self, table:str, order:str|None=None, limit:int|None=None, json:list[str]|None=None, **where) -> list[dict]:
+  def find(
+    self,
+    table:str,
+    order:str|None = None,
+    limit:int|None = None,
+    json:list[str]|None = None,
+    **where,
+  ) -> list[dict]:
     """
-    Simple query builder with kwargs.
+    Query builder, `**where` being `column=value` conditions joined with AND.
 
-    Args:
-      table: Table name.
-      order: ORDER BY clause.
-      limit: Max rows to return.
-      json: Column names to parse as JSON.
-      **where: Column=value conditions (AND).
-
-    Returns:
-      List of matching rows as dicts.
-
-    Example:
-      >>> db.find("users", active=True, role="admin")
-      >>> db.find("users", order="created DESC", limit=10)
+    `order` is raw SQL appended after ORDER BY, never place user input there.
     """
     sql, params = _find_sql(table, order, limit, self.ph, where)
     return self.get_dicts(sql, params, json=json)
@@ -343,19 +281,18 @@ class AbstractDatabase(ABC):
     rows = self.find(table, limit=1, json=json, **where)
     return rows[0] if rows else None
 
-  def paginate(self, sql:str, params=None, page:int=1, per_page:int=20, json:list[str]|None=None) -> dict:
+  def paginate(
+    self,
+    sql:str,
+    params=None,
+    page:int = 1,
+    per_page:int = 20,
+    json:list[str]|None = None,
+  ) -> dict:
     """
-    Paginate query results.
+    Paginate a SELECT written without LIMIT/OFFSET.
 
-    Args:
-      sql: Base SELECT statement (without LIMIT/OFFSET).
-      params: Query parameters.
-      page: Page number (1-based).
-      per_page: Items per page.
-      json: Column names to parse as JSON.
-
-    Returns:
-      Dict with `items`, `total`, `page`, `pages`.
+    `page` is 1-based. Returns `{"items", "total", "page", "pages"}`.
     """
     offset = (page - 1) * per_page
     items = self.get_dicts(f"{sql} LIMIT {per_page} OFFSET {offset}", params, json=json)
@@ -364,10 +301,15 @@ class AbstractDatabase(ABC):
     return {"items": items, "total": total, "page": page, "pages": pages}
 
   def upsert(self, table:str, data:dict, on:str|list[str], update:list[str]|None=None) -> int:
-    """Insert or update on conflict. Override in subclasses."""
+    """
+    Insert, or update the columns in `update` when `on` conflicts.
+
+    Dialect-specific: every backend overrides this, the base raises `NotImplementedError`.
+    `update` defaults to every column of `data` except those named in `on`.
+    """
     raise NotImplementedError(f"upsert not implemented for {self.__class__.__name__}")
 
-  #------------------------------------------------------------------------------------- Schema
+  #----------------------------------------------------------------------------------------- Schema
 
   @abstractmethod
   def has_table(self, name:str) -> bool:
