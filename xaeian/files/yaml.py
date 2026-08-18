@@ -6,7 +6,7 @@ YAML file operations. Requires `pyyaml`.
 Loading goes through `safe_load`, so tags that would construct Python objects are rejected.
 """
 
-__extras__ = ("yaml", ["pyyaml"])
+__extras__ = ("yaml", ["PyYAML"])
 
 import os
 from typing import Any

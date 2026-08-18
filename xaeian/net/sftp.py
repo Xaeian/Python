@@ -26,6 +26,8 @@ try:
 except ImportError:
   raise ImportError("Install with: pip install xaeian[sftp]")
 
+#-------------------------------------------------------------------------------------- Trust store
+
 def _known_hosts() -> str:
   """
   The library's own trust store for first-contact host keys.
@@ -38,6 +40,35 @@ def _known_hosts() -> str:
     path.parent.mkdir(mode=0o700, exist_ok=True)
     path.touch(mode=0o600)
   return str(path)
+
+def _store_lines() -> list[bytes]:
+  """Trust store as raw lines; bytes, so a stray non-UTF-8 byte cannot break reading it."""
+  return Path(_known_hosts()).read_bytes().splitlines(keepends=True)
+
+def _parses(line:bytes) -> bool:
+  """Whether paramiko can read this entry back; blank and comment lines it skips on its own."""
+  text = line.decode("utf-8", "replace").strip()
+  if not text or text.startswith("#"): return True
+  try:
+    return paramiko.hostkeys.HostKeyEntry.from_line(text) is not None
+  except Exception:
+    return False
+
+def _trust_store(log:Logger|Print|None=None) -> str:
+  """
+  Path to the trust store, with any unreadable line dropped first.
+
+  `HostKeys.load` lets `InvalidHostKey` through, so one damaged line - a partial append after a
+  kill, a hand edit - would fail every connect. The file is the library's own, so it gets
+  repaired instead of being allowed to lock the user out.
+  """
+  path = _known_hosts()
+  lines = _store_lines()
+  kept = [line for line in lines if _parses(line)]
+  if len(kept) != len(lines):
+    FILE.save(path, b"".join(kept))
+    if log: log.wrn(f"dropped damaged host key lines:{len(lines) - len(kept)} | {path}")
+  return path
 
 class _RecordPolicy(paramiko.MissingHostKeyPolicy):
   """
@@ -94,6 +125,15 @@ class SFTP:
   def __exit__(self, *_): self.disconnect()
 
   @staticmethod
+  def known() -> list[tuple[str, str]]:
+    """Recorded hosts as `(host, key_type)`, in file order."""
+    out = []
+    for line in _store_lines():
+      fields = line.decode("utf-8", "replace").split()
+      if len(fields) >= 2 and not fields[0].startswith("#"): out.append((fields[0], fields[1]))
+    return out
+
+  @staticmethod
   def forget(host:str, port:int=22) -> bool:
     """
     Drop `host` from the library's trust store, so its next connection records the key anew.
@@ -102,15 +142,14 @@ class SFTP:
     file belongs to the user (`ssh-keygen -R host` cleans it).
     """
     names = {host, f"[{host}]:{port}"}
-    path = _known_hosts()
-    lines = Path(path).read_text(encoding="utf-8").splitlines(keepends=True)
+    lines = _store_lines()
     kept = []
     for line in lines:
-      fields = line.split()
+      fields = line.decode("utf-8", "replace").split()
       if fields and names & set(fields[0].split(",")): continue
       kept.append(line)
     if len(kept) == len(lines): return False
-    FILE.save(path, "".join(kept))
+    FILE.save(_known_hosts(), b"".join(kept))
     return True
 
   #------------------------------------------------------------------------------------- Connection
@@ -127,7 +166,7 @@ class SFTP:
     self._can_utime = True
     self._ssh = paramiko.SSHClient()
     self._ssh.load_system_host_keys()
-    self._ssh.load_host_keys(_known_hosts())
+    self._ssh.load_host_keys(_trust_store(self.log))
     self._ssh.set_missing_host_key_policy(
       paramiko.RejectPolicy() if self._strict else _RecordPolicy()
     )
@@ -149,7 +188,7 @@ class SFTP:
       if self.log: self.log.err(f"host key changed {c.TURQUS}{self.host}{c.END} | {e}")
       raise ConnectionError(
         f"SFTP host key changed host:{self.host} | {e} | "
-        f"rebuilt on purpose? SFTP.forget({self.host!r}) drops the old key"
+        f"rebuilt on purpose? drop the old key with: xn host {self.host}"
       ) from e
     except Exception as e:
       if self.log: self.log.err(f"connect failed {c.TURQUS}{self.host}{c.END} | {e}")

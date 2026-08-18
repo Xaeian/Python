@@ -1,8 +1,12 @@
 # Changes `xaeian`
 
+## `0.8.2` CLI host keys
+
+- `cli`: `xn host` lists pinned hosts, `xn host <ip>` drops one after a server rebuild
+
 ## `0.8.1` SFTP host keys
 
-- `net`: `SFTP` pins first-contact host keys; `SFTP.forget(host)` trusts a rebuilt server anew
+- `net`: `SFTP` pins first-contact host keys, so a changed server key aborts
 
 ## `0.8.0` Safety audit
 

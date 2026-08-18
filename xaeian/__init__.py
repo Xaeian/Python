@@ -5,13 +5,13 @@ Xaeian - Python utilities library.
 
 Not re-exported here, import directly: `table` (list[dict] ops), `files_async`, `cmd`,
 `cstruct` (binary structs), `net` (SFTP/FTP), `db` (SQLite, MySQL, PostgreSQL), `media` (PDF,
-image), `eda` (E-series, KiCad, NgSpice), `cli` (tree, dupes, wifi, fonts).
+image), `eda` (E-series, KiCad, NgSpice), `cli` (tree, dupes, wifi, fonts, host).
 
 Example:
   >>> from xaeian import logger, JSON, split_sql, Files, Plot
 """
 
-__version__ = "0.8.1"
+__version__ = "0.8.2"
 __repo__ = "Xaeian/Python"
 __python__ = ">=3.12"
 __description__ = (

@@ -7,6 +7,7 @@ COMMANDS = {
   "dupes": "xaeian.cli.dupes",
   "tree": "xaeian.cli.tree",
   "fonts": "xaeian.cli.fonts",
+  "host": "xaeian.cli.host",
   "min": "xaeian.media.min",
   "meta": "xaeian.media.meta",
   "ico": "xaeian.media.ico",

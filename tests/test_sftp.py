@@ -96,8 +96,10 @@ def connect_loads_known_hosts_and_honours_strict(monkeypatch, tmp_path):
   def factory():
     made.append(Recorder())
     return made[-1]
+  store = tmp_path / "kh"
+  store.touch()
   monkeypatch.setattr(sftpmod.paramiko, "SSHClient", factory)
-  monkeypatch.setattr(sftpmod, "_known_hosts", lambda: str(tmp_path / "kh"))
+  monkeypatch.setattr(sftpmod, "_known_hosts", lambda: str(store))
   SFTP("host", "user").connect()
   assert made[-1].loaded is True  # system known_hosts honored, read-only
   assert made[-1].own.endswith("kh")  # writable store: arms persistence and the key check
@@ -116,6 +118,19 @@ def forget_drops_only_the_given_host(monkeypatch, tmp_path):
   assert "b.example" in left and "a.example" not in left
   assert SFTP.forget("b.example", port=2222) is True
   assert store.read_text(encoding="utf-8") == ""
+
+def trust_store_drops_lines_paramiko_cannot_read(monkeypatch, tmp_path):
+  store = tmp_path / "kh"
+  key = paramiko.RSAKey.generate(2048)
+  good = paramiko.hostkeys.HostKeyEntry(["good.example"], key).to_line()
+  damaged = "half.example ssh-rsa AAAAB3Nz!!truncated" # an append killed mid-write
+  store.write_bytes("\n".join(["# note", damaged, good.strip(), ""]).encode())
+  monkeypatch.setattr(sftpmod, "_known_hosts", lambda: str(store))
+  with pytest.raises(Exception): # InvalidHostKey escapes HostKeys.load, so connect would die
+    paramiko.SSHClient().load_host_keys(str(store))
+  paramiko.SSHClient().load_host_keys(sftpmod._trust_store()) # repaired: loads clean
+  left = store.read_text(encoding="utf-8")
+  assert "good.example" in left and "half.example" not in left and "# note" in left
 
 def disconnect_closes_the_ssh_session_even_when_the_channel_is_dead(client):
   session = client(close_fails=True)
