@@ -3,9 +3,9 @@
 """
 Python client for embedded Shell (`lib/sh` C firmware).
 
-Sends text commands and parses responses, dropping the device echo (`>> command^E\\r\\n`), the
-ANSI escapes of its prompt and trailing whitespace. The methods wrap the `cmd.h` built-ins;
-device-specific extensions go through `exec()`:
+Sends text commands and parses responses, dropping the device echo (`>> command^E\\r\\n`),
+the ANSI escapes of its prompt and trailing whitespace.
+The methods wrap the `cmd.h` built-ins; device-specific extensions go through `exec()`:
 
   >>> sh.exec("alarm 1 set everyday 06:00:00")
 
@@ -26,7 +26,7 @@ from ..colors import Color as c
 
 #------------------------------------------------------------------------------------------ Helpers
 
-def convert_value(value:str|None):
+def convert_value(value:str|None) -> bool|int|float|str|None:
   """
   Convert a response token to a Python type.
 
@@ -76,14 +76,15 @@ class Shell(SerialPort):
     pack_size:int = 1024,
     crc = None,
     debug:bool = False,
-  ):
+  ) -> None:
     self.console_mode = console_mode
     self.strip_echo = strip_echo
     self.pack_size = pack_size
     self._mbb_list:list[str]|None = None
-    super().__init__(port, baudrate, timeout, buffer_size,
-      print_console, print_file, time_disp, time_utc, time_format,
-      address, print_limit, crc, debug)
+    super().__init__(port, baudrate=baudrate, timeout=timeout, buffer_size=buffer_size,
+      print_console=print_console, print_file=print_file, time_disp=time_disp,
+      time_utc=time_utc, time_format=time_format,
+      address=address, print_limit=print_limit, crc=crc, debug=debug)
 
   #------------------------------------------------------------------------------------------- Exec
 
@@ -266,8 +267,8 @@ class Shell(SerialPort):
     """
     Load the entire content of the active MBB.
 
-    Each `mbb load <limit> <offset>` reply is exactly `limit` raw bytes plus the `\\r\\n` of
-    `DBG_Enter()`, so the exact count is read and the newline consumed - no size guessing.
+    Each `mbb load <limit> <offset>` reply is exactly `limit` raw bytes plus the `\\r\\n`
+    of `DBG_Enter()`, so the exact count is read and the newline consumed - no size guessing.
     Replies are read off `self.serial` directly, bypassing the `address` and `crc` handling.
     """
     info = self.mbb_info()
@@ -316,7 +317,7 @@ class Shell(SerialPort):
     if match: return datetime.strptime(match.group(), "%Y-%m-%d %H:%M:%S")
     return None
 
-  def set_time(self, utc:bool|None=None):
+  def set_time(self, utc:bool|None=None) -> None:
     """Set device RTC to the current host time. `utc=None` follows `self.time_utc`."""
     use_utc = utc if utc is not None else self.time_utc
     now = datetime.now(timezone.utc) if use_utc else datetime.now()
@@ -324,20 +325,20 @@ class Shell(SerialPort):
 
   #------------------------------------------------------------------------------------------- Trig
 
-  def trig(self, code:int):
+  def trig(self, code:int) -> None:
     """Wake device handlers blocked on `TRIG_Wait`/`TRIG_WaitFor` with this `code`."""
     self.exec(f"trig {code}")
 
   #------------------------------------------------------------------------------------------ Power
 
-  def reboot(self):
+  def reboot(self) -> None:
     """Issue `pwr reboot` to device."""
     self.exec("pwr reboot")
 
-  def reset(self):
+  def reset(self) -> None:
     """Issue `pwr reset` to device."""
     self.exec("pwr reset")
 
-  def sleep(self, mode:str="stop"):
+  def sleep(self, mode:str="stop") -> None:
     """Put device to sleep: `stop`, `stop0`, `stop1`, `standby`, `standbysram`, `shutdown`."""
     self.exec(f"pwr sleep {mode}")

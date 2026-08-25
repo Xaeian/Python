@@ -8,12 +8,12 @@ COMMANDS = {
   "tree": "xaeian.cli.tree",
   "fonts": "xaeian.cli.fonts",
   "host": "xaeian.cli.host",
-  "min": "xaeian.media.min",
-  "meta": "xaeian.media.meta",
-  "ico": "xaeian.media.ico",
+  "min": "xaeian.cli.min",
+  "meta": "xaeian.cli.meta",
+  "ico": "xaeian.cli.ico",
 }
 
-def main():
+def main() -> None:
   import sys, runpy
   if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
     print("Usage: xn <command> [args...]")

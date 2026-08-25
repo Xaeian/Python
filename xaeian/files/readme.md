@@ -83,7 +83,8 @@ DIR.zip("folder", "archive.zip")
 
 ## `PATH`
 
-Pure path manipulation, no IO.
+Pure path manipulation, no IO - except `real`, which expands symlinks and says so.
+Whether a path exists is `FILE.exists` / `DIR.exists` business.
 
 ```py
 from xaeian import PATH

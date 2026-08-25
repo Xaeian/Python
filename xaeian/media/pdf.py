@@ -6,12 +6,20 @@ PDF manipulation: compress, merge, split, extract, metadata, text overlay.
 Compression shells out to Ghostscript, structure edits use pypdf, text PyMuPDF (fitz).
 """
 
-import os, subprocess
+import itertools, os, subprocess
 from typing import Literal, NoReturn, Sequence
-from pypdf import PdfReader, PdfWriter
+from ..extras import MissingExtra, absent
 from ..files import DIR, FILE
 from ..cmd import which
 from .utils import require_file, resolve_dst
+
+_tmp_seq = itertools.count() # a fixed temp name could sit on a file we do not own
+
+try:
+  from pypdf import PdfReader, PdfWriter
+except ModuleNotFoundError as e:
+  if not absent(e, "pypdf"): raise
+  raise MissingExtra("Install with: pip install xaeian[media]") from e
 
 #-------------------------------------------------------------------------------------------- Types
 
@@ -24,7 +32,7 @@ def pdf_compress(
   src:str,
   dst:str|None = None,
   level:PdfCompatLevel = "1.7",
-  settings:PdfSettings = "/screen",
+  settings:PdfSettings = "/ebook",
   programs:Sequence[str] = ("gswin64c", "gswin32c", "gs"),
   inplace:bool = False,
   verify:bool = True,
@@ -32,14 +40,16 @@ def pdf_compress(
   """
   Compress PDF, one of `programs` must be on PATH.
 
-  `settings` ranges from /screen (smallest) to /prepress (largest), it drives image
-  downsampling, so a text-only PDF may come out no smaller. `dst` None → `-min` suffix
-  beside the source, or the source itself when `inplace`.
+  `settings` ranges from /screen (smallest) to /prepress (largest), it drives image downsampling,
+  so a text-only PDF may come out no smaller.
+  `dst` None → `-min` suffix beside the source, or the source itself when `inplace`.
 
-  Ghostscript exits 0 on damaged input after writing a stub, so `verify` reads the page count
-  before and after and refuses a result that lost pages. A source that cannot be read is refused
-  outright, since a conversion cannot be checked against an original nobody can open. Passing
-  `verify=False` compresses a malformed file anyway and accepts a silently truncated result.
+  Ghostscript exits 0 on damaged input after writing a stub,
+  so `verify` reads the page count before and after and refuses a result that lost pages.
+  A source that cannot be read is refused outright,
+  since a conversion cannot be checked against an original nobody can open.
+  Passing `verify=False` compresses a malformed file anyway
+  and accepts a silently truncated result.
   """
   src = require_file(src, "PDF")
   src_pages = _page_count(src) if verify else 0
@@ -50,7 +60,7 @@ def pdf_compress(
   out_path = resolve_dst(src, dst, inplace, "min")
   # GS can't read and write the same file, and a refused result must never reach `out_path`
   base, ext = os.path.splitext(out_path)
-  tmp_path = f"{base}-tmp{ext}"
+  tmp_path = f"{base}-{os.getpid()}.{next(_tmp_seq)}-tmp{ext}"
   cmd = [
     gs_cmd,
     "-dNOPAUSE", "-dBATCH", "-dQUIET",
@@ -95,8 +105,8 @@ def pdf_scrub_metadata(src:str, dst:str|None=None, inplace:bool=False) -> str:
   """
   Rebuild a PDF with an empty document info dictionary.
 
-  Pages are copied whole, so anything riding on a page (annotations, embedded files) is
-  kept: this clears the document info, it does not strip every trace of provenance.
+  Pages are copied whole, so anything riding on a page (annotations, embedded files) is kept:
+  this clears the document info, it does not strip every trace of provenance.
   `dst` None → `-nometa` suffix beside the source, or the source itself when `inplace`.
   """
   src = require_file(src, "PDF")
@@ -149,9 +159,12 @@ def parse_pages(spec:str|int|Sequence[str|int], total:int) -> list[int]:
   """
   Parse a 1-based page spec into sorted 0-based indices.
 
-  `spec` takes 5, "1,3,5-7,!2" or [1, "5-7", "!2"]: `!` excludes, an open range "5-"
-  runs to `total`, and a spec holding only exclusions starts from every page. Numbers
-  beyond `total` are dropped silently, so an over-wide range is a safe way to say "rest".
+  `spec` takes 5, "1,3,5-7,!2" or [1, "5-7", "!2"]:
+  `!` excludes, an open range "5-" runs to `total`,
+  and a spec holding only exclusions starts from every page.
+
+  Numbers beyond `total` are dropped, so an over-wide range is a safe way to say "rest":
+  the range is clamped before it is built, never materialised at its stated width.
   """
   if isinstance(spec, int): spec = str(spec)
   elif not isinstance(spec, str): spec = ",".join(str(x) for x in spec)
@@ -164,7 +177,9 @@ def parse_pages(spec:str|int|Sequence[str|int], total:int) -> list[int]:
     if neg: part = part[1:]
     if "-" in part:
       a, b = part.split("-", 1)
-      rng = set(range(int(a), (int(b) if b else total) + 1))
+      lo = max(int(a), 1)
+      hi = min(int(b) if b else total, total)
+      rng = set(range(lo, hi + 1))
     else:
       rng = {int(part)}
     if neg: exclude |= rng
@@ -222,7 +237,11 @@ def pdf_add_text(
     color: RGB, 0.0-1.0 per channel.
     pages: 0-based indices, None → every page.
   """
-  import fitz
+  try:
+    import fitz
+  except ModuleNotFoundError as e:
+    if not absent(e, "fitz"): raise
+    raise MissingExtra("Install with: pip install xaeian[media]") from e
   src = require_file(src, "PDF")
   out_path = resolve_dst(src, dst, inplace, "text")
   doc = fitz.open(src)
@@ -232,7 +251,7 @@ def pdf_add_text(
   # Fitz can't save over the file it opened
   if out_path == src:
     base, ext = os.path.splitext(src)
-    tmp_path = f"{base}-tmp{ext}"
+    tmp_path = f"{base}-{os.getpid()}.{next(_tmp_seq)}-tmp{ext}"
     doc.save(tmp_path)
     doc.close()
     os.replace(tmp_path, src)

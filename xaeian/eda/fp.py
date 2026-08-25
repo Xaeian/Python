@@ -3,8 +3,9 @@
 """
 KiCad `.kicad_mod` footprint generator.
 
-`Footprint` emits compact single-line S-expressions, all dimensions in mm. Style presets `XXS`
-to `XL` set line widths and font per component size, `REF["connector"]` → `"J**"`.
+`Footprint` emits compact single-line S-expressions, all dimensions in mm.
+Style presets `XXS` to `XL` set line widths and font per component size.
+`REF["connector"]` → `"J**"`.
 
 Example:
   >>> fp = Footprint("SOT-23", ref=REF["transistor"], style=S)
@@ -17,6 +18,13 @@ Example:
 import uuid
 from dataclasses import dataclass
 from ..files import FILE
+
+# `sym.py` has its own `Style`, tiers and `REF`, in mil for symbols.
+# These are in mm for footprints, so qualify by module when both are in play.
+__all__ = [
+  "Footprint", "Style", "XXS", "XS", "S", "M", "L", "XL", "REF",
+  "uid", "fmt_number", "FORMAT_VERSION", "GENERATOR_VERSION",
+]
 
 # `.kicad_mod` format date and the KiCad version claimed in the header
 FORMAT_VERSION = "20260206"
@@ -72,7 +80,7 @@ REF = {
 
 class Footprint:
   """Emits lines in call order, `build()` wraps them with the header and 3D models."""
-  def __init__(self, name:str, ref:str="REF**", layer:str="F.Cu", style:Style=L):
+  def __init__(self, name:str, ref:str="REF**", layer:str="F.Cu", style:Style=L) -> None:
     self.name = name
     self.ref = ref
     self.layer = layer
@@ -95,12 +103,12 @@ class Footprint:
     val_font:tuple|None = None,
     datasheet:str = "",
     description:str = "",
-  ):
+  ) -> None:
     """
     Add Reference, Value, Datasheet, Description properties.
 
-    `*_at` is `(x, y, angle)`, `*_font` is `(size_x, size_y, thickness)` falling back to the
-    style. Datasheet and Description are always hidden and keep KiCad's default font.
+    `*_at` is `(x, y, angle)`, `*_font` is `(size_x, size_y, thickness)`, style font when omitted.
+    Datasheet and Description are always hidden and keep KiCad's default font.
     """
     s = self.style
     font = ref_font or (s.font_size, s.font_size, s.font_thick)
@@ -125,14 +133,14 @@ class Footprint:
       f' (effects (font (size {fmt_number(s1)} {fmt_number(s2)}) (thickness {fmt_number(th)}))))'
     )
 
-  def attr(self, kind:str = "through_hole"):
+  def attr(self, kind:str = "through_hole") -> None:
     """Set footprint attribute: `through_hole` or `smd`."""
     self._add(f'\t(attr {kind})')
     self._add(f'\t(duplicate_pad_numbers_are_jumpers no)')
 
   #----------------------------------------------------------------------------- Drawing primitives
 
-  def line(self, x1:float, y1:float, x2:float, y2:float, width:float, layer:str):
+  def line(self, x1:float, y1:float, x2:float, y2:float, width:float, layer:str) -> None:
     """Add `fp_line`."""
     self._add(
       f'\t(fp_line (start {fmt_number(x1)} {fmt_number(y1)})'
@@ -141,14 +149,14 @@ class Footprint:
       f' (layer "{layer}") (uuid "{uid()}"))'
     )
 
-  def rect(self, x1:float, y1:float, x2:float, y2:float, width:float, layer:str):
+  def rect(self, x1:float, y1:float, x2:float, y2:float, width:float, layer:str) -> None:
     """Add rectangle as 4 `fp_line` segments."""
     self.line(x1, y1, x2, y1, width, layer)
     self.line(x2, y1, x2, y2, width, layer)
     self.line(x2, y2, x1, y2, width, layer)
     self.line(x1, y2, x1, y1, width, layer)
 
-  def filled_rect(self, x1:float, y1:float, x2:float, y2:float, width:float, layer:str):
+  def filled_rect(self, x1:float, y1:float, x2:float, y2:float, width:float, layer:str) -> None:
     """Add `fp_rect` with fill."""
     self._add(
       f'\t(fp_rect (start {fmt_number(x1)} {fmt_number(y1)})'
@@ -157,8 +165,8 @@ class Footprint:
       f' (fill yes) (layer "{layer}") (uuid "{uid()}"))'
     )
 
-  def circle(self, cx:float, cy:float, radius:float, width:float, layer:str):
-    """Add `fp_circle` from centre and radius."""
+  def circle(self, cx:float, cy:float, radius:float, width:float, layer:str) -> None:
+    """Add `fp_circle`, radius converted to KiCad's edge point."""
     self._add(
       f'\t(fp_circle (center {fmt_number(cx)} {fmt_number(cy)})'
       f' (end {fmt_number(cx + radius)} {fmt_number(cy)})'
@@ -176,7 +184,7 @@ class Footprint:
     ey:float,
     width:float,
     layer:str,
-  ):
+  ) -> None:
     """Add `fp_arc` (3-point: start, midpoint, end)."""
     self._add(
       f'\t(fp_arc (start {fmt_number(sx)} {fmt_number(sy)})'
@@ -186,7 +194,7 @@ class Footprint:
       f' (layer "{layer}") (uuid "{uid()}"))'
     )
 
-  def poly(self, pts:list[tuple], width:float, layer:str, fill:bool=True):
+  def poly(self, pts:list[tuple], width:float, layer:str, fill:bool=True) -> None:
     """Add `fp_poly` from `(x, y)` points."""
     xy = " ".join(f"(xy {fmt_number(x)} {fmt_number(y)})" for x, y in pts)
     self._add(
@@ -204,7 +212,7 @@ class Footprint:
     size:float = 1,
     thickness:float = 0.15,
     angle:float = 0,
-  ):
+  ) -> None:
     """Add free `fp_text user`, unrelated to the Reference and Value properties."""
     self._add(
       f'\t(fp_text user "{txt}" (at {fmt_number(x)} {fmt_number(y)} {fmt_number(angle)})'
@@ -226,12 +234,12 @@ class Footprint:
     shape:str = "oval",
     rratio:float|None = None,
     drill_offset:tuple|None = None,
-  ):
+  ) -> None:
     """
     Add through-hole pad. Shape: `circle`, `oval`, `rect`, `roundrect`.
 
-    `rratio` is the roundrect corner ratio, `drill_offset` is `(dx, dy)` of the hole relative to
-    the pad centre; both are omitted from the output when `None`.
+    `rratio` is the roundrect corner ratio, `drill_offset` is `(dx, dy)` from the pad centre.
+    Both are omitted from the output when `None`.
     """
     rr = f' (roundrect_rratio {rratio})' if rratio is not None else ""
     if drill_offset:
@@ -256,7 +264,7 @@ class Footprint:
     shape:str = "roundrect",
     rratio:float = 0.25,
     layers:list[str]|None = None,
-  ):
+  ) -> None:
     """Add SMD pad, layers default to `F.Cu`, `F.Paste`, `F.Mask`."""
     if layers is None: layers = ["F.Cu", "F.Paste", "F.Mask"]
     rr = f' (roundrect_rratio {rratio})' if rratio is not None else ""
@@ -267,7 +275,7 @@ class Footprint:
       f'{rr} (uuid "{uid()}"))'
     )
 
-  def pad_npth(self, x:float, y:float, drill:float):
+  def pad_npth(self, x:float, y:float, drill:float) -> None:
     """Add non-plated through hole, unnumbered and with no copper ring."""
     self._add(
       f'\t(pad "" np_thru_hole circle (at {fmt_number(x)} {fmt_number(y)})'
@@ -283,7 +291,7 @@ class Footprint:
     offset:tuple = (0, 0, 0),
     scale:tuple = (1, 1, 1),
     rotate:tuple = (0, 0, 0),
-  ):
+  ) -> None:
     """Add 3D model reference: `offset` in mm, `rotate` in degrees, all `(x, y, z)`."""
     ox, oy, oz = offset
     sx, sy, sz = scale
@@ -297,12 +305,12 @@ class Footprint:
 
   #----------------------------------------------------------------------------------------- Output
 
-  def raw(self, text:str):
+  def raw(self, text:str) -> None:
     """Add raw S-expression line."""
     self._add(text)
 
   def build(self) -> str:
-    """Build complete footprint string."""
+    """Build the full `.kicad_mod` text."""
     header = [
       f'(footprint "{self.name}"',
       f'\t(version {FORMAT_VERSION})',

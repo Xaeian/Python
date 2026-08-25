@@ -3,8 +3,9 @@
 """
 Minimal fluent matplotlib wrapper for CLI time-series plotting.
 
-Traces are stored as dicts, the figure is built on `show()`/`save()`. Stacked panels share the
-x-axis, datetime axes format themselves, `.fig`/`.axes` escape to raw matplotlib.
+Traces are stored as dicts, the figure is built on `show()`/`save()`.
+Stacked panels share the x-axis and datetime axes format themselves.
+`.fig`/`.axes` escape to raw matplotlib.
 
 Requires: `pip install xaeian[plot]`
 
@@ -23,6 +24,8 @@ __extras__ = ("plot", ["matplotlib", "numpy"])
 
 import os
 from datetime import datetime, date
+from typing import Any
+from .extras import MissingExtra, absent
 
 try:
   import matplotlib
@@ -30,8 +33,9 @@ try:
   import matplotlib.dates as mdates
   import matplotlib.ticker
   import numpy as np
-except ImportError as e:
-  raise ImportError("Install with: pip install xaeian[plot]  (matplotlib + numpy)") from e
+except ModuleNotFoundError as e:
+  if not absent(e, "matplotlib", "numpy", "PIL"): raise # matplotlib hard-requires Pillow
+  raise MissingExtra("Install with: pip install xaeian[plot]  (matplotlib + numpy)") from e
 
 #------------------------------------------------------------------------------------------ Helpers
 
@@ -80,7 +84,7 @@ class _SmartDateFormatter(matplotlib.ticker.Formatter):
   60 d-2 y → `25-03-01`
   > 2 y → `2025-03`
   """
-  def __call__(self, x, pos=None):
+  def __call__(self, x:float, pos:int|None=None) -> str:
     dt = mdates.num2date(x)
     span = abs(self.axis.get_view_interval()[1]
       - self.axis.get_view_interval()[0]) # span in days
@@ -159,7 +163,7 @@ class Plot:
     size: `(width, height)` in inches.
     dpi: display only, save DPI comes from `save(dpi=)`.
   """
-  def __init__(self, theme:str="clean", size:tuple=(14, 7), dpi:int=100):
+  def __init__(self, theme:str="clean", size:tuple=(14, 7), dpi:int=100) -> None:
     self._theme = theme
     self._size = size
     self._dpi = dpi
@@ -174,7 +178,7 @@ class Plot:
   #------------------------------------------------------------------------------- Panel management
 
   @staticmethod
-  def _empty_panel() -> dict:
+  def _empty_panel() -> dict[str, Any]:
     return {
       "traces": [], "ylabel": None, "height": 1.0,
       "xlim": None, "ylim": None,
@@ -184,7 +188,7 @@ class Plot:
     }
 
   @property
-  def _target(self) -> dict:
+  def _target(self) -> dict[str, Any]:
     """Twin if active, else the main panel."""
     return self._cur["twin"] if self._cur["twin"] is not None else self._cur
 
@@ -329,7 +333,7 @@ class Plot:
     return self
 
   def legend(self, show:bool=True, **kw) -> Plot:
-    """Override legend. `show=False` hides it. `**kw` → `ax.legend()`."""
+    """Override legend. `**kw` → `ax.legend()`."""
     self._cur["legend"] = (show, kw)
     return self
 
@@ -340,7 +344,7 @@ class Plot:
 
   #-------------------------------------------------------------------------------------- Rendering
 
-  def _finalize_panels(self) -> list[dict]:
+  def _finalize_panels(self) -> list[dict[str, Any]]:
     """Panels holding traces, the unfinished current one included."""
     panels = self._panels + [self._cur]
     return [p for p in panels if p["traces"] or (p["twin"] and p["twin"]["traces"])]
@@ -395,7 +399,7 @@ class Plot:
           if tr["x"] is not None and _is_datetime(tr["x"]):
             _setup_date_axis(ax)
             break
-        # shared x: only the bottom panel keeps tick labels
+        # shared x: the upper panels would repeat the bottom panel's labels
         if not is_last and n > 1:
           ax.tick_params(labelbottom=False)
           ax.set_xlabel("")
@@ -454,7 +458,7 @@ class Plot:
   def _apply_axis(self, ax:plt.Axes, panel:dict, is_twin:bool=False):
     """Set ylabel, limits and log scale. `is_twin` skips x config: the twin shares that axis."""
     ylabel = panel.get("ylabel")
-    # lone series → derive the ylabel from it and color it to match
+
     if ylabel is None and len(panel["traces"]) == 1:
       t = panel["traces"][0]
       if t["name"] and t["kind"] not in ("hline", "vline", "text"):
@@ -500,7 +504,7 @@ class Plot:
     self._fig.savefig(path, **kw)
     return self
 
-  def close(self):
+  def close(self) -> None:
     """Close the figure and free its memory. Idempotent."""
     if self._fig:
       plt.close(self._fig)
@@ -524,13 +528,13 @@ class Plot:
 
   #---------------------------------------------------------------------------------------- Special
 
-  def __repr__(self):
+  def __repr__(self) -> str:
     panels = self._finalize_panels()
     n = sum(len(p["traces"]) + (len(p["twin"]["traces"]) if p.get("twin") else 0)
       for p in panels)
     return f"<Plot {len(panels)} panels, {n} traces>"
 
-  def __del__(self):
+  def __del__(self) -> None:
     self.close()
 
 #-------------------------------------------------------------------------------------- Convenience
@@ -541,7 +545,7 @@ def quick(x, y, label:str|tuple|None=None, **kw) -> Plot:
 
 #--------------------------------------------------------------------------------------------- Demo
 
-def demo():
+def demo() -> None:
   """Stacked sensor dashboard: alarm, twinx, multi-series, datetime."""
   t = np.arange("2025-03-01", "2025-03-02", dtype="datetime64[5m]")
   n = len(t)
@@ -568,7 +572,7 @@ def demo():
     .title("Sensor Dashboard: 24h")
     .show())
 
-def demo_family():
+def demo_family() -> None:
   """Family of curves: simulated parametric sweep."""
   t = np.linspace(0, 1e-3, 200)
   # same shape `Simulation.sweep()` returns

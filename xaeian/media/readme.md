@@ -19,6 +19,8 @@ scrub_metadata("photo.jpg")         # → photo-nometa.jpg
 ```
 
 Both `compress()` and `scrub_metadata()` auto-detect PDF vs image by extension.
+`compress()` returns one dict per file - `src`, `dst`, `orig_kB`, `new_kB` - whatever the
+input kind; images add `orig_size`, `new_size` and `format`.
 
 ## Modules
 
@@ -27,12 +29,12 @@ Both `compress()` and `scrub_metadata()` auto-detect PDF vs image by extension.
 ```py
 from xaeian.media.pdf import *
 
-pdf_compress(src, dst=None, level="1.7", settings="/ebook", inplace=False)
+pdf_compress(src, dst=None, level="1.7", settings="/ebook", inplace=False, verify=True)
 pdf_scrub_metadata(src, dst=None, inplace=False)
 pdf_merge(["a.pdf", "b.pdf"], "out.pdf")
 pdf_split("doc.pdf", "pages/", prefix="page")  # → pages/page_001.pdf, ...
 pdf_extract("doc.pdf", "out.pdf", "1,3,5-7")   # extract specific pages
-pdf_add_text(src, dst=None, text="DRAFT", x=50, y=50, size=12, pages=None)
+pdf_add_text(src, dst=None, text="DRAFT", pos=(50, 50), fontsize=12, pages=None)
 ```
 
 Page spec for `pdf_extract`: `"1,3,5-7"`, `[1, 3]`, or `"2-"` (to end).
@@ -44,7 +46,7 @@ from xaeian.media.img import *
 
 img_compress(src, dst=None, max_px=1920, format="keep", quality=80,
   target_kB=None, recursive=True, inplace=False)
-img_resize(src, dst=None, width=None, height=None, quality=90)
+img_resize(src, dst=None, width=None, height=None, scale=None, quality=90)
 img_convert("photo.png", "photo.webp", quality=90)
 img_scrub_metadata(src, dst=None, inplace=False)
 ```
@@ -82,7 +84,7 @@ xn min report.pdf -s /printer -i      # printer quality, in-place
 xn min photo.jpg --max-px 1280 -q 70  # compress + resize
 xn min photo.jpg -f avif              # convert to AVIF
 xn min photo.jpg -f webp -i           # convert to WebP in-place
-xn min photo.png --target-kb 200      # fit under 200 kB
+xn min photo.png --target-kb 200      # fit under 200kB
 xn min photos/                        # batch compress directory
 xn min photos/ --max-px 800 -q 60     # batch resize + aggressive quality
 xn min photos/ -f auto                # batch, pick smallest format per file

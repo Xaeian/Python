@@ -5,7 +5,8 @@
 import datetime
 import pytest
 from xaeian.net import ftp as ftpmod
-from xaeian.net.ftp import FTP, Attrs, _leaf, _safe_name, _unchanged
+from xaeian.net.common import Attrs, safe_name, unchanged
+from xaeian.net.ftp import FTP, _leaf
 
 PERM = ftpmod.ftplib.error_perm
 EPOCH = 1_700_000_000.0
@@ -17,8 +18,10 @@ class Server:
   SIZE answers only in binary, NLST resets TYPE to ASCII (as ftplib's retrlines does),
   and RNTO refuses an existing target.
   """
-  def __init__(self, files=None, dirs=(), mlsd=True, mfmt=True,
-               unlistable=(), strict_rename=True, store_fail=False):
+  def __init__(
+    self, files=None, dirs=(), mlsd=True, mfmt=True,
+    unlistable=(), strict_rename=True, store_fail=False,
+  ):
     self.files = dict(files or {})
     self.dirs = set(dirs)
     self.mlsd_ok, self.mfmt_ok = mlsd, mfmt
@@ -26,6 +29,7 @@ class Server:
     self.strict_rename, self.store_fail = strict_rename, store_fail
     self.binary = False
     self.closed = False
+    self.cwd_path = "/"
 
   @staticmethod
   def stamp(epoch: float) -> str:
@@ -35,7 +39,7 @@ class Server:
   def _children(self, remote):
     dirs = sorted(d for d in self.dirs if d != remote and d.rsplit("/", 1)[0] == remote)
     files = sorted(p for p in self.files if p.rsplit("/", 1)[0] == remote)
-    return dirs, files  # dirs first: a file after a subdir catches a lost TYPE I
+    return dirs, files # dirs first: a file after a subdir catches a lost TYPE I
 
   def connect(self, host, port, timeout=0): pass
   def login(self, user, password): pass
@@ -49,7 +53,7 @@ class Server:
     return "200"
 
   def sendcmd(self, cmd):
-    if cmd == "FEAT":  # lowercase on purpose: FEAT casing is not guaranteed
+    if cmd == "FEAT": # lowercase on purpose: FEAT casing is not guaranteed
       feat = ["211-Extensions:"]
       if self.mlsd_ok: feat.append(" mlst")
       if self.mfmt_ok: feat.append(" mfmt")
@@ -68,7 +72,7 @@ class Server:
     raise PERM("500")
 
   def nlst(self, remote):
-    self.binary = False  # retrlines sends TYPE A
+    self.binary = False # retrlines sends TYPE A
     if remote in self.unlistable or remote not in self.dirs: raise PERM("550")
     dirs, files = self._children(remote)
     return dirs + files
@@ -92,7 +96,7 @@ class Server:
     self.binary = True
     path = cmd[5:]
     if self.store_fail:
-      self.files[path] = (1, 1_000_000.0)  # a partial file already landed on the server
+      self.files[path] = (1, 1_000_000.0) # a partial file already landed on the server
       raise OSError("transfer aborted")
     self.files[path] = (len(handle.read()), 1_000_000.0)
 
@@ -117,6 +121,12 @@ class Server:
 
   def rmd(self, path): self.dirs.discard(path)
 
+  def pwd(self): return self.cwd_path
+
+  def cwd(self, path):
+    if path != "/" and path not in self.dirs: raise PERM("550 not a directory")
+    self.cwd_path = path
+
 @pytest.fixture
 def client():
   def build(**kw):
@@ -126,7 +136,7 @@ def client():
     return session
   return build
 
-#--------------------------------------------------------------------------------- Connection
+#--------------------------------------------------------------------------------------- Connection
 
 def connect_reports_failure_as_connection_error(monkeypatch):
   class Refusing(Server):
@@ -149,7 +159,7 @@ def disconnect_frees_the_socket_when_quit_cannot_round_trip(client):
   assert server.closed is True
   assert session._ftp is None
 
-#-------------------------------------------------------------------------------- Single file
+#-------------------------------------------------------------------------------------- Single file
 
 def stat_forces_binary_because_strict_servers_reject_size_in_ascii(client):
   session = client(files={"/d/a.txt": (10, EPOCH)}, dirs=["/d"])
@@ -189,7 +199,7 @@ def rename_does_not_destroy_the_target_when_the_source_is_gone(client):
     session.rename("/r/missing.tmp", "/r/live.txt")
   assert "/r/live.txt" in session._ftp.files
 
-#------------------------------------------------------------------------------------ Listing
+#------------------------------------------------------------------------------------------ Listing
 
 def index_walks_nested_directories_without_mlsd(client):
   session = client(files={"/r/sub/x.txt": (1, EPOCH), "/r/b.txt": (7, EPOCH)},
@@ -203,7 +213,7 @@ def index_reasserts_binary_after_a_failed_nested_listing(client):
   session = client(files={"/r/b.txt": (7, EPOCH)}, dirs=["/r", "/r/sub"],
     mlsd=False, unlistable=["/r/sub"])
   idx = session._index_remote("/r")
-  assert "b.txt" in idx  # a file after the failed subdir must not be read as a directory
+  assert "b.txt" in idx # a file after the failed subdir must not be read as a directory
   assert session._index_partial is True
 
 def index_without_mlsd_carries_mtime_from_mdtm(client):
@@ -220,7 +230,7 @@ def hostile_names_from_the_server_are_skipped(client):
   assert sorted(session._index_remote("/r")) == ["ok.txt"]
   assert [a.filename for a in session.ls("/r")] == ["ok.txt"]
 
-#--------------------------------------------------------------------------------------- Sync
+#--------------------------------------------------------------------------------------------- Sync
 
 def sync_pull_refuses_to_delete_when_the_remote_listing_failed(client, tmp_path):
   (tmp_path / "keep.txt").write_bytes(b"precious")
@@ -255,7 +265,7 @@ def push_compares_mtime_when_the_server_supports_mfmt(client, tmp_path):
   session = client(files={"/r/a.txt": (5, 999_999.0)}, dirs=["/r"], mfmt=True)
   assert ("put", "a.txt") in session.sync_push(str(tmp_path), "/r")
 
-#------------------------------------------------------------------------------------ Helpers
+#------------------------------------------------------------------------------------------ Helpers
 
 def leaf_takes_the_last_segment_of_any_nlst_answer():
   assert _leaf("a.txt") == "a.txt"
@@ -263,11 +273,11 @@ def leaf_takes_the_last_segment_of_any_nlst_answer():
   assert _leaf("/srv/dir/a.txt") == "a.txt"
 
 def safe_name_rejects_traversal_and_separators():
-  assert _safe_name("ok.txt")
-  assert not any(_safe_name(n) for n in ("", ".", "..", "a/b", "a\\b"))
+  assert safe_name("ok.txt")
+  assert not any(safe_name(n) for n in ("", ".", "..", "a/b", "a\\b"))
 
 def unchanged_compares_mtime_only_when_it_can_be_trusted():
   attrs = Attrs(st_size=5, st_mtime=999.0)
-  assert not _unchanged(attrs, 111.0, 5)
-  assert _unchanged(attrs, 111.0, 5, use_mtime=False)
-  assert _unchanged(Attrs(st_size=5, st_mtime=111.0), 111.0, 5)
+  assert not unchanged(attrs, 111.0, 5)
+  assert unchanged(attrs, 111.0, 5, use_mtime=False)
+  assert unchanged(Attrs(st_size=5, st_mtime=111.0), 111.0, 5)

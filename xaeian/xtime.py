@@ -3,8 +3,8 @@
 """
 Extended datetime with human-friendly interface.
 
-`Time` subclasses `datetime` and adds string parsing, interval arithmetic, format
-conversion and rounding down to a unit. Requires `pytz`, `tzlocal`.
+`Time` subclasses `datetime` and adds string parsing, interval arithmetic,
+format conversion and rounding down to a unit. Requires `pytz`, `tzlocal`.
 
 Example:
   >>> from xaeian.xtime import Time
@@ -15,15 +15,18 @@ from __future__ import annotations
 
 __extras__ = ("time", ["pytz", "tzlocal"])
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, tzinfo
 from typing import Union, overload
 import calendar
 import re
 
+from .extras import MissingExtra, absent
+
 try:
   import pytz, tzlocal
-except ImportError:
-  raise ImportError("Install with: pip install xaeian[time]")
+except ModuleNotFoundError as e:
+  if not absent(e, "pytz", "tzlocal"): raise
+  raise MissingExtra("Install with: pip install xaeian[time]") from e
 
 TimeInput = Union[str, int, float, datetime, timedelta, "Time"]
 
@@ -37,8 +40,9 @@ class Time(datetime):
   - `Time("2d")`: now + 2 days
   - `Time("-6h 30m")`: now - 6 hours + 30 minutes
 
-  Naive values are treated as local time; comparisons run in UTC. Digit-only text is a unix
-  timestamp, never a date: `Time("20250301")` lands in 1970.
+  Naive values are treated as local time; comparisons run in UTC.
+  Comparison accepts only `Time` and `datetime`: wrap anything else, `t == Time("2025-03-01")`.
+  Digit-only text is a unix timestamp, never a date: `Time("20250301")` lands in 1970.
   """
   #----------------------------------------------------------------------------------- Construction
 
@@ -55,23 +59,24 @@ class Time(datetime):
     minute:int = 0,
     second:int = 0,
     microsecond:int = 0,
-    tzinfo:object = None,
+    tzinfo:tzinfo|None = None,
   ) -> Time: ...
 
-  def __new__(cls, *args, **kwargs):
+  def __new__(cls, *args, **kwargs) -> Time:
     if not args and not kwargs: return cls._now()
     if len(args) == 1 and not kwargs: return cls._parse(args[0])
     return datetime.__new__(cls, *args, **kwargs)
 
   def __hash__(self) -> int:
-    return super().__hash__()
+    """Hashed in UTC, as equality compares: values that compare equal have to hash alike."""
+    return hash(self._to_utc())
 
   @classmethod
   def _from_datetime(cls, dt:datetime) -> Time:
     return datetime.__new__(cls,
       dt.year, dt.month, dt.day,
       dt.hour, dt.minute, dt.second,
-      dt.microsecond, tzinfo=dt.tzinfo,
+      dt.microsecond, tzinfo=dt.tzinfo, fold=dt.fold, # fold picks the pass over a repeated hour
     )
 
   @classmethod
@@ -84,7 +89,7 @@ class Time(datetime):
     return datetime(
       self.year, self.month, self.day,
       self.hour, self.minute, self.second,
-      self.microsecond, tzinfo=self.tzinfo,
+      self.microsecond, tzinfo=self.tzinfo, fold=self.fold,
     )
 
   def copy(self) -> Time:
@@ -178,23 +183,19 @@ class Time(datetime):
   #------------------------------------------------------------------------------------- Comparison
 
   def _to_utc(self) -> datetime:
-    if self.tzinfo is None:
-      return self.replace(tzinfo=tzlocal.get_localzone()).astimezone(pytz.utc)
-    return self.astimezone(pytz.utc)
+    """Plain `datetime` in UTC: plain, so comparing and hashing do not re-enter this class."""
+    dt = self.to_datetime()
+    if dt.tzinfo is None: dt = dt.replace(tzinfo=tzlocal.get_localzone())
+    return dt.astimezone(pytz.utc)
 
   @staticmethod
-  def _safe_parse(v:TimeInput) -> datetime|None:
-    """UTC-normalized parse, None for anything unparsable, so comparisons can defer."""
-    try:
-      t = Time._parse(v)
-      if t.tzinfo is None:
-        return t.replace(tzinfo=tzlocal.get_localzone()).astimezone(pytz.utc)
-      return t.astimezone(pytz.utc)
-    except Exception:
-      return None
+  def _other_utc(v) -> datetime|None:
+    """Comparison operand in UTC, None for anything that is not a `datetime`."""
+    if not isinstance(v, datetime): return None
+    return Time._from_datetime(v)._to_utc()
 
   def __eq__(self, v) -> bool:
-    other = Time._safe_parse(v)
+    other = Time._other_utc(v)
     if other is None: return NotImplemented
     return datetime.__eq__(self._to_utc(), other)
 
@@ -204,22 +205,22 @@ class Time(datetime):
     return not result
 
   def __lt__(self, v) -> bool:
-    other = Time._safe_parse(v)
+    other = Time._other_utc(v)
     if other is None: return NotImplemented
     return datetime.__lt__(self._to_utc(), other)
 
   def __le__(self, v) -> bool:
-    other = Time._safe_parse(v)
+    other = Time._other_utc(v)
     if other is None: return NotImplemented
     return datetime.__le__(self._to_utc(), other)
 
   def __gt__(self, v) -> bool:
-    other = Time._safe_parse(v)
+    other = Time._other_utc(v)
     if other is None: return NotImplemented
     return datetime.__gt__(self._to_utc(), other)
 
   def __ge__(self, v) -> bool:
-    other = Time._safe_parse(v)
+    other = Time._other_utc(v)
     if other is None: return NotImplemented
     return datetime.__ge__(self._to_utc(), other)
 
@@ -355,6 +356,8 @@ def time_to(v:TimeInput|None, fmt:str) -> str|int|float|Time|None:
 #-------------------------------------------------------------------------------------------- Tests
 
 if __name__ == "__main__":
+  from .log import Print
+  print = Print() # claims stdout for UTF-8, prints like the builtin
   t1 = Time()
   t2 = Time("2025-03-01 12:00")
   t3 = Time("03/01/25 12:00:00")

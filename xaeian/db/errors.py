@@ -8,8 +8,8 @@ class DatabaseError(RuntimeError):
   Database operation failed, wrapping the driver exception.
 
   Keeps `op` (method name), `cause`, `sql` and `params` of the failing call as attributes.
-  The message carries `op`, `cause` and the SQL clipped to 200 chars, never `params`, so
-  logging it cannot leak values.
+  The message carries `op`, `cause` and the SQL clipped to 200 chars, never `params`,
+  so logging it cannot leak values.
   """
   def __init__(
     self,
@@ -17,7 +17,7 @@ class DatabaseError(RuntimeError):
     cause:Exception,
     sql:str|None = None,
     params:tuple|None = None,
-  ):
+  ) -> None:
     self.op = op
     self.cause = cause
     self.sql = sql

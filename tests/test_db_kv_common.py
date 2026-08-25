@@ -9,10 +9,10 @@ import pytest
 from xaeian.db.kv_common import (
   check_key, check_table, dumps, loads, now_ms,
   KEY_MAX, VALUE_MAX_BYTES,
-  sql_create, sql_get_value, sql_get_meta, sql_read_all, sql_read_all_meta, where_key,
+  sql_create, sql_upsert, sql_get_value, sql_get_meta, sql_read_all, sql_read_all_meta, where_key,
 )
 
-#------------------------------------------------------------------------------------ check_key
+#---------------------------------------------------------------------------------------- check_key
 
 @pytest.mark.parametrize("key", ["a", "config.timeout", "x" * KEY_MAX])
 def check_key_accepts_reasonable_keys(key):
@@ -30,7 +30,7 @@ def check_key_rejects_overlong():
   with pytest.raises(ValueError):
     check_key("x" * (KEY_MAX + 1))
 
-#---------------------------------------------------------------------------------- check_table
+#-------------------------------------------------------------------------------------- check_table
 
 @pytest.mark.parametrize("table", ["kv", "_store", "Cache1"])
 def check_table_accepts_valid_identifiers(table):
@@ -50,7 +50,7 @@ def check_table_rejects_overlong():
   with pytest.raises(ValueError):
     check_table("t" * (KEY_MAX + 1))
 
-#---------------------------------------------------------------------------------------- dumps
+#-------------------------------------------------------------------------------------------- dumps
 
 def dumps_is_canonical_sorted_and_compact():
   assert dumps({"b": 1, "a": 2}) == '{"a":2,"b":1}'
@@ -68,7 +68,7 @@ def dumps_rejects_non_json_types():
   with pytest.raises(TypeError):
     dumps({1, 2, 3}) # a set is not JSON-serializable
 
-#---------------------------------------------------------------------------------------- loads
+#-------------------------------------------------------------------------------------------- loads
 
 def loads_round_trips_dumps():
   for value in [None, True, 42, 1.5, "text", [1, 2], {"a": 1}]:
@@ -82,7 +82,7 @@ def loads_wraps_bad_json_with_key_context():
   with pytest.raises(ValueError, match="mykey"):
     loads("{not json}", "mykey")
 
-#--------------------------------------------------------------------------------------- now_ms
+#------------------------------------------------------------------------------------------- now_ms
 
 def now_ms_returns_epoch_milliseconds():
   ts = now_ms()
@@ -90,39 +90,69 @@ def now_ms_returns_epoch_milliseconds():
   # bracket against the wall clock: catches a seconds (too small) or nanoseconds mixup
   assert time.time() * 1000 - 5000 < ts < time.time() * 1000 + 5000
 
-#--------------------------------------------------------------------------------- SQL builders
+#------------------------------------------------------------------------------------- SQL builders
+
+# `key` is reserved in MySQL, so the store quotes every identifier it owns. The quote comes
+# from the backend: `"` for SQLite and PostgreSQL, a backtick for MySQL.
 
 def sql_create_declares_kv_schema():
-  assert sql_create("kv") == (
-    "CREATE TABLE IF NOT EXISTS kv ("
-    f"key VARCHAR({KEY_MAX}) PRIMARY KEY, "
-    "value TEXT NOT NULL, "
-    "updated_at BIGINT NOT NULL)"
+  assert sql_create("kv", '"') == (
+    'CREATE TABLE IF NOT EXISTS "kv" ('
+    f'"key" VARCHAR({KEY_MAX}) PRIMARY KEY, '
+    '"value" TEXT NOT NULL, '
+    '"updated_at" BIGINT NOT NULL)'
   )
 
+def sql_create_uses_backticks_for_mysql():
+  sql = sql_create("kv", "`")
+  assert "`key` VARCHAR" in sql and "CREATE TABLE IF NOT EXISTS `kv`" in sql
+
 def sql_get_value_selects_single_value():
-  assert sql_get_value("kv", "?") == "SELECT value FROM kv WHERE key = ?"
+  assert sql_get_value("kv", "?", '"') == 'SELECT "value" FROM "kv" WHERE "key" = ?'
 
 def sql_get_meta_selects_value_and_timestamp():
-  assert sql_get_meta("kv", "$1") == "SELECT value, updated_at FROM kv WHERE key = $1"
+  assert sql_get_meta("kv", "?", "`") == "SELECT `value`, `updated_at` FROM `kv` WHERE `key` = ?"
 
 def sql_read_all_is_ordered_by_key():
-  assert sql_read_all("kv") == "SELECT key, value FROM kv ORDER BY key"
+  assert sql_read_all("kv", '"') == 'SELECT "key", "value" FROM "kv" ORDER BY "key"'
 
 def sql_read_all_meta_includes_timestamp():
-  assert sql_read_all_meta("kv") == "SELECT key, value, updated_at FROM kv ORDER BY key"
+  assert sql_read_all_meta("kv", '"') == (
+    'SELECT "key", "value", "updated_at" FROM "kv" ORDER BY "key"'
+  )
 
 def where_key_builds_lookup_clause():
-  assert where_key("%s") == "key = %s"
+  assert where_key("?", "`") == "`key` = ?"
 
 @pytest.mark.parametrize("build", [
-  lambda t: sql_create(t),
-  lambda t: sql_get_value(t, "?"),
-  lambda t: sql_get_meta(t, "?"),
-  lambda t: sql_read_all(t),
-  lambda t: sql_read_all_meta(t),
+  lambda t: sql_create(t, '"'),
+  lambda t: sql_get_value(t, "?", '"'),
+  lambda t: sql_get_meta(t, "?", '"'),
+  lambda t: sql_read_all(t, '"'),
+  lambda t: sql_read_all_meta(t, '"'),
 ], ids=["create", "get_value", "get_meta", "read_all", "read_all_meta"])
 def sql_builders_reject_bad_table_names(build):
   # every table name flows through ident(), so injection attempts blow up at build time
   with pytest.raises(ValueError):
     build("kv; DROP TABLE kv")
+
+def quoting_cannot_be_escaped_by_the_name():
+  """`ident` runs first, so a name carrying a quote never reaches the SQL."""
+  with pytest.raises(ValueError):
+    sql_create('kv" ; DROP TABLE x; --', '"')
+
+def sql_upsert_writes_the_conflict_form():
+  sql = sql_upsert("kv", "?", '"', "EXCLUDED")
+  assert sql == (
+    'INSERT INTO "kv" ("key", "value", "updated_at") VALUES (?, ?, ?) '
+    'ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value", '
+    '"updated_at" = EXCLUDED."updated_at"'
+  )
+
+def sql_upsert_writes_the_mysql_form_without_a_conflict_target():
+  sql = sql_upsert("kv", "?", "`", None)
+  assert sql == (
+    "INSERT INTO `kv` (`key`, `value`, `updated_at`) VALUES (?, ?, ?) "
+    "ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), "
+    "`updated_at` = VALUES(`updated_at`)"
+  )

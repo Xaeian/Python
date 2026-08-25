@@ -4,14 +4,20 @@
 Colored logging with file rotation.
 
 `logger()` builds a `Logger` for services and daemons, `Print` writes CLI/script output.
-Both expose the same interface, so a library can take either without branching:
-  `dbg/debug` `inf/info` `wrn/warning` `err/error` `crt/critical` `pnc/panic`
-  `space/gap` (indent) `item/dot` (`-` entry), both emitted at the last named call's level.
+Anything taking `log=` may be handed either, because both answer to one vocabulary:
+
+  `dbg` `inf` `wrn` `err` `crt` `pnc` - levels
+  `tip` `run` `ok` - INF with a different tag
+  `gap` (indent) `dot` (`-` entry) - sub-entries, emitted at the level of the last named call
+
+`Logger` also answers to the stdlib names it inherits (`debug`, `info`, ...); `Print` does not.
+The threshold is the one thing they spell differently:
+`p.level = "WRN"` against `log.setLevel(logging.WARNING)`.
 
 Example:
   >>> log = logger("app", file="app.log")
-  >>> log.error("Connection failed")
-  >>> log.item("host unreachable") # logged at ERROR
+  >>> log.err("Connection failed")
+  >>> log.dot("host unreachable") # logged at ERROR
 """
 
 import sys, re, logging, builtins
@@ -25,21 +31,35 @@ logging.addLevelName(PANIC, "PANIC")
 LevelName = Literal["DBG", "INF", "WRN", "ERR", "CRT", "PNC"]
 Level = LevelName | int
 
-# (short, name, numeric, color)
+# each short name must also exist on `Ico`: `ColorFormatter` looks its tag up by `getattr`
 _LEVEL_TABLE = [
-  ("DBG", "DEBUG", logging.DEBUG, Color.GREEN),
-  ("INF", "INFO", logging.INFO, Color.BLUE),
-  ("WRN", "WARNING", logging.WARNING, Color.YELLOW),
-  ("ERR", "ERROR", logging.ERROR, Color.RED),
-  ("CRT", "CRITICAL", logging.CRITICAL, Color.MAGNTA),
-  ("PNC", "PANIC", PANIC, Color.GOLD),
+  ("DBG", "DEBUG", logging.DEBUG),
+  ("INF", "INFO", logging.INFO),
+  ("WRN", "WARNING", logging.WARNING),
+  ("ERR", "ERROR", logging.ERROR),
+  ("CRT", "CRITICAL", logging.CRITICAL),
+  ("PNC", "PANIC", PANIC),
 ]
-_LEVELS = {short: num for short, _name, num, _color in _LEVEL_TABLE}
+_LEVELS = {short: num for short, _name, num in _LEVEL_TABLE}
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
 def _strip_ansi(text:str) -> str:
   return _ANSI_RE.sub("", text)
+
+def _console(stream):
+  """
+  Reconfigure a stream to UTF-8 and hand it back.
+
+  Redirected output falls back to the OS codepage, which on Windows cannot encode the `→`
+  and `•` these messages carry, so the write raises instead of printing.
+  `backslashreplace` then degrades visibly rather than killing the process.
+
+  Streams without `reconfigure` (`StringIO`, a plain file) are handed back untouched.
+  """
+  try: stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+  except (AttributeError, ValueError): pass
+  return stream
 
 def _level(v:Level) -> int:
   if isinstance(v, int): return v
@@ -59,7 +79,7 @@ def _fmt(date:bool, time:bool) -> str:
 
 class LogFormatter(logging.Formatter):
   """Plain formatter with 3-char level abbreviations for file output."""
-  LEVELS = {name: short for short, name, _num, _color in _LEVEL_TABLE}
+  LEVELS = {name: short for short, name, _num in _LEVEL_TABLE}
 
   def format(self, record:logging.LogRecord) -> str:
     record.levelname = self.LEVELS.get(record.levelname, record.levelname)
@@ -67,17 +87,17 @@ class LogFormatter(logging.Formatter):
 
 class ColorFormatter(LogFormatter):
   """Colored formatter for terminal output."""
-  COLORS = {short: color for short, _name, _num, color in _LEVEL_TABLE}
+  TAGS = {short: getattr(Ico, short) for short, _name, _num in _LEVEL_TABLE}
 
-  def __init__(self, date:bool=True, time:bool=True):
+  def __init__(self, date:bool=True, time:bool=True) -> None:
     super().__init__(fmt=_fmt(date, time), datefmt=_datefmt(date, time))
 
   def format(self, record:logging.LogRecord) -> str:
     record.levelname = self.LEVELS.get(record.levelname, record.levelname)
     lvl = record.levelname
-    color = self.COLORS.get(lvl, Color.WHITE)
+    tag = self.TAGS.get(lvl, f"{Color.WHITE}{lvl}{Color.END}")
     text = record.getMessage()
-    msg = f"{color}{lvl}{Color.END} {Color.WHITE}{text}{Color.END}"
+    msg = f"{tag} {Color.WHITE}{text}{Color.END}"
     if self.datefmt:
       ts = self.formatTime(record, self.datefmt)
       msg = f"{Color.GREY}{ts}{Color.END} {msg}"
@@ -88,16 +108,19 @@ class ColorFormatter(LogFormatter):
 
 class Print:
   """
-  Terminal logger with level filtering, interface-compatible with `Logger`.
+  Terminal logger with level filtering, answering the same vocabulary as `Logger`.
 
   `file` is a stream handed to `print()`, not a path: `Print(file=sys.stderr)`.
+  `gap` and `dot` take the level of the last named call on this instance.
   """
-  def __init__(self, file=None, level:Level="DBG"):
+  def __init__(self, file=None, level:Level="DBG") -> None:
+    # `file` stays None so `print()` resolves stdout per call, as `redirect_stdout` expects
+    _console(sys.stdout if file is None else file)
     self._file = file
     self._level = _level(level)
     self._last_level = logging.DEBUG
 
-  def __call__(self, *args, **kwargs):
+  def __call__(self, *args, **kwargs) -> None:
     if self._file and "file" not in kwargs:
       kwargs["file"] = self._file
     builtins.print(*args, **kwargs)
@@ -109,47 +132,43 @@ class Print:
   def _emit_sub(self, ico:str, *args, **kwargs):
     if self._last_level >= self._level: self(ico, *args, **kwargs)
 
-  def dbg(self, *a, **kw): self._emit(logging.DEBUG, Ico.DBG, *a, **kw)
-  def inf(self, *a, **kw): self._emit(logging.INFO, Ico.INF, *a, **kw)
-  def wrn(self, *a, **kw): self._emit(logging.WARNING, Ico.WRN, *a, **kw)
-  def err(self, *a, **kw): self._emit(logging.ERROR, Ico.ERR, *a, **kw)
-  def crt(self, *a, **kw): self._emit(logging.CRITICAL, Ico.CRT, *a, **kw)
-  def pnc(self, *a, **kw): self._emit(PANIC, Ico.PNC, *a, **kw)
-  def tip(self, *a, **kw): self._emit(logging.INFO, Ico.TIP, *a, **kw)
-  def run(self, *a, **kw): self._emit(logging.INFO, Ico.RUN, *a, **kw)
+  def dbg(self, *a, **kw) -> None: self._emit(logging.DEBUG, Ico.DBG, *a, **kw)
+  def inf(self, *a, **kw) -> None: self._emit(logging.INFO, Ico.INF, *a, **kw)
+  def wrn(self, *a, **kw) -> None: self._emit(logging.WARNING, Ico.WRN, *a, **kw)
+  def err(self, *a, **kw) -> None: self._emit(logging.ERROR, Ico.ERR, *a, **kw)
+  def crt(self, *a, **kw) -> None: self._emit(logging.CRITICAL, Ico.CRT, *a, **kw)
+  def pnc(self, *a, **kw) -> None: self._emit(PANIC, Ico.PNC, *a, **kw)
+  def tip(self, *a, **kw) -> None: self._emit(logging.INFO, Ico.TIP, *a, **kw)
+  def run(self, *a, **kw) -> None: self._emit(logging.INFO, Ico.RUN, *a, **kw)
 
-  def gap(self, *a, **kw): self._emit_sub(Ico.GAP, *a, **kw)
-  def dot(self, *a, **kw): self._emit_sub(Ico.DOT, *a, **kw)
-  def space(self, *a, **kw): self.gap(*a, **kw) # Logger compat
-  def item(self, *a, **kw): self.dot(*a, **kw) # Logger compat
+  def gap(self, *a, **kw) -> None: self._emit_sub(Ico.GAP, *a, **kw)
+  def dot(self, *a, **kw) -> None: self._emit_sub(Ico.DOT, *a, **kw)
 
-  def ok(self, *args, **kwargs):
+  def ok(self, *args, **kwargs) -> None:
     """Append ` OK` badge to last arg, print at INF level."""
     suffix = f" {Ico.OK}"
     args = (*args[:-1], str(args[-1]) + suffix) if args else (suffix.lstrip(),)
     self._emit(logging.INFO, Ico.INF, *args, **kwargs)
-
-  # long aliases: Logger compat
-  def debug(self, *a, **kw): self.dbg(*a, **kw)
-  def info(self, *a, **kw): self.inf(*a, **kw)
-  def warning(self, *a, **kw): self.wrn(*a, **kw)
-  def error(self, *a, **kw): self.err(*a, **kw)
-  def critical(self, *a, **kw): self.crt(*a, **kw)
-  def panic(self, *a, **kw): self.pnc(*a, **kw)
 
   @property
   def level(self) -> int:
     return self._level
 
   @level.setter
-  def level(self, v:Level):
+  def level(self, v:Level) -> None:
     self._level = _level(v)
 
 #------------------------------------------------------------------------------------------- Logger
 
 class Logger(logging.Logger):
-  """Stdlib logger with short aliases and level-inheriting `space`/`item` sub-entries."""
-  def __init__(self, name:str, level:int=logging.NOTSET):
+  """
+  Stdlib logger speaking the `Print` vocabulary as well as its own.
+
+  `gap` and `dot` take the level of the last named call on this logger.
+  `logging.getLogger` hands the same instance to every caller of a given name,
+  so two modules logging under one name can see a sub-entry follow the other's call.
+  """
+  def __init__(self, name:str, level:int=logging.NOTSET) -> None:
     super().__init__(name, level)
     self._init_handlers()
 
@@ -159,30 +178,31 @@ class Logger(logging.Logger):
     if not hasattr(self, "_file_path"): self._file_path: str = ""
     if not hasattr(self, "_last_level"): self._last_level: int = logging.DEBUG
 
-  # stdlib overrides: track _last_level
-  def debug(self, *a, **kw): self._last_level = logging.DEBUG; super().debug(*a, **kw)
-  def info(self, *a, **kw): self._last_level = logging.INFO; super().info(*a, **kw)
-  def warning(self, *a, **kw): self._last_level = logging.WARNING; super().warning(*a, **kw)
-  def error(self, *a, **kw): self._last_level = logging.ERROR; super().error(*a, **kw)
-  def critical(self, *a, **kw): self._last_level = logging.CRITICAL; super().critical(*a, **kw)
-  def panic(self, *a, **kw): self._last_level = PANIC; self.log(PANIC, *a, **kw)
+  # stdlib overrides
+  def debug(self, *a, **kw) -> None: self._last_level = logging.DEBUG; super().debug(*a, **kw)
+  def info(self, *a, **kw) -> None: self._last_level = logging.INFO; super().info(*a, **kw)
+  def warning(self, *a, **kw) -> None:
+    self._last_level = logging.WARNING; super().warning(*a, **kw)
+  def error(self, *a, **kw) -> None: self._last_level = logging.ERROR; super().error(*a, **kw)
+  def critical(self, *a, **kw) -> None:
+    self._last_level = logging.CRITICAL; super().critical(*a, **kw)
+  def panic(self, *a, **kw) -> None: self._last_level = PANIC; self.log(PANIC, *a, **kw)
 
   # short aliases: Print compat
-  def dbg(self, *a, **kw): self.debug(*a, **kw)
-  def inf(self, *a, **kw): self.info(*a, **kw)
-  def wrn(self, *a, **kw): self.warning(*a, **kw)
-  def err(self, *a, **kw): self.error(*a, **kw)
-  def crt(self, *a, **kw): self.critical(*a, **kw)
-  def pnc(self, *a, **kw): self.panic(*a, **kw)
-  def run(self, *a, **kw): self.info(*a, **kw)
+  def dbg(self, *a, **kw) -> None: self.debug(*a, **kw)
+  def inf(self, *a, **kw) -> None: self.info(*a, **kw)
+  def wrn(self, *a, **kw) -> None: self.warning(*a, **kw)
+  def err(self, *a, **kw) -> None: self.error(*a, **kw)
+  def crt(self, *a, **kw) -> None: self.critical(*a, **kw)
+  def pnc(self, *a, **kw) -> None: self.panic(*a, **kw)
+  def run(self, *a, **kw) -> None: self.info(*a, **kw)
+  def tip(self, *a, **kw) -> None: self.info(*a, **kw)
 
-  # sub-entries: inherit _last_level
-  def space(self, msg="", *a, **kw): self.log(self._last_level, f"    {msg}", *a, **kw)
-  def item(self, msg="", *a, **kw): self.log(self._last_level, f" -  {msg}", *a, **kw)
-  def gap(self, *a, **kw): self.space(*a, **kw)
-  def dot(self, *a, **kw): self.item(*a, **kw)
+  # sub-entries
+  def gap(self, msg="", *a, **kw) -> None: self.log(self._last_level, f"    {msg}", *a, **kw)
+  def dot(self, msg="", *a, **kw) -> None: self.log(self._last_level, f" -  {msg}", *a, **kw)
 
-  def ok(self, msg="", *a, **kw):
+  def ok(self, msg="", *a, **kw) -> None:
     """Append ` OK` badge to the message, log at INFO level."""
     self.info(f"{msg} {Ico.OK}" if msg else Ico.OK, *a, **kw)
 
@@ -192,7 +212,7 @@ class Logger(logging.Logger):
     return self._file_path
 
   @file.setter
-  def file(self, path:str): self.set_file(file=path)
+  def file(self, path:str) -> None: self.set_file(file=path)
 
   def set_file(
     self,
@@ -235,7 +255,7 @@ class Logger(logging.Logger):
     return self._stream_handler is not None
 
   @stream.setter
-  def stream(self, enable:bool): self.set_stream(enable=enable)
+  def stream(self, enable:bool) -> None: self.set_stream(enable=enable)
 
   def set_stream(
     self,
@@ -252,7 +272,7 @@ class Logger(logging.Logger):
       except Exception: pass
       self._stream_handler = None
     if not enable: return
-    sh = logging.StreamHandler(sys.stdout)
+    sh = logging.StreamHandler(_console(sys.stdout))
     sh.setLevel(_level(level))
     if color: fmt = ColorFormatter(date, time)
     else: fmt = LogFormatter(_fmt(date, time), _datefmt(date, time))
@@ -279,8 +299,8 @@ def logger(
   """
   Create or reconfigure a named logger.
 
-  A repeat call with the same name rebuilds that logger's handlers. The logger itself stays at
-  DEBUG and does not propagate, so `stream_lvl` and `file_lvl` are what filters.
+  A repeat call with the same name rebuilds that logger's handlers.
+  The logger itself stays at DEBUG and does not propagate: `stream_lvl` and `file_lvl` filter.
 
   Args:
     name: `"app.module"` for a child logger.
@@ -306,10 +326,10 @@ def logger(
 
 if __name__ == "__main__":
   log = logger("demo", file=False)
-  log.debug("debug"); log.info("info"); log.error("error")
-  log.item("detail one"); log.item("detail two")
-  log.info("back to info"); log.space("indented")
-  log.warning("warning"); log.critical("critical"); log.panic("panic")
+  log.dbg("debug"); log.inf("info"); log.err("error")
+  log.dot("detail one"); log.dot("detail two")
+  log.inf("back to info"); log.gap("indented")
+  log.wrn("warning"); log.crt("critical"); log.pnc("panic")
 
   p = Print()
   p.inf("info"); p.err("error")
@@ -318,4 +338,4 @@ if __name__ == "__main__":
   p.wrn("warning"); p.ok("done")
 
   p2 = Print(level="WRN")
-  p2.info("hidden"); p2.error("visible"); p2.dot("visible: inherits ERR")
+  p2.inf("hidden"); p2.err("visible"); p2.dot("visible: inherits ERR")

@@ -3,8 +3,9 @@
 """
 Serial communication over `pyserial`.
 
-`SerialPort` is the colored-console base, `Recorder`/`MultiRecorder` poll numeric values in a
-background thread, `Shell` speaks the embedded SH command protocol.
+`SerialPort` is the colored-console base,
+`Recorder`/`MultiRecorder` poll numeric values in a background thread,
+`Shell` speaks the embedded SH command protocol.
 """
 
 __extras__ = ("serial", ["pyserial"])

@@ -3,7 +3,7 @@
 """Core configuration and context management for file operations."""
 
 import os, sys
-from typing import Any
+from typing import Any, Iterator
 from dataclasses import dataclass, replace
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -34,7 +34,7 @@ class Config:
   clean: bool = True
   encoding: str = "utf-8"
 
-  def __post_init__(self):
+  def __post_init__(self) -> None:
     if self.root_path is None:
       self.root_path = _default_root_path()
     elif not os.path.isabs(self.root_path):
@@ -55,7 +55,7 @@ def set_context(**overrides) -> Config:
   return new_cfg
 
 @contextmanager
-def file_context(**overrides:Any):
+def file_context(**overrides:Any) -> Iterator[Config]:
   """Temporarily override configuration within a block."""
   cfg = get_context()
   new_cfg = replace(cfg, **overrides) if overrides else cfg

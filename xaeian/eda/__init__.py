@@ -2,6 +2,7 @@
 
 """Electronics - E-series, voltage converters, KiCad tooling, NgSpice runner."""
 
+from ..extras import MissingExtra
 from .ee import E6, E12, E24, expand_series, VConv
 from .spice import Simulation, parse_output
 from .kicad_clean import clean_step, clean_footprint
@@ -18,5 +19,5 @@ __all__ = [
 try:
   from .kicad import KiCad
   __all__ += ["KiCad"]
-except ImportError:
+except MissingExtra:
   pass

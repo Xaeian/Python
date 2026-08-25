@@ -3,8 +3,9 @@
 """
 Shell command helpers: version check, execution, lookup.
 
-Thin wrappers over `subprocess` and `shutil.which`: `version`, `which` and `output` return
-`None` when a command is missing or fails, `run` returns the raw `CompletedProcess`.
+Thin wrappers over `subprocess` and `shutil.which`:
+`version`, `which` and `output` return `None` when a command is missing or fails,
+`run` returns the raw `CompletedProcess`.
 """
 
 import os, re, shlex, subprocess, shutil
@@ -67,7 +68,7 @@ def run(
   check:bool = False,
   encoding:str = "utf-8",
   timeout:float|None = None,
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
   """
   Run command in text mode, capturing output and tolerating a non-zero exit.
 

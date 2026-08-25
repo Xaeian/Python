@@ -5,6 +5,7 @@
 import sys
 from ..log import Print
 from ..colors import Color as c
+from .args import make_parser, add_help
 
 p = Print()
 
@@ -30,13 +31,12 @@ def _list() -> int:
 
 #----------------------------------------------------------------------------------------- Commands
 
-def main():
-  from ._args import _make_parser, _add_help
-  parser = _make_parser("List or drop SSH host keys recorded by `SFTP`", EXAMPLES)
+def main() -> None:
+  parser = make_parser("List or drop SSH host keys recorded by `SFTP`", EXAMPLES)
   parser.add_argument("host", nargs="?", default=None, help="Host to drop (omit to list)")
   parser.add_argument("-p", "--port", type=int, default=22, metavar="N",
     help="Port the entry was recorded under (default: 22)")
-  _add_help(parser)
+  add_help(parser)
   args = parser.parse_args()
   try:
     from ..net.sftp import SFTP

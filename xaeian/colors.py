@@ -49,7 +49,7 @@ class Ico:
   DOT = f"{Color.SILVER} • {Color.END}"
   GAP = "   "
 
-def test_colors():
+def test_colors() -> None:
   """Print each color name rendered in its own color, next to its escape literal."""
   for name, code in vars(Color).items():
     if not name.isupper() or name == "END": continue

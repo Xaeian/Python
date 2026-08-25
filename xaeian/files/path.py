@@ -9,15 +9,20 @@ from ..xstring import replace_start
 #----------------------------------------------------------------------------------- PATH namespace
 
 class PATH:
-  """Static path helpers; normalization and resolution follow the active `Config`."""
+  """
+  Static path helpers; normalization and resolution follow the active `Config`.
+
+  Everything here is lexical: no call reads the filesystem; `real` alone expands symlinks.
+  Whether a path exists is `FILE.exists` / `DIR.exists` business.
+  """
   @staticmethod
   def normalize(path:str) -> str:
     """
     Normalize path separators and redundant segments.
 
-    The leading `//` of a UNC share (`//host/share`) and of the `//?/` extended-length prefix
-    survives collapsing, since it is the root itself and not a repeated separator. The `//./`
-    device namespace is not preserved, its `.` reads as a current-directory segment.
+    A leading `//` is the root itself and not a repeated separator, so it survives collapsing:
+    a UNC share (`//host/share`) and the `//?/` extended-length prefix keep theirs.
+    The `//./` device namespace is not preserved, its `.` reads as a current-directory segment.
     """
     cfg = get_context()
     if cfg.posix_slash: path = path.replace("\\", "/")
@@ -62,9 +67,9 @@ class PATH:
     """
     Resolve to an absolute path with every symlink expanded.
 
-    `resolve` only folds `.` and `..` lexically, so a link inside a directory still reads as
-    inside it. Use this whenever a path built from untrusted input has to be proven to stay
-    within a base directory.
+    `resolve` only folds `.` and `..` lexically,
+    so a link inside a directory still reads as inside it.
+    Use this whenever a path from untrusted input must be proven to stay inside a base directory.
     """
     return PATH.normalize(os.path.realpath(PATH.resolve(path)))
 
@@ -106,8 +111,8 @@ class PATH:
     """
     Path relative to `base` with `prefix` prepended; `PATH.rel()` is the plain form.
 
-    Falls back to the absolute path when `path` lies outside `base`. A result that already
-    starts with `prefix` is not prefixed twice.
+    Falls back to the absolute path when `path` lies outside `base`.
+    A result that already starts with `prefix` is not prefixed twice.
     """
     cfg = get_context()
     abs_path = PATH.resolve(path)
@@ -129,21 +134,6 @@ class PATH:
     except ValueError:
       pass
     return PATH.normalize(abs_path)
-
-  @staticmethod
-  def exists(path:str) -> bool:
-    """Check if path exists (file or directory)."""
-    return os.path.exists(PATH.resolve(path))
-
-  @staticmethod
-  def is_file(path:str) -> bool:
-    """Check if path is an existing file."""
-    return os.path.isfile(PATH.resolve(path))
-
-  @staticmethod
-  def is_dir(path:str) -> bool:
-    """Check if path is an existing directory."""
-    return os.path.isdir(PATH.resolve(path))
 
   @staticmethod
   def basename(path:str) -> str:
@@ -188,8 +178,9 @@ class PATH:
     """
     Check if path is inside `base`, or inside `root_path` when `base` is omitted.
 
-    `real=True` expands symlinks on both sides first. Without it a link inside `base`
-    pointing elsewhere still counts as inside, which untrusted input can exploit.
+    `real=True` expands symlinks on both sides first.
+    Without it a link inside `base` pointing elsewhere still counts as inside,
+    which untrusted input can exploit.
     """
     cfg = get_context()
     conv = PATH.real if real else PATH.resolve

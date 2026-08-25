@@ -24,8 +24,10 @@ class Attr:
 
 class Client:
   """Fake paramiko.SFTPClient over a scripted tree."""
-  def __init__(self, tree=None, targets=None, missing=(), nostat=(),
-               put_fails=False, close_fails=False, utime_fails=False):
+  def __init__(
+    self, tree=None, targets=None, missing=(), nostat=(),
+    put_fails=False, close_fails=False, utime_fails=False,
+  ):
     self.tree = tree or {}
     self.targets = targets or {}
     self.missing, self.nostat = set(missing), set(nostat)
@@ -48,7 +50,7 @@ class Client:
     with open(local, "wb") as handle: handle.write(b"xxx")
 
   def put(self, local, remote, callback=None):
-    self.files[remote] = True  # bytes already landed on the wire
+    self.files[remote] = True # bytes already landed on the wire
     if self.put_fails: raise OSError("link dropped mid-transfer")
 
   def posix_rename(self, src, dst): self.files[dst] = self.files.pop(src)
@@ -81,7 +83,7 @@ def client():
     return session
   return build
 
-#--------------------------------------------------------------------------------- Connection
+#--------------------------------------------------------------------------------------- Connection
 
 def connect_loads_known_hosts_and_honours_strict(monkeypatch, tmp_path):
   class Recorder:
@@ -101,8 +103,8 @@ def connect_loads_known_hosts_and_honours_strict(monkeypatch, tmp_path):
   monkeypatch.setattr(sftpmod.paramiko, "SSHClient", factory)
   monkeypatch.setattr(sftpmod, "_known_hosts", lambda: str(store))
   SFTP("host", "user").connect()
-  assert made[-1].loaded is True  # system known_hosts honored, read-only
-  assert made[-1].own.endswith("kh")  # writable store: arms persistence and the key check
+  assert made[-1].loaded is True # system known_hosts honored, read-only
+  assert made[-1].own.endswith("kh") # writable store: arms persistence and the key check
   assert isinstance(made[-1].policy, sftpmod._RecordPolicy)
   SFTP("host", "user", strict=True).connect()
   assert isinstance(made[-1].policy, paramiko.RejectPolicy)
@@ -139,7 +141,7 @@ def disconnect_closes_the_ssh_session_even_when_the_channel_is_dead(client):
   assert ssh.closed is True
   assert session._sftp is None and session._ssh is None
 
-#-------------------------------------------------------------------------------- Single file
+#-------------------------------------------------------------------------------------- Single file
 
 def a_failed_upload_removes_the_partial_tmp_file(client, tmp_path):
   (tmp_path / "a.txt").write_bytes(b"hello")
@@ -165,7 +167,7 @@ def a_server_refusing_setstat_neither_aborts_the_push_nor_loops_forever(client, 
   assert session._can_utime is False
   assert ("skip", "a.txt") in session.sync_push(str(tmp_path), "/r")
 
-#------------------------------------------------------------------------------------ Listing
+#------------------------------------------------------------------------------------------ Listing
 
 def hostile_names_from_the_server_are_skipped(client):
   session = client(tree={"/r": [Attr("../evil.txt"), Attr(".."), Attr("a/b"), Attr("ok.txt")]})
@@ -187,7 +189,7 @@ def file_symlinks_resolve_to_their_target_and_directory_links_are_skipped(client
   )
   idx = session._index_remote("/r")
   assert sorted(idx) == ["flink", "real.txt"]
-  assert idx["flink"].st_size == 42  # the target's size, not the link's
+  assert idx["flink"].st_size == 42 # the target's size, not the link's
   assert idx["flink"].st_mtime == EPOCH
 
 def rmdir_unlinks_a_symlink_instead_of_following_it(client):
@@ -197,7 +199,7 @@ def rmdir_unlinks_a_symlink_instead_of_following_it(client):
   session.rmdir("/r")
   assert session._sftp.removed == ["/r/dlink"]
 
-#--------------------------------------------------------------------------------------- Sync
+#--------------------------------------------------------------------------------------------- Sync
 
 def sync_pull_refuses_to_delete_when_the_remote_root_is_missing(client, tmp_path):
   (tmp_path / "keep.txt").write_bytes(b"precious")
@@ -229,7 +231,7 @@ def sync_push_creates_a_remote_root_that_does_not_exist_yet(client, tmp_path):
   assert "/new/a.txt" in session._sftp.files
   assert ("put", "a.txt") in actions
 
-#--------------------------------------------------------------------------------------- Exec
+#--------------------------------------------------------------------------------------------- Exec
 
 def exec_drains_stderr_concurrently_and_tolerates_non_utf8(client):
   gate = threading.Event()

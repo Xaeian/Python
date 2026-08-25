@@ -3,7 +3,9 @@
 """Directory tree visualizer with filtering and color output."""
 
 import os, sys
-from ..files import PATH, JSON
+from typing import Any
+from ..files import PATH, DIR, JSON
+from ..files.dir import _linked # a link is shown, never entered
 from ..log import Print
 from ..colors import Color as c
 
@@ -23,9 +25,9 @@ DEFAULT_IGNORE = {
   ".DS_Store", "Thumbs.db",
 }
 
-from ._args import _fmt_size as _fmt_size_raw
+from .args import fmt_size as _fmt_size_raw, make_parser, add_help
 
-def _fmt_size(b:int) -> str:
+def fmt_size(b:int) -> str:
   return _fmt_size_raw(b, (" B", "k", "M", "G"))
 
 def _match_exts(name:str, exts:list[str]|None) -> bool:
@@ -46,7 +48,7 @@ def tree(
   max_depth:int|None = None,
   dirs_only:bool = False,
   color:bool = True,
-) -> dict:
+) -> dict[str, Any]:
   """
   Build the tree rows and stats for `root`; nothing is printed.
 
@@ -59,8 +61,8 @@ def tree(
   Returns:
     Keys: dirs, files, size (bytes), lines (rendered rows, root first).
   """
-  root = os.path.abspath(root)
-  if not os.path.isdir(root):
+  root = PATH.resolve(root)
+  if not DIR.exists(root):
     raise FileNotFoundError(f"Directory not found: {root}")
   if ignore is None:
     ignore = DEFAULT_IGNORE.copy()
@@ -92,7 +94,7 @@ def tree(
       if is_dir:
         stats["dirs"] += 1
         stats["lines"].append(f"{prefix}{connector}{_col(name + '/', c.CYAN)}")
-        if max_depth is None or depth < max_depth:
+        if (max_depth is None or depth < max_depth) and not _linked(dirpath, name):
           extension = _BLANK if is_last else _PIPE
           _walk(full, prefix + extension, depth + 1)
       else:
@@ -101,7 +103,7 @@ def tree(
         except OSError: sz = 0
         stats["size"] += sz
         if show_size:
-          size_str = _col(_fmt_size(sz).rjust(6), c.GREY)
+          size_str = _col(fmt_size(sz).rjust(6), c.GREY)
           stats["lines"].append(f"{prefix}{connector}{name.ljust(max_name)} {size_str}")
         else:
           stats["lines"].append(f"{prefix}{connector}{name}")
@@ -123,9 +125,8 @@ examples:
   xn tree . -o tree.json  Save stats to JSON
 """
 
-def main():
-  from ._args import _make_parser, _add_help
-  parser = _make_parser("Draw directory tree with filtering", EXAMPLES)
+def main() -> None:
+  parser = make_parser("Draw directory tree with filtering", EXAMPLES)
   parser.add_argument("root", nargs="?", default=".", help="Root directory (default: .)")
   parser.add_argument("-e", "--exts", nargs="+", default=None, metavar="EXT",
     help="Filter by extensions (e.g. .py .c .h)")
@@ -139,10 +140,10 @@ def main():
   parser.add_argument("--no-color", action="store_true", help="Disable ANSI colors")
   parser.add_argument("-o", "--output", default=None, metavar="PATH",
     help="Save stats to JSON file")
-  _add_help(parser)
+  add_help(parser)
   args = parser.parse_args()
-  root = os.path.abspath(args.root)
-  if not os.path.isdir(root):
+  root = PATH.resolve(args.root)
+  if not DIR.exists(root):
     p.err(f"Directory {c.ORANGE}{root}{c.END} not found")
     sys.exit(1)
   ignore = DEFAULT_IGNORE.copy()
@@ -170,7 +171,7 @@ def main():
   print()
   p.inf(f"{c.TEAL}{result['dirs']}{c.END} directories, "
     f"{c.CYAN}{result['files']}{c.END} files, "
-    f"{c.GREY}{_fmt_size(result['size']).strip()}{c.END} total")
+    f"{c.GREY}{fmt_size(result['size']).strip()}{c.END} total")
   if args.output:
     JSON.save_pretty(args.output, {
       "root": root,

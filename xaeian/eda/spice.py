@@ -3,8 +3,9 @@
 """
 NgSpice simulation runner with template-based netlists.
 
-Template substitution, batch execution, ASCII output parsing, CSV caching and parallel
-parametric sweeps. Requires the `ngspice` binary on PATH or an explicit path.
+Template substitution, batch execution, ASCII output parsing, CSV caching
+and parallel parametric sweeps.
+Requires the `ngspice` binary on PATH or an explicit path.
 
 Example:
   >>> sim = Simulation("inverter", lib="C:/Kicad/Spice")
@@ -12,7 +13,7 @@ Example:
   >>> results = sim.sweep(RLOAD=["1k", "2.2k", "4.7k"])
 """
 
-import os, re, glob
+import os, re, glob, hashlib, itertools
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..cmd import run as cmd_run, which
@@ -27,8 +28,8 @@ def parse_output(path:str) -> dict[str, list[float]]:
   Parse ngspice ASCII wrdata/print output → `{column: [values]}`.
 
   nutmeg carries variable names in its header → `{"TIME": [...], "V(OUT)": [...]}`.
-  wrdata is positional only → `{"x": [...], "col0": [...]}`; use `Simulation.run()`
-  to remap those keys onto the signal names taken from the template.
+  wrdata is positional only → `{"x": [...], "col0": [...]}`.
+  Use `Simulation.run()` to remap those keys onto the signal names from the template.
   """
   text = FILE.load(path)
   if not text: raise FileNotFoundError(f"Empty or missing: {path}")
@@ -121,8 +122,8 @@ def _load_template(name:str, path:str, lib:str) -> str:
   """
   Load `{path}/{name}.cir`, inline its `.include` directives, append `{name}.sp` commands.
 
-  `lib` fills the `{LIB}` and `{LSM}` placeholders. A trailing `.end` is stripped so the
-  appended commands stay inside the netlist.
+  `lib` fills the `{LIB}` and `{LSM}` placeholders.
+  A trailing `.end` is stripped so the appended commands stay inside the netlist.
   """
   cir_file = os.path.join(path, f"{name}.cir")
   cir = FILE.load(cir_file).rstrip()
@@ -142,6 +143,34 @@ def _load_template(name:str, path:str, lib:str) -> str:
   return cir
 
 #--------------------------------------------------------------------------------- Simulation class
+
+_work_seq = itertools.count()
+
+def _run_key(params:dict) -> str:
+  """
+  Stable identity of one parameter set: a readable prefix, then the digest that carries it.
+
+  The digest covers a form where every key and value states its own length,
+  so no two parameter sets can serialise alike.
+  A plain join gives no such promise: `{"AB": "C"}` and `{"A": "BC"}` both read `ABC`,
+  and would share one cache file under it.
+  The prefix only makes a listing readable, so it may drop characters and be cut short.
+  """
+  pairs = sorted((str(k), str(v)) for k, v in params.items())
+  canon = "".join(f"{len(k)}:{k}:{len(v)}:{v}:" for k, v in pairs)
+  digest = hashlib.sha1(canon.encode("utf-8")).hexdigest()[:12]
+  prefix = re.sub(r"[^A-Za-z0-9._-]", "", "_".join(k + v for k, v in pairs))[:48] or "run"
+  return f"{prefix}-{digest}"
+
+def _work_id(key:str) -> str:
+  """
+  Working-file stem for one call: the run key plus a token no call in flight repeats.
+
+  Runs of the same parameters share one cache entry by design,
+  so `key` alone would point two of them at one `.cir` and one `.out`
+  while ngspice still holds them open.
+  """
+  return f"{key}-{os.getpid()}-{next(_work_seq)}"
 
 class Simulation:
   """
@@ -173,7 +202,7 @@ class Simulation:
     scale:dict[str, float]|None = None,
     timeout:int = 300,
     verbose:bool = True,
-  ):
+  ) -> None:
     self.path = path
     self.lib = lib
     self.params = params or {}
@@ -196,23 +225,16 @@ class Simulation:
 
   #------------------------------------------------------------------------------- Internal methods
 
-  def _render(self, run_id:str, **overrides) -> str:
+  def _render(self, work_id:str, **overrides) -> str:
     """Render netlist: defaults merged with `overrides`, output path injected as `{FILE}`."""
     merged = {**self.params, **overrides}
-    out_path = os.path.join(self.work_dir, f"{self.name}_{run_id}.out")
-    merged["FILE"] = out_path
+    merged["FILE"] = self._out_path(work_id)
     cir = replace_map(self._template, merged, "{", "}")
     return cir
 
-  def _cache_path(self, params:dict) -> str:
-    """Deterministic CSV cache path from param values."""
-    if params:
-      suffix = "_".join(f"{k}={v}" for k, v in sorted(params.items())
-        if k != "FILE")
-      suffix = re.sub(r'[^\w=.]', '_', suffix)[:120]
-    else:
-      suffix = "default"
-    return os.path.join(self.work_dir, f"{self.name}_{suffix}.csv")
+  def _cache_path(self, key:str) -> str:
+    """CSV cache path for one run key."""
+    return os.path.join(self.work_dir, f"{self.name}_{key}.csv")
 
   def _wrdata_vars(self) -> list[str]:
     """Extract variable names from `wrdata {FILE} var1 var2 ...` in template."""
@@ -239,11 +261,11 @@ class Simulation:
         data[var_name.upper()] = data.pop(key)
     return data
 
-  def _out_path(self, run_id:str) -> str:
-    return os.path.join(self.work_dir, f"{self.name}_{run_id}.out")
+  def _out_path(self, work_id:str) -> str:
+    return os.path.join(self.work_dir, f"{self.name}_{work_id}.out")
 
-  def _cir_path(self, run_id:str) -> str:
-    return os.path.join(self.work_dir, f"#{run_id}.cir")
+  def _cir_path(self, work_id:str) -> str:
+    return os.path.join(self.work_dir, f"#{work_id}.cir")
 
   def _apply_transforms(self, data:dict[str, list[float]]) -> dict[str, list[float]]:
     """Apply `rename` (its keys uppercased to match parsed columns) then `scale`."""
@@ -266,7 +288,9 @@ class Simulation:
     Raises `RuntimeError` when ngspice produces no output or the output cannot be parsed.
     """
     merged = {**self.params, **overrides}
-    csv_path = self._cache_path(merged)
+    ident = {k: v for k, v in merged.items() if k != "FILE"} # FILE names the netlist, not a run
+    key = _run_key(ident)
+    csv_path = self._cache_path(key)
     if cache and os.path.exists(csv_path):
       if self.verbose: self._print.inf(f"Cache hit: {csv_path}")
       rows = CSV.load(csv_path, types={})
@@ -276,11 +300,10 @@ class Simulation:
         for k in result:
           result[k] = [float(v) for v in result[k]]
         return result
-    run_id = "_".join(f"{k}{v}" for k, v in sorted(merged.items()))
-    run_id = re.sub(r'[^\w]', '', run_id)[:80] or "run"
-    cir_text = self._render(run_id, **overrides)
-    cir_path = self._cir_path(run_id)
-    out_path = self._out_path(run_id)
+    work_id = _work_id(key)
+    cir_text = self._render(work_id, **overrides)
+    cir_path = self._cir_path(work_id)
+    out_path = self._out_path(work_id)
     FILE.remove(cir_path)
     FILE.remove(out_path)
     FILE.save(cir_path, cir_text)
@@ -318,7 +341,9 @@ class Simulation:
       keys = list(data.keys())
       n = len(next(iter(data.values())))
       rows = [{k: data[k][i] for k in keys} for i in range(n)]
-      CSV.save(csv_path, rows)
+      # a parallel run of the same parameters aims here too, and stores the same rows
+      try: CSV.save(csv_path, rows)
+      except OSError: pass
     return data
 
   def sweep(
@@ -334,8 +359,8 @@ class Simulation:
     Several parameters are zipped, not combined cartesian, so the shortest list wins.
     The label is the bare value for a single parameter, `"R=1k_C=10u"` for several.
     A job that raises is stored as an empty dict, the sweep never aborts.
-    `cache` is on here and off in `run()`, so a repeated sweep replays CSVs instead of
-    re-simulating; pass `cache=False` after editing the netlist.
+    `cache` is on here and off in `run()`: a repeated sweep replays CSVs instead of re-simulating.
+    Pass `cache=False` after editing the netlist.
     """
     if not param_lists: raise ValueError("No parameters to sweep")
     keys = list(param_lists.keys())
@@ -375,7 +400,7 @@ class Simulation:
           results[label] = {}
     return results
 
-  def __repr__(self):
+  def __repr__(self) -> str:
     params = ", ".join(f"{k}={v}" for k, v in self.params.items())
     return f"<Simulation {self.name} ({params})>"
 

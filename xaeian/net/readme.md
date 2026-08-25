@@ -21,13 +21,13 @@ with Remote("ftp", "10.0.0.1", "user", password="pass") as r:
 
 ## `Remote(type, host, user, ...)`
 
-Factory — returns `SFTP` or `FTP` instance.
+Factory - returns `SFTP` or `FTP` instance.
 
 | Param        | Default     | Notes                          |
 | ------------ | ----------- | ------------------------------ |
-| `type`       | —           | `"sftp"` or `"ftp"`            |
-| `host`       | —           | Hostname or IP                 |
-| `user`       | —           | Username                       |
+| `type`       | -           | `"sftp"` or `"ftp"`            |
+| `host`       | -           | Hostname or IP                 |
+| `user`       | -           | Username                       |
 | `port`       | `22` / `21` | Override if non-standard       |
 | `password`   | `None`      | SFTP: optional if `key` set    |
 | `key`        | `None`      | SFTP only: path to private key |
@@ -81,7 +81,10 @@ SFTP("host", "user", password="pass")
 SFTP("host", "user", agent=True)
 ```
 
-Host keys are checked against `~/.ssh/known_hosts`; `strict=True` also rejects unknown hosts.
+Host keys are checked against `~/.ssh/known_hosts`. An unknown host is trusted on first
+contact and its key is pinned to `~/.ssh/known_hosts.xaeian`, so a changed server key aborts
+the next connect; `strict=True` rejects unknown hosts outright. `xn host` lists the pinned
+keys and `xn host <ip>` drops one after a server rebuild.
 
 ## FTP notes
 
@@ -89,6 +92,6 @@ Skip strategy depends on server capabilities detected at connect:
 - `sync_push` → **mtime + size** with MFMT, **size only** without
 - `sync_pull` → **mtime + size** with MLSD or MDTM, **size only** without
 
-`preserve_mtime` on upload needs MFMT — without it the remote mtime is left as-is.
+`preserve_mtime` on upload needs MFMT - without it the remote mtime is left as-is.
 
 FTP is cleartext: prefer SFTP when confidentiality matters.

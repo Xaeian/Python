@@ -7,12 +7,12 @@ from datetime import datetime, timezone
 import pytest
 from xaeian.db.utils import (
   serialize, norm, serialize_params, serialize_dict, listify,
-  ident, ph, ph_list, renum_ph,
+  ident, ph, ph_list, to_driver,
   _insert_sql, _insert_many_sql, _update_sql, _find_sql, _upsert_sql,
   parse_json, parse_row, to_dicts, split_sql,
 )
 
-#------------------------------------------------------------------------------------ serialize
+#---------------------------------------------------------------------------------------- serialize
 
 def serialize_turns_containers_into_json():
   assert serialize({"k": "v"}) == '{"k": "v"}'
@@ -31,7 +31,7 @@ def serialize_keeps_invalid_iso_as_string():
   # matches the ISO shape but is not a real date → fromisoformat fails, string survives
   assert serialize("2024-13-99") == "2024-13-99"
 
-#----------------------------------------------------------------------------------------- norm
+#--------------------------------------------------------------------------------------------- norm
 
 @pytest.mark.parametrize("raw, expected", [
   (None, ()),
@@ -48,7 +48,7 @@ def serialize_params_normalizes_then_serializes():
 def serialize_dict_serializes_each_value():
   assert serialize_dict({"meta": {"a": 1}, "name": "x"}) == {"meta": '{"a": 1}', "name": "x"}
 
-#-------------------------------------------------------------------------------------- listify
+#------------------------------------------------------------------------------------------ listify
 
 def listify_converts_tuples_recursively():
   assert listify((1, (2, 3), [4, (5,)])) == [1, [2, 3], [4, [5]]]
@@ -56,7 +56,7 @@ def listify_converts_tuples_recursively():
 def listify_passes_scalars_through():
   assert listify("x") == "x"
 
-#---------------------------------------------------------------------------------------- ident
+#-------------------------------------------------------------------------------------------- ident
 
 @pytest.mark.parametrize("name", ["users", "user_id", "_private", "t1"])
 def ident_accepts_valid_identifiers(name):
@@ -67,97 +67,96 @@ def ident_rejects_dangerous_names(name):
   with pytest.raises(ValueError):
     ident(name)
 
-#---------------------------------------------------------------------------- placeholders (ph)
+#-------------------------------------------------------------------------------- placeholders (ph)
 
-def ph_default_style():
+def ph_is_one_dialect():
   assert ph(3) == "(?, ?, ?)"
-
-def ph_postgres_style_is_numbered():
-  assert ph(3, "$") == "($1, $2, $3)"
-  assert ph(2, "$", offset=3) == "($4, $5)" # continue after 3 earlier params
-
-def ph_mysql_percent_style():
-  assert ph(2, "%s") == "(%s, %s)"
-
-def ph_list_mirrors_ph_without_parens():
   assert ph_list(3) == ["?", "?", "?"]
-  assert ph_list(3, "$") == ["$1", "$2", "$3"]
-  assert ph_list(2, "$", offset=2) == ["$3", "$4"]
 
-#------------------------------------------------------------------------------------- renum_ph
+#---------------------------------------------------------------------------------------- to_driver
 
-def renum_ph_shifts_numbered_placeholders():
-  assert renum_ph("id = $1 AND status = $2", 3) == "id = $4 AND status = $5"
+def to_driver_leaves_sqlite_untouched():
+  sql = "SELECT * FROM t WHERE a = ? AND b = ?"
+  assert to_driver(sql, "?") == sql
 
-def renum_ph_is_noop_for_zero_offset():
-  assert renum_ph("id = $1", 0) == "id = $1"
+def to_driver_writes_percent_for_mysql_and_psycopg():
+  assert to_driver("WHERE a = ? AND b = ?", "%s") == "WHERE a = %s AND b = %s"
 
-def renum_ph_ignores_clauses_without_placeholders():
-  assert renum_ph("deleted = 0", 5) == "deleted = 0"
+def to_driver_numbers_for_asyncpg():
+  assert to_driver("WHERE a = ? AND b = ?", "$") == "WHERE a = $1 AND b = $2"
 
-#---------------------------------------------------------------------------------- SQL: INSERT
+def to_driver_never_touches_a_quoted_literal():
+  out = to_driver("WHERE note = 'is it? yes' AND id = ?", "$")
+  assert out == "WHERE note = 'is it? yes' AND id = $1"
+
+def to_driver_survives_a_doubled_quote_inside_a_literal():
+  out = to_driver("WHERE note = 'it''s ok?' AND id = ?", "%s")
+  assert out == "WHERE note = 'it''s ok?' AND id = %s"
+
+#-------------------------------------------------------------------------------------- SQL: INSERT
 
 def insert_builds_columns_and_placeholders():
-  sql, params = _insert_sql("users", {"name": "bob", "age": 30}, "?")
+  sql, params = _insert_sql("users", {"name": "bob", "age": 30})
   assert sql == "INSERT INTO users (name, age) VALUES (?, ?)"
   assert params == ("bob", 30)
 
 def insert_serializes_container_values():
-  sql, params = _insert_sql("events", {"payload": {"x": 1}}, "$")
-  assert sql == "INSERT INTO events (payload) VALUES ($1)"
+  sql, params = _insert_sql("events", {"payload": {"x": 1}})
+  assert sql == "INSERT INTO events (payload) VALUES (?)"
   assert params == ('{"x": 1}',)
 
 def insert_many_shares_one_statement_with_per_row_params():
-  sql, rows = _insert_many_sql("t", [{"a": 1}, {"a": 2}], "%s")
-  assert sql == "INSERT INTO t (a) VALUES (%s)"
+  sql, rows = _insert_many_sql("t", [{"a": 1}, {"a": 2}])
+  assert sql == "INSERT INTO t (a) VALUES (?)"
   assert rows == [(1,), (2,)]
 
-#---------------------------------------------------------------------------------- SQL: UPDATE
+#-------------------------------------------------------------------------------------- SQL: UPDATE
 
-def update_renumbers_where_after_set_params():
-  # SET takes $1; the caller's WHERE "$1" must shift to "$2"
-  sql, params = _update_sql("users", {"name": "x"}, "id = $1", [5], "$")
-  assert sql == "UPDATE users SET name = $1 WHERE id = $2"
+def update_leaves_the_callers_where_alone():
+  """SET and WHERE both carry `?`, so the driver numbers them in one pass and never collides."""
+  sql, params = _update_sql("users", {"name": "x"}, "id = ?", [5])
+  assert sql == "UPDATE users SET name = ? WHERE id = ?"
   assert params == ("x", 5)
+  assert to_driver(sql, "$") == "UPDATE users SET name = $1 WHERE id = $2"
 
-#---------------------------------------------------------------------------------- SQL: UPSERT
+#-------------------------------------------------------------------------------------- SQL: UPSERT
 
-def upsert_sqlite_dialect():
-  sql, params = _upsert_sql("t", {"id": 1, "name": "a"}, "id", None, "?", "excluded")
-  assert sql == ("INSERT INTO t (id, name) VALUES (?, ?)"
-                 " ON CONFLICT (id) DO UPDATE SET name = excluded.name")
+def upsert_conflict_dialect():
+  sql, params = _upsert_sql("t", {"id": 1, "name": "a"}, "id", None, "excluded")
+  assert sql == (
+    "INSERT INTO t (id, name) VALUES (?, ?)"
+    " ON CONFLICT (id) DO UPDATE SET name = excluded.name"
+  )
   assert params == (1, "a")
 
-def upsert_postgres_dialects():
-  sql, _ = _upsert_sql("t", {"id": 1, "name": "a"}, "id", None, "%s", "EXCLUDED")
-  assert sql == ("INSERT INTO t (id, name) VALUES (%s, %s)"
-                 " ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name")
-  sql, _ = _upsert_sql("t", {"id": 1, "name": "a"}, "id", None, "$", "EXCLUDED")
-  assert sql == ("INSERT INTO t (id, name) VALUES ($1, $2)"
-                 " ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name")
+def upsert_postgres_names_its_alias_in_caps():
+  sql, _ = _upsert_sql("t", {"id": 1, "name": "a"}, "id", None, "EXCLUDED")
+  assert sql.endswith("ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name")
 
 def upsert_mysql_dialect_has_no_conflict_clause():
-  sql, _ = _upsert_sql("t", {"id": 1, "name": "a"}, "id", None, "%s", None)
-  assert sql == ("INSERT INTO t (id, name) VALUES (%s, %s)"
-                 " ON DUPLICATE KEY UPDATE name = VALUES(name)")
+  sql, _ = _upsert_sql("t", {"id": 1, "name": "a"}, "id", None, None)
+  assert sql == (
+    "INSERT INTO t (id, name) VALUES (?, ?)"
+    " ON DUPLICATE KEY UPDATE name = VALUES(name)"
+  )
 
 def upsert_composite_key_and_explicit_update():
-  sql, _ = _upsert_sql("t", {"a": 1, "b": 2, "c": 3}, ["a", "b"], None, "?", "excluded")
+  sql, _ = _upsert_sql("t", {"a": 1, "b": 2, "c": 3}, ["a", "b"], None, "excluded")
   assert "ON CONFLICT (a, b) DO UPDATE SET c = excluded.c" in sql
-  sql, _ = _upsert_sql("t", {"a": 1, "b": 2, "c": 3}, "a", ["b"], "?", "excluded")
+  sql, _ = _upsert_sql("t", {"a": 1, "b": 2, "c": 3}, "a", ["b"], "excluded")
   assert sql.endswith("DO UPDATE SET b = excluded.b")
 
-#------------------------------------------------------------------------------------ SQL: FIND
+#---------------------------------------------------------------------------------------- SQL: FIND
 
 def find_plain_select_without_clauses():
-  assert _find_sql("t", None, None, "?", {}) == ("SELECT * FROM t", ())
+  assert _find_sql("t", None, None, {}) == ("SELECT * FROM t", ())
 
 def find_assembles_where_order_and_limit():
-  sql, params = _find_sql("users", "id DESC", 10, "?", {"active": True})
+  sql, params = _find_sql("users", "id DESC", 10, {"active": True})
   assert sql == "SELECT * FROM users WHERE active = ? ORDER BY id DESC LIMIT 10"
   assert params == (True,)
 
-#----------------------------------------------------------------------------------- parse_json
+#--------------------------------------------------------------------------------------- parse_json
 
 def parse_json_decodes_valid_json():
   assert parse_json('{"key": "value"}') == {"key": "value"}
@@ -171,7 +170,7 @@ def parse_json_returns_original_on_garbage():
 def parse_row_only_decodes_marked_columns():
   assert parse_row(["a", '{"x": 1}', "{not json}"], {1}) == ["a", {"x": 1}, "{not json}"]
 
-#------------------------------------------------------------------------------------- to_dicts
+#----------------------------------------------------------------------------------------- to_dicts
 
 def to_dicts_zips_columns_to_values():
   assert to_dicts([(1, "a"), (2, "b")], ["id", "name"]) == [
@@ -182,10 +181,25 @@ def to_dicts_parses_named_json_columns():
   rows = to_dicts([(1, '{"x": 1}')], ["id", "meta"], json=["meta"])
   assert rows == [{"id": 1, "meta": {"x": 1}}]
 
-#------------------------------------------------------------------------------------ split_sql
+#---------------------------------------------------------------------------------------- split_sql
 
 def split_sql_keeps_statements_separate():
   assert split_sql("SELECT 1; SELECT 2") == ["SELECT 1;", "SELECT 2;"]
 
 def split_sql_respects_semicolons_inside_quotes():
   assert split_sql("SELECT 'a;b'") == ["SELECT 'a;b';"]
+
+def split_sql_is_the_xstring_implementation():
+  from xaeian import split_sql as string_split_sql
+  assert split_sql is string_split_sql
+
+def to_driver_leaves_a_question_mark_that_is_not_a_placeholder():
+  """Only SQL counts: comments and quoted names carry `?` as text."""
+  assert to_driver("SELECT a FROM t -- is it? yes", "%s") == "SELECT a FROM t -- is it? yes"
+  assert to_driver("SELECT 1 /* why? */ FROM t", "%s") == "SELECT 1 /* why? */ FROM t"
+  assert to_driver('CREATE TABLE "odd?name" (a INT)', "%s") == 'CREATE TABLE "odd?name" (a INT)'
+  assert to_driver("SELECT * FROM `w?t` WHERE id = ?", "%s") == "SELECT * FROM `w?t` WHERE id = %s"
+
+def to_driver_numbers_only_the_real_placeholders():
+  sql = "SELECT 'a?b' FROM t -- ?\nWHERE x = ? AND y = ?"
+  assert to_driver(sql, "$") == "SELECT 'a?b' FROM t -- ?\nWHERE x = $1 AND y = $2"

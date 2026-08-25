@@ -3,14 +3,21 @@
 """
 Image manipulation: resize, convert, compress, metadata.
 
-Pillow-backed. AVIF encoding needs a Pillow build with AVIF support, `img_compress` falls
-back to the next candidate format when it is missing.
+Pillow-backed. AVIF encoding needs a Pillow build with AVIF support,
+`img_compress` falls back to the next candidate format when it is missing.
 """
 
 import os
 from io import BytesIO
-from typing import Literal
-from PIL import Image, ImageOps
+from typing import Any, Literal
+from ..extras import MissingExtra, absent
+
+try:
+  from PIL import Image, ImageOps
+except ModuleNotFoundError as e:
+  if not absent(e, "PIL"): raise
+  raise MissingExtra("Install with: pip install xaeian[media]") from e
+
 from ..files import DIR, FILE, PATH
 from .utils import IMG_EXTS, require_file, resolve_dst
 
@@ -40,7 +47,9 @@ def _flatten_rgb(img:Image.Image, bg:tuple=(255, 255, 255)) -> Image.Image:
     return base
   return img.convert("RGB") if img.mode != "RGB" else img
 
-def _resize_max(img:Image.Image, max_px:int) -> tuple[Image.Image, tuple, tuple]:
+def _resize_max(
+  img:Image.Image, max_px:int,
+) -> tuple[Image.Image, tuple[int, int], tuple[int, int]]:
   """Downscale to fit `max_px` on the long side → (img, orig_size, new_size)."""
   w, h = img.size
   scale = min(max_px / max(w, h), 1.0)
@@ -110,10 +119,11 @@ def _encode_best(
   """
   Encode along `fmt_order`, stopping at the first fit → (data, fmt, ext, quality).
 
-  With `target_kB` set, quality steps down by 5 to a floor of 35. `pick_smallest` tries
-  every format and keeps the smallest result instead of stopping early. PNG is lossless,
-  so it is only ever tried once at the starting quality. When nothing reaches `target_kB`
-  the smallest attempt is returned anyway, so the goal is best-effort, not a guarantee.
+  With `target_kB` set, quality steps down by 5 to a floor of 35.
+  `pick_smallest` tries every format and keeps the smallest result instead of stopping early.
+  PNG is lossless, so it is only ever tried once at the starting quality.
+  When nothing reaches `target_kB` the smallest attempt is returned anyway,
+  so the goal is best-effort, not a guarantee.
   """
   q_start = max(1, min(100, quality))
   q_min, step = 35, 5
@@ -156,15 +166,18 @@ def img_scrub_metadata(src:str, dst:str|None=None, inplace:bool=False) -> str:
   """
   Remove all metadata (EXIF, ICC, comments) by rebuilding the pixel data into a fresh image.
 
-  Not lossless: JPEG output is re-encoded at quality 95, and only the first frame of a
-  multi-frame file survives. The EXIF orientation tag is dropped without being baked into
-  the pixels, so a photo that relied on it comes out sideways.
+  Not lossless: JPEG output is re-encoded at quality 95,
+  and only the first frame of a multi-frame file survives.
+  The EXIF orientation tag is dropped without being baked into the pixels,
+  so a photo that relied on it comes out sideways.
 
   `dst` None → `-nometa` suffix beside the source, or the source itself when `inplace`.
   """
   src = require_file(src, "Image")
   image = Image.open(src)
-  data = list(image.getdata())
+  # Pillow 14 removes `getdata`; `get_flattened_data` replaces it from Pillow 12
+  read = getattr(image, "get_flattened_data", image.getdata)
+  data = list(read())
   clean = Image.new(image.mode, image.size)
   if image.mode == "P":
     clean.putpalette(image.getpalette())
@@ -260,14 +273,15 @@ def img_compress(
   avif_speed:int = 6,
   recursive:bool = True,
   inplace:bool = False,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
   """
   Compress a file or a directory of images: resize, re-encode, pick best format.
 
-  EXIF rotation is baked into the pixels and all other metadata is dropped. Skipped without
-  an error: files Pillow cannot open, multi-frame files, and files no encoder accepts, which
-  under "keep" means gif, bmp and tiff. Two sources landing on one output path raise
-  `FileExistsError`, as does an in-place output that would overwrite an unrelated file.
+  EXIF rotation is baked into the pixels and all other metadata is dropped.
+  Skipped without an error: files Pillow cannot open, multi-frame files,
+  and files no encoder accepts, which under "keep" means gif, bmp and tiff.
+  Two sources landing on one output path raise `FileExistsError`,
+  as does an in-place output that would overwrite an unrelated file.
 
   Args:
     dst: None → `-min` suffix on a file, `-min/` sibling tree on a directory.
@@ -290,17 +304,7 @@ def img_compress(
     files = [src]
     is_single = True
   else:
-    files = []
-    if recursive:
-      for root, _, names in os.walk(src):
-        for name in names:
-          if os.path.splitext(name)[1].lower() in IMG_EXTS:
-            files.append(os.path.join(root, name))
-    else:
-      for name in os.listdir(src):
-        fp = os.path.join(src, name)
-        if os.path.isfile(fp) and os.path.splitext(name)[1].lower() in IMG_EXTS:
-          files.append(fp)
+    files = list(DIR.iter_files(src, exts=sorted(IMG_EXTS), deep=recursive))
     is_single = False
   if not files:
     return []

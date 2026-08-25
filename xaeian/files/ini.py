@@ -80,13 +80,13 @@ class INI:
     return text
 
   @staticmethod
-  def load(path:str) -> dict:
+  def load(path:str) -> dict[str, Any]:
     """
     Load an INI file into a nested dict, `{}` when missing.
 
     Keys before the first `[section]` land at the top level, each section becomes a sub-dict.
-    Values pass through `parse`: an unquoted value loses its `;`/`#` inline comment, a quoted
-    value ends at its closing quote with the rest of the line dropped.
+    Values pass through `parse`: an unquoted value loses its `;`/`#` inline comment,
+    a quoted value ends at its closing quote with the rest of the line dropped.
     """
     cfg = get_context()
     path = INI._ensure_ext(path)
@@ -126,14 +126,15 @@ class INI:
     """
     Save a dict as INI: scalar keys first, then dict values as `[section]` blocks.
 
-    A value given as a `(value, comment)` pair gets a trailing comment. `comment_section` maps
-    section → text written above the header, `comment_field` maps section → `{key: comment}`
-    and wins over pair comments, its `None` key holding the top-level fields.
+    A value given as a `(value, comment)` pair gets a trailing comment.
+    `comment_section` maps section → text written above the header.
+    `comment_field` maps section → `{key: comment}` and wins over pair comments,
+    its `None` key holding the top-level fields.
     """
-    path = DIR._resolve_write(INI._ensure_ext(path), "")
+    path = INI._ensure_ext(path)
     comment_section = comment_section or {}
     comment_field = comment_field or {}
-    def write_comment_lines(f, text:str):
+    def write_comment_lines(f, text:str) -> None:
       if not text: return
       for line in str(text).splitlines():
         line = line.strip()

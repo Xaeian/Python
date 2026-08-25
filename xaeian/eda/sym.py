@@ -3,8 +3,9 @@
 """
 KiCad `.kicad_sym` symbol library generator.
 
-`Symbol` builds one symbol, `SymbolLib` collects them into a library file. All dimensions in
-mil, converted to mm on output. Font presets `S`, `M`, `L`, `REF["connector"]` → `"J"`.
+`Symbol` builds one symbol, `SymbolLib` collects them into a library file.
+All dimensions in mil, converted to mm on output.
+Font presets `S`, `M`, `L`, `REF["connector"]` → `"J"`.
 
 Example:
   >>> lib = SymbolLib()
@@ -21,6 +22,13 @@ Example:
 from dataclasses import dataclass
 from ..files import FILE
 from .fp import fmt_number, GENERATOR_VERSION
+
+# `fp.py` has its own `Style`, tiers and `REF`, in mm for footprints.
+# These are in mil for symbols, so qualify by module when both are in play.
+__all__ = [
+  "Symbol", "SymbolLib", "Style", "S", "M", "L", "REF",
+  "MIL", "PROP_FONT", "PROP_THICK", "DETAIL_THICK",
+]
 
 #---------------------------------------------------------------------------------------------- Mil
 
@@ -94,7 +102,7 @@ class Symbol:
     pin_offset:float = 0,
     pin_names:bool = True,
     pin_numbers:bool = True,
-  ):
+  ) -> None:
     self.name = name
     self.ref = ref
     self.style = style
@@ -106,7 +114,7 @@ class Symbol:
     self._units: dict[int, list[str]] = {}
     self._unit = 1
 
-  def unit(self, n:int):
+  def unit(self, n:int) -> None:
     """Switch active unit for subsequent `pin()` calls."""
     self._unit = n
 
@@ -126,7 +134,7 @@ class Symbol:
     bold_val:bool = False,
     italic_val:bool = False,
     hide_val:bool = False,
-  ):
+  ) -> None:
     """Add Reference and Value properties, positions `(x, y)` in mil relative to the origin."""
     s = self.style
     rx, ry = ref_at
@@ -143,7 +151,7 @@ class Symbol:
       f' (effects {self._font_str(s.font, s.thick, bold=bold_val, italic=italic_val)}{val_hide}))'
     )
 
-  def prop(self, name:str, value:str="", at:tuple=(0, 0), hide:bool=True):
+  def prop(self, name:str, value:str="", at:tuple=(0, 0), hide:bool=True) -> None:
     """Add custom property (Manufacturer, Code, LCSC, etc.), hidden and in the fixed prop font."""
     x, y = at
     hfont = self._font_str(PROP_FONT, PROP_THICK)
@@ -155,7 +163,10 @@ class Symbol:
 
   #----------------------------------------------------------------------------- Drawing primitives
 
-  def rect(self, x1:float, y1:float, x2:float, y2:float, fill:str="background", width:float=0):
+  def rect(
+    self, x1:float, y1:float, x2:float, y2:float,
+    fill:str = "background", width:float = 0,
+  ) -> None:
     """Add rectangle. Fill: `background`, `outline`, `none`. `width=0` = KiCad default stroke."""
     self._graphics.append(
       f'\t\t\t(rectangle (start {_n(x1)} {_n(y1)}) (end {_n(x2)} {_n(y2)})'
@@ -163,7 +174,7 @@ class Symbol:
       f' (fill (type {fill})))'
     )
 
-  def polyline(self, pts:list[tuple], fill:str="none", width:float=5):
+  def polyline(self, pts:list[tuple], fill:str="none", width:float=5) -> None:
     """Add polyline through `(x, y)` points, open unless the last point repeats the first."""
     pts_s = " ".join(f"(xy {_n(x)} {_n(y)})" for x, y in pts)
     self._graphics.append(
@@ -172,7 +183,7 @@ class Symbol:
       f' (fill (type {fill})))'
     )
 
-  def circle(self, cx:float, cy:float, radius:float, fill:str="outline", width:float=0):
+  def circle(self, cx:float, cy:float, radius:float, fill:str="outline", width:float=0) -> None:
     """Add circle, filled solid by default (junction dot, not an outline)."""
     self._graphics.append(
       f'\t\t\t(circle (center {_n(cx)} {_n(cy)}) (radius {_n(radius)})'
@@ -180,7 +191,7 @@ class Symbol:
       f' (fill (type {fill})))'
     )
 
-  def arc(self, sx:float, sy:float, mx:float, my:float, ex:float, ey:float, width:float=0):
+  def arc(self, sx:float, sy:float, mx:float, my:float, ex:float, ey:float, width:float=0) -> None:
     """Add arc through start, mid and end."""
     self._graphics.append(
       f'\t\t\t(arc (start {_n(sx)} {_n(sy)})'
@@ -197,7 +208,7 @@ class Symbol:
     size:float|None = None,
     thick:float|None = None,
     angle:float = 0,
-  ):
+  ) -> None:
     """Add text, style font used when `size` or `thick` is omitted."""
     sz = size or self.style.font
     th = thick or self.style.thick
@@ -218,7 +229,7 @@ class Symbol:
     name:str|None = None,
     type:str = "passive",
     graphic:str = "line",
-  ):
+  ) -> None:
     """
     Add pin. Angle: 0=right, 90=up, 180=left, 270=down. Name defaults to the number.
 
@@ -240,11 +251,11 @@ class Symbol:
 
   #-------------------------------------------------------------------------------------------- Raw
 
-  def raw_gfx(self, text:str):
+  def raw_gfx(self, text:str) -> None:
     """Add raw S-expression to shared graphics."""
     self._graphics.append(text)
 
-  def raw_unit(self, text:str):
+  def raw_unit(self, text:str) -> None:
     """Add raw S-expression to the current unit."""
     self._units.setdefault(self._unit, []).append(text)
 
@@ -254,8 +265,9 @@ class Symbol:
     """
     Build symbol S-expression block (without library wrapper).
 
-    Sub-symbol names carry the structure KiCad expects: `<name>_0_1` holds the graphics common
-    to every unit, `<name>_N_1` holds unit N, and the trailing 1 is the body style.
+    Sub-symbol names carry the structure KiCad expects.
+    `<name>_0_1` holds the graphics common to every unit, `<name>_N_1` holds unit N,
+    and the trailing 1 is the body style.
     """
     lines = []
     lines.append(f'\t(symbol "{self.name}"')
@@ -285,11 +297,11 @@ class Symbol:
 
 class SymbolLib:
   """Container writing a set of `Symbol` objects into one `.kicad_sym` file."""
-  def __init__(self):
+  def __init__(self) -> None:
     self._symbols: list[Symbol] = []
 
-  def add(self, sym:Symbol):
-    """Add symbol to library."""
+  def add(self, sym:Symbol) -> None:
+    """Add symbol, written in call order."""
     self._symbols.append(sym)
 
   def build(self) -> str:

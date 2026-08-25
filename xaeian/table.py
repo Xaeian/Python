@@ -3,11 +3,13 @@
 """
 Lightweight tabular operations on `list[dict]`: pandas-free, zero dependencies.
 
-Takes anything that produces `list[dict]`, such as `CSV.load()` or `JSON.load()`. Filter
-(`where`, `first`, `take`), shape (`select`, `exclude`, `rename`, `add_column`, `pluck`,
-`set_defaults`), order (`sort_by`, `unique`), group (`group_by`, `count_by`, `aggregate`),
-combine (`join`, `concat`), map (`replace_values`, `map_column`), inspect (`columns`,
-`describe`), render (`markdown`, `markdown_raw`).
+Takes anything that produces `list[dict]`, such as `CSV.load()` or `JSON.load()`.
+
+Filter: `where`, `first`, `take`.
+Shape: `select`, `exclude`, `rename`, `add_column`, `pluck`, `set_defaults`.
+Order: `sort_by`, `unique`. Group: `group_by`, `count_by`, `aggregate`.
+Combine: `join`, `concat`. Map: `replace_values`, `map_column`.
+Inspect: `columns`, `describe`. Render: `markdown`, `markdown_raw`.
 
 Example:
   >>> from xaeian.table import where, aggregate
@@ -46,7 +48,7 @@ def where(rows:Rows, predicate:Callable[[dict], bool]) -> Rows:
   """Filter rows by predicate."""
   return [r for r in rows if predicate(r)]
 
-def first(rows:Rows, predicate:Callable[[dict], bool]) -> dict|None:
+def first(rows:Rows, predicate:Callable[[dict], bool]) -> dict[str, Any]|None:
   """Return first row matching predicate, or `None`."""
   for r in rows:
     if predicate(r): return r
@@ -215,10 +217,11 @@ def join(
   """
   Join two tables on a key column. Hash-based, O(n+m).
 
-  `on` names the left key, `right_on` the right one and defaults to `on`. `lsuffix`/`rsuffix`
-  rename only the columns present in both tables. A key value repeated on both sides yields
-  every pair, so rows can multiply. Matched rows carry the left key column, right-only rows
-  from a `right`/`outer` join carry `right_on`.
+  `on` names the left key, `right_on` the right one and defaults to `on`.
+  `lsuffix`/`rsuffix` rename only the columns present in both tables.
+  A key value repeated on both sides yields every pair, so rows can multiply.
+  Matched rows carry the left key column,
+  a right-only row from a `right`/`outer` join carries `right_on`.
   """
   rk = right_on or on
   index: dict[Any, list[dict]] = {}
@@ -295,8 +298,8 @@ def describe(rows:Rows, col:str) -> dict[str, Any]:
   Summary statistics for a single column.
 
   Keys: `count` (all rows, nulls included), `nulls`, `unique` (distinct non-null values),
-  `min`, `max`, `mean`. `mean` is `None` for non-numeric columns, `min`/`max` are `None` when
-  the values cannot be compared with each other.
+  `min`, `max`, `mean`. `mean` is `None` for non-numeric columns, `min`/`max` are `None`
+  when the values cannot be compared with each other.
   """
   values = pluck(rows, col)
   non_null = [v for v in values if v is not None]
@@ -364,12 +367,12 @@ def _md_render(hdr:list[str], data:list[list[str]], aligns:list[str]|None) -> st
   for r in data:
     for i in range(ncols):
       widths[i] = max(widths[i], len(r[i]))
-  def fmt(i, txt):
+  def fmt(i:int, txt:str) -> str:
     a, w = aligns[i], widths[i]
     if a == ">": return txt.rjust(w)
     if a == "^": return txt.center(w)
     return txt.ljust(w)
-  def sep(i):
+  def sep(i:int) -> str:
     a, w = aligns[i], widths[i]
     if a == "<": return ":" + "-" * (w - 1)
     if a == "^": return ":" + "-" * (w - 2) + ":"
@@ -398,8 +401,8 @@ def markdown(
   Args:
     cols: Keys to include, default all keys of the first row.
     header: Display names, default `cols`; must line up with what is left after `exclude`.
-    aligns: Per column `"<"`/`"^"`/`">"` or `"left"`/`"center"`/`"right"`, `None` right-aligns
-      columns whose values are at least 70% numeric and left-aligns the rest.
+    aligns: Per column `"<"`/`"^"`/`">"` or `"left"`/`"center"`/`"right"`.
+      `None` right-aligns a column whose values are at least 70% numeric, left-aligns the rest.
     exclude: Keys to drop, applied after `cols` is resolved.
 
   Example:

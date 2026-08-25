@@ -30,7 +30,7 @@ def expand_series(
 
 class VConv:
   """Voltage converter divider: call it for Vout, `.find()` for the closest R1/R2 pair."""
-  def __init__(self, formula, vref:float, doc:str=""):
+  def __init__(self, formula, vref:float, doc:str="") -> None:
     self._formula = formula
     self.vref = vref
     self.__doc__ = doc
@@ -39,7 +39,7 @@ class VConv:
     """Vout for the `R1`/`R2` pair, `vref=None` uses the converter's own reference."""
     return self._formula(R1, R2, vref if vref is not None else self.vref)
 
-  def __repr__(self):
+  def __repr__(self) -> str:
     return f"<VConv vref={self.vref}>"
 
   def find(
@@ -53,8 +53,9 @@ class VConv:
     """
     Find R1/R2 pairs within `tolerance` volts of `vtarget`: `(R1, R2, Vout)`, best first.
 
-    At most `limit` pairs. `rseries=None` → `expand_series(E24)`, `vref=None` → the converter's
-    own `vref`; R1 and R2 are taken from `rseries` and carry its unit.
+    At most `limit` pairs. `rseries=None` → `expand_series(E24)`,
+    `vref=None` → the converter's own `vref`.
+    R1 and R2 are taken from `rseries` and carry its unit.
     """
     if rseries is None:
       rseries = expand_series(E24)

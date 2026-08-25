@@ -156,7 +156,7 @@ db = Database("sqlite", "app.db")
 kv = KeyValue(db)
 kv.set("active_table", "pilot")
 kv.get("active_table")       # "pilot"
-kv.all()                     # {"active_table": "pilot", ...}
+kv.read_all()                # {"active_table": "pilot", ...}
 kv.delete("active_table")
 
 # Async
@@ -164,7 +164,7 @@ db = AsyncDatabase("postgres", "mydb", user="postgres", password="secret")
 kv = AsyncKeyValue(db)
 await kv.set("maintenance", "true")
 await kv.get("maintenance")  # "true"
-await kv.all()               # {"maintenance": "true", ...}
+await kv.read_all()               # {"maintenance": "true", ...}
 ```
 
 Custom table name:
@@ -250,10 +250,15 @@ db = PostgresDatabase("mydb", host="localhost", user="postgres", password="secre
 
 ## Placeholders
 
-All backends accept `?` placeholders. Converted automatically:
-- SQLite: `?`
-- MySQL: `?` → `%s`
-- PostgreSQL: `?` → `$1`, `$2`, ...
+Raw SQL takes `?`, and only `?`. Each driver's own form is written in one place, on the way
+into that driver:
+
+- SQLite: `?` unchanged
+- MySQL, and PostgreSQL through `psycopg2`: `?` → `%s`
+- PostgreSQL through `asyncpg`: `?` → `$1`, `$2`, ...
+
+A `?` inside a quoted literal is left alone, so the jsonb `?` operator has to be written as
+`jsonb_exists()`.
 
 ```py
 # Works on all backends

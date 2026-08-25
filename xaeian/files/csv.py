@@ -32,8 +32,8 @@ class CSV:
     """
     Load CSV rows as dicts keyed by the header row, `[]` when the file is missing.
 
-    Cells stay strings unless `types` maps a column to a converter; an empty or unconvertible
-    cell becomes `None` rather than raising.
+    Cells stay strings unless `types` maps a column to a converter;
+    an empty or unconvertible cell becomes `None` rather than raising.
     """
     cfg = get_context()
     path = ensure_suffix(path, ".csv")
@@ -121,7 +121,7 @@ class CSV:
     datarow:dict[str, Any]|list[Any],
     delimiter:str = ",",
     header:list[str]|None = None,
-  ):
+  ) -> None:
     """
     Append one row, writing the header first when the file is new.
 
@@ -130,7 +130,9 @@ class CSV:
     """
     if datarow is None: raise ValueError("datarow must not be None")
     cfg = get_context()
-    path = DIR._resolve_write(path, ".csv")
+    # appends in place rather than through the atomic FILE.save, so it resolves its own path
+    path = PATH.resolve(ensure_suffix(path, ".csv"), read=False)
+    DIR.ensure(path, is_file=True)
     file_exists = os.path.isfile(path) and os.path.getsize(path) > 0
     with open(path, "a", newline="", encoding=cfg.encoding) as csv_file:
       if isinstance(datarow, dict):
@@ -164,7 +166,7 @@ class CSV:
     `field_names` is required for list rows, dict rows fall back to the first row's keys.
     """
     if not data: return
-    path = DIR._resolve_write(path, ".csv")
+    path = ensure_suffix(path, ".csv")
     # rendered whole first, so a bad row cannot leave a truncated file behind
     csv_file = io.StringIO()
     if all(isinstance(row, dict) for row in data):
@@ -196,7 +198,7 @@ class CSV:
       raise ValueError("All vectors must have same length")
     if header and len(header) != len(columns):
       raise ValueError("Header length must match number of vectors")
-    path = DIR._resolve_write(path, ".csv")
+    path = ensure_suffix(path, ".csv")
     file = io.StringIO()
     writer = csv.writer(file, delimiter=delimiter)
     if header: writer.writerow(header)

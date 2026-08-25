@@ -3,8 +3,8 @@
 """
 Signal processing for embedded sensor data.
 
-Immutable `Signal` wraps a numpy array with its sample rate. Every transform returns a new
-Signal, so calls chain: `sig.highpass(10).integrate().rms`.
+Immutable `Signal` wraps a numpy array with its sample rate.
+Every transform returns a new Signal, so calls chain: `sig.highpass(10).integrate().rms`.
 
 Requires: `pip install xaeian[dsp]`
 
@@ -17,6 +17,8 @@ Example:
 
 from __future__ import annotations
 import operator
+from typing import Iterator
+from .extras import MissingExtra, absent
 
 __extras__ = ("dsp", ["scipy", "numpy"])
 
@@ -27,8 +29,9 @@ try:
     detrend as _detrend, hilbert, welch, windows,
   )
   from scipy.integrate import cumulative_trapezoid
-except ImportError as e:
-  raise ImportError("Install with: pip install xaeian[dsp]  (scipy + numpy)") from e
+except ModuleNotFoundError as e:
+  if not absent(e, "scipy", "numpy"): raise
+  raise MissingExtra("Install with: pip install xaeian[dsp]  (scipy + numpy)") from e
 
 #----------------------------------------------------------------------------------------- Spectrum
 
@@ -36,7 +39,7 @@ class Spectrum:
   """FFT result: frequency bins in Hz, complex coefficients, sample rate of the source."""
   __slots__ = ("freqs", "complex", "fs")
 
-  def __init__(self, freqs:np.ndarray, complex:np.ndarray, fs:float):
+  def __init__(self, freqs:np.ndarray, complex:np.ndarray, fs:float) -> None:
     self.freqs = freqs
     self.complex = complex
     self.fs = fs
@@ -83,7 +86,7 @@ class Spectrum:
     data = np.fft.irfft(self.complex, n=n)
     return Signal(data, fs=self.fs)
 
-  def __repr__(self):
+  def __repr__(self) -> str:
     return (f"Spectrum(bins={len(self.freqs)}, "
       f"range=0-{self.freqs[-1]:.0f}Hz, peak={self.peak_freq:.1f}Hz)")
 
@@ -98,7 +101,7 @@ class Signal:
   """
   __slots__ = ("_data", "_fs", "_units", "_label")
 
-  def __init__(self, data, fs:float=1000, units:str="", label:str=""):
+  def __init__(self, data, fs:float=1000, units:str="", label:str="") -> None:
     self._data = np.array(data, dtype=np.float64, copy=True).flatten()
     self._data.flags.writeable = False
     self._fs = float(fs)
@@ -193,51 +196,51 @@ class Signal:
       return self._new(op(self._data, other._data))
     return self._new(op(self._data, np.asarray(other)))
 
-  def __add__(self, other):
+  def __add__(self, other) -> Signal:
     return self._binop(operator.add, other)
 
-  def __radd__(self, other):
+  def __radd__(self, other) -> Signal:
     return self.__add__(other)
 
-  def __sub__(self, other):
+  def __sub__(self, other) -> Signal:
     return self._binop(operator.sub, other)
 
-  def __rsub__(self, other):
+  def __rsub__(self, other) -> Signal:
     return self._new(np.asarray(other) - self._data)
 
-  def __mul__(self, other):
+  def __mul__(self, other) -> Signal:
     return self._binop(operator.mul, other)
 
-  def __rmul__(self, other):
+  def __rmul__(self, other) -> Signal:
     return self.__mul__(other)
 
-  def __truediv__(self, other):
+  def __truediv__(self, other) -> Signal:
     return self._binop(operator.truediv, other)
 
-  def __neg__(self):
+  def __neg__(self) -> Signal:
     return self._new(-self._data)
 
-  def __abs__(self):
+  def __abs__(self) -> Signal:
     return self._new(np.abs(self._data))
 
-  def __pow__(self, exp):
+  def __pow__(self, exp) -> Signal:
     return self._new(self._data ** exp)
 
   #------------------------------------------------------------------------------- Indexing / numpy
 
-  def __len__(self):
+  def __len__(self) -> int:
     return len(self._data)
 
   def __getitem__(self, key) -> Signal:
     """Slice by sample index."""
     return self._new(self._data[key])
 
-  def __array__(self, dtype=None):
+  def __array__(self, dtype=None) -> np.ndarray:
     """NumPy interop: `np.asarray(sig)` yields a copy, never the read-only buffer."""
     if dtype: return self._data.astype(dtype)
     return self._data.copy()
 
-  def __iter__(self):
+  def __iter__(self) -> Iterator[float]:
     return iter(self._data)
 
   #---------------------------------------------------------------------------------- Filters (SOS)
@@ -293,9 +296,9 @@ class Signal:
     """
     Integrate signal (acceleration → velocity → displacement).
 
-    DC removal, Tukey window, high-pass and final detrend suppress the drift that plain
-    cumulative integration accumulates. `units` is inherited when omitted, so pass the
-    new unit explicitly.
+    DC removal, Tukey window, high-pass and final detrend suppress the drift
+    that plain cumulative integration accumulates.
+    `units` is inherited when omitted, so pass the result's unit explicitly.
     """
     data = self._data - np.mean(self._data)
     data *= windows.tukey(len(data), alpha=0.05)
@@ -430,17 +433,17 @@ class Signal:
 
   #---------------------------------------------------------------------------------------- Special
 
-  def __repr__(self):
+  def __repr__(self) -> str:
     parts = [f"n={self.samples}", f"fs={self._fs:.0f}Hz",
       f"duration={self.duration:.3f}s", f"rms={self.rms:.4g}"]
     if self._units: parts.append(f"units='{self._units}'")
     if self._label: parts.append(f"label='{self._label}'")
     return f"Signal({", ".join(parts)})"
 
-  def __str__(self):
+  def __str__(self) -> str:
     return self.__repr__()
 
-  def __eq__(self, other):
+  def __eq__(self, other) -> bool:
     if not isinstance(other, Signal): return NotImplemented
     return self._fs == other._fs and np.array_equal(self._data, other._data)
 
@@ -452,7 +455,7 @@ class Signal:
 
 #--------------------------------------------------------------------------------------------- Demo
 
-def demo():
+def demo() -> None:
   """Signal processing demo: filter, FFT, vibration metrics."""
   t = np.arange(10000) / 10000
   raw = 2 * np.sin(2 * np.pi * 50 * t) + 0.5 * np.sin(2 * np.pi * 200 * t)

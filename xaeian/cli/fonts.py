@@ -11,9 +11,11 @@ Variable fonts are kept in web mode, skipped in system mode (static instances on
 """
 
 import os, sys, re, io
+from typing import Any
 from ..files import PATH, DIR, FILE
 from ..log import Print
 from ..colors import Color as c
+from .args import make_parser, add_help
 
 p = Print()
 
@@ -125,14 +127,14 @@ def _family_to_slug(family:str) -> str:
   return re.sub(r"\s+", "-", family.strip()).lower()
 
 def _family_to_pascal(family:str) -> str:
-  """`JetBrains Mono` → `JetBrainsMono`, `Inter Display` → `InterDisplay`"""
+  """`JetBrains Mono` → `JetBrainsMono`"""
   return "".join(w for w in re.split(r"\s+", family.strip()) if w)
 
 #----------------------------------------------------------------------------- Style/weight parsing
 
 def _extract_weight_italic(style:str) -> tuple[int|str, bool]:
   """Weight and italic flag from style: `BoldItalic`, `Bold-Italic`, `700italic`, `Oblique`."""
-  s = re.sub(r"[-_\s]+", "", style.lower()) # `Bold-Italic` is the same style as `BoldItalic`
+  s = re.sub(r"[-_\s]+", "", style.lower())
   italic = "italic" in s or "oblique" in s or s.endswith("it")
   s = re.sub(r"italic|oblique|(?<=\w)it$", "", s)
   if not s or s in ("regular", "normal", "book"):
@@ -175,8 +177,9 @@ def _parse_filename(stem:str) -> tuple[str, int|str, bool]|None:
   """
   Parse a filename stem into `(family, weight, italic)`, `None` when unparsable.
 
-  Weight is `"var"` for variable fonts, else 100-900. Handles `Inter-BoldItalic`, `foo-700italic`,
-  `inter-700-italic`, `foo-v12-latin-regular`, `Inter[wght]`, `source-code-pro-VariableFont_wght`.
+  Weight is `"var"` for variable fonts, else 100-900.
+  Handles `Inter-BoldItalic`, `foo-700italic`, `inter-700-italic`, `foo-v12-latin-regular`,
+  `Inter[wght]`, `source-code-pro-VariableFont_wght`.
   """
   if "[" in stem:
     pre = stem.split("[")[0].rstrip("-")
@@ -272,8 +275,8 @@ def _rewrite_metadata(path:str, family:str, weight:int|str, italic:bool):
     17: subfamily,
   }
   for name_id, value in records.items():
-    name_table.setName(value, name_id, 1, 0, 0)      # Mac Roman
-    name_table.setName(value, name_id, 3, 1, 0x409)  # Windows Unicode US
+    name_table.setName(value, name_id, 1, 0, 0) # Mac Roman
+    name_table.setName(value, name_id, 3, 1, 0x409) # Windows Unicode US
   # nameID 18-25 (compatible full, variations) would override the records above
   name_table.names = [
     n for n in name_table.names
@@ -301,7 +304,7 @@ def rename_fonts(
   dry_run:bool = False,
   mode:str = "web",
   meta:bool = False,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
   """
   Rename the font files in `root` (top level only) to the `web` or `system` layout.
 
@@ -324,8 +327,8 @@ def rename_fonts(
     except ImportError:
       p.err(f"--meta needs {c.ORANGE}fontTools{c.END} | pip install fonttools")
       sys.exit(1)
-  root = os.path.abspath(root)
-  if not PATH.is_dir(root):
+  root = PATH.resolve(root)
+  if not DIR.exists(root):
     raise FileNotFoundError(f"Directory not found: {root}")
   files = sorted(
     f for f in os.listdir(root)
@@ -358,7 +361,7 @@ def rename_fonts(
     old_path = root + "/" + name
     new_path = root + "/" + new_name
     # samefile keeps case-only renames working on a case-insensitive FS
-    if name != new_name and PATH.exists(new_path) and not os.path.samefile(old_path, new_path):
+    if name != new_name and FILE.exists(new_path) and not os.path.samefile(old_path, new_path):
       p.wrn(f"COLLISION {c.ORANGE}{new_name}{c.END} exists, skipping {name}")
       continue
     if name == new_name:
@@ -391,7 +394,7 @@ def _generate_css(font_dir:str, css_path:str, results:list[dict], dry_run:bool):
   if not results:
     p.wrn(f"No fonts to write CSS for, skipping {c.ORANGE}{css_path}{c.END}")
     return
-  css_path = os.path.abspath(css_path)
+  css_path = PATH.resolve(css_path)
   rel = os.path.relpath(font_dir, PATH.dirname(css_path)).replace("\\", "/")
   faces: dict[tuple, list[dict]] = {}
   for r in results:
@@ -443,9 +446,8 @@ examples:
   xn fonts fonts/ --dry-run                        Preview without changes
 """
 
-def main():
-  from ._args import _make_parser, _add_help
-  parser = _make_parser("Rename font files to xaeian convention (web or system layout)", EXAMPLES)
+def main() -> None:
+  parser = make_parser("Rename font files to xaeian convention (web or system layout)", EXAMPLES)
   parser.add_argument("root", help="Directory with font files")
   parser.add_argument("--mode", choices=["web", "system"], default="web",
     help="Layout: web (slug-weight + CSS) or system (PascalCase, reportlab/PIL)")
@@ -455,10 +457,10 @@ def main():
     help="Rewrite TTF/OTF name table to match new files (needs fontTools)")
   parser.add_argument("--dry-run", action="store_true",
     help="Preview without renaming or writing files")
-  _add_help(parser)
+  add_help(parser)
   args = parser.parse_args()
-  root = os.path.abspath(args.root)
-  if not PATH.is_dir(root):
+  root = PATH.resolve(args.root)
+  if not DIR.exists(root):
     p.err(f"Directory {c.ORANGE}{root}{c.END} not found")
     sys.exit(1)
   flags = []

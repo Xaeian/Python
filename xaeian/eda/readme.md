@@ -39,23 +39,28 @@ kc = KiCad("./kicad", "./produce")
 kc.bom() # generic BOM
 kc.bom("JLCPCB") # JLCPCB format (LCSC parts)
 kc.bom("EuroCircuits") # EuroCircuits format
+kc.bom(dnp_ref=["CN*"], dnp_package=["TO220-3"]) # depopulate for this production
 
 kc.gerber() # gerbers + drill → ZIP
 kc.cpl() # pick & place CSV
 kc.cpl(jlcpcb_format=True) # JLCPCB CPL format
 kc.cpl(
-  blacklist=["CP", "TP"], # skip test points, connectors
-  rotation_refs={90: ["U1"]}, # rotation corrections
-  dnp=["R99"], # do not place
+  blacklist=["CP", "TP"], # skip these ref prefixes
+  rot_ref={"U1": 90}, # rotation corrections, degrees added to Rot
+  rot_package={"SOT23-3": 180},
+  dnp_ref=["R99"], # do not place
 )
 
 kc.pdf_layout() # multi-page PCB layout PDF
-kc.pdf_layout(top=True, bot=True)
+kc.pdf_layout(el="both", cu="both", desc="top") # pick sides per page kind
 kc.pdf_schema() # schematic PDF
 
 kc.zip_prod("1.0.0") # ZIP everything
 kc.ok() # print success
 ```
+
+Every export, PDFs included, lands in `produce_path`. A failed `kicad-cli` call raises
+`RuntimeError`, so a production script stops at the first broken export.
 
 ### Typical `produce.py`
 

@@ -11,7 +11,7 @@ import json
 import pytest
 from xaeian.files.json import JSON
 
-#---------------------------------------------------------------------- layout stays valid JSON
+#-------------------------------------------------------------------------- layout stays valid JSON
 
 @pytest.mark.parametrize("data", [
   [1, 2, 3],
@@ -26,7 +26,7 @@ def smart_output_is_always_valid_json(data):
   # however smart lays it out, it must still parse back to the original value
   assert json.loads(JSON.smart(data)) == data
 
-#------------------------------------------------------------------------------- numeric arrays
+#----------------------------------------------------------------------------------- numeric arrays
 
 def short_numeric_array_stays_inline():
   assert JSON.smart([1, 2, 3]) == "[1, 2, 3]"
@@ -40,7 +40,7 @@ def long_numeric_array_wraps_into_chunks():
     "]"
   )
 
-#---------------------------------------------------------------------------- 2D numeric matrix
+#-------------------------------------------------------------------------------- 2D numeric matrix
 
 def matrix_puts_each_row_on_its_own_line():
   assert JSON.smart([[1, 2, 3], [4, 5, 6]], max_line=5, array_wrap=3) == (
@@ -59,7 +59,7 @@ def matrix_row_wraps_when_too_long():
     "]"
   )
 
-#--------------------------------------------------------------------------------- dictionaries
+#------------------------------------------------------------------------------------- dictionaries
 
 def flat_dict_packs_entries_up_to_the_line_width():
   assert JSON.smart({"a": 1, "b": 2, "c": 3, "d": 4}, max_line=24) == (
@@ -82,7 +82,7 @@ def nested_dict_expands_to_multiline():
     "}"
   )
 
-#----------------------------------------------------------------------------------- containers
+#--------------------------------------------------------------------------------------- containers
 
 def list_of_objects_breaks_onto_multiple_lines():
   assert JSON.smart([{"a": 1}, {"b": 2}], max_line=5) == (

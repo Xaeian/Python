@@ -8,9 +8,11 @@ which only root can read.
 """
 
 import os, sys, re, subprocess, platform
+from typing import Any
 from ..files import JSON
 from ..log import Print
 from ..colors import Color as c
+from .args import make_parser, add_help
 
 p = Print()
 
@@ -23,7 +25,7 @@ def _run(cmd:list[str]) -> str|None:
   except Exception:
     return None
 
-def _windows() -> list[dict]:
+def _windows() -> list[dict[str, Any]]:
   out = _run(["netsh", "wlan", "show", "profiles"])
   if not out: return []
   profiles = re.findall(r":\s*(.+)", out)
@@ -42,7 +44,7 @@ def _windows() -> list[dict]:
     results.append({"ssid": ssid, "password": password})
   return results
 
-def _linux() -> list[dict]:
+def _linux() -> list[dict[str, Any]]:
   conn_dir = "/etc/NetworkManager/system-connections"
   results = []
   out = _run(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"])
@@ -83,7 +85,7 @@ def _linux() -> list[dict]:
 
 #---------------------------------------------------------------------------------------------- API
 
-def wifi_passwords() -> list[dict]:
+def wifi_passwords() -> list[dict[str, Any]]:
   """
   Saved Wi-Fi networks, sorted by SSID.
 
@@ -107,12 +109,11 @@ examples:
   xn wifi -o wifi.json  Save report to JSON file
 """
 
-def main():
-  from ._args import _make_parser, _add_help
-  parser = _make_parser("Extract saved Wi-Fi passwords", EXAMPLES)
+def main() -> None:
+  parser = make_parser("Extract saved Wi-Fi passwords", EXAMPLES)
   parser.add_argument("-o", "--output", default=None, metavar="PATH",
     help="Save JSON report to file")
-  _add_help(parser)
+  add_help(parser)
   args = parser.parse_args()
   system = platform.system()
   if system not in ("Windows", "Linux"):
@@ -142,7 +143,9 @@ def main():
         p.dot(f"{c.GREY}{ssid}  (open){c.END}")
   if args.output:
     JSON.save_pretty(args.output, networks)
+    os.chmod(args.output, 0o600) # POSIX only: on Windows the directory ACL is the protection
     p.ok(f"Saved {c.TEAL}{args.output}{c.END}")
+    p.wrn("The file holds passwords in plain text")
 
 if __name__ == "__main__":
   main()

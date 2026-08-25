@@ -24,7 +24,7 @@ Example:
 
 from struct import pack, unpack_from, calcsize
 from enum import Enum
-from typing import Callable, Any
+from typing import Callable, Any, Iterator
 from numbers import Real
 
 from .crc import CRC, crc32_iso
@@ -162,10 +162,10 @@ class Field:
     if self.type.is_float: value = round(value, self.precision)
     return value
 
-  def __str__(self):
+  def __str__(self) -> str:
     return f"Field {self.name}[{self.unit}]" if self.unit else f"Field {self.name}"
 
-  def __repr__(self):
+  def __repr__(self) -> str:
     parts = [f"Field({self.type.name!r}, {self.name!r}"]
     if self.unit: parts.append(f", unit={self.unit!r}")
     if self.length > 1: parts.append(f", length={self.length}")
@@ -187,7 +187,7 @@ class Bitfield:
       ("reserved", 3),
     ]) # 8 bits total → uint8
   """
-  def __init__(self, name:str, bits:list[tuple[str, int]], base_type:Type=None):
+  def __init__(self, name:str, bits:list[tuple[str, int]], base_type:Type|None=None) -> None:
     """
     Args:
       bits: (bit_name, bit_width) pairs
@@ -236,14 +236,14 @@ class Bitfield:
     """Size of the packed base type in bytes, not bits."""
     return self.base_type.size
 
-  def __str__(self):
+  def __str__(self) -> str:
     return f"Bitfield {self.name} ({self.total_bits} bits)"
 
 #------------------------------------------------------------------------------------------ Padding
 
 class Padding:
   """Fixed run of filler bytes for alignment, skipped on decode."""
-  def __init__(self, size:int, fill:int=0x00):
+  def __init__(self, size:int, fill:int=0x00) -> None:
     self.name = f"_pad_{size}"
     self.size = size
     self.fill = fill
@@ -253,7 +253,7 @@ class Padding:
     """Filler bytes emitted in place of this padding."""
     return bytes([self.fill] * self.size)
 
-  def __str__(self):
+  def __str__(self) -> str:
     return f"Padding({self.size})"
 
 #------------------------------------------------------------------------------------------ Variant
@@ -270,7 +270,7 @@ class Variant:
       2: [Field(Type.string, "text")],
     })
   """
-  def __init__(self, name:str, selector:str, variants:dict[int, list[Field]]):
+  def __init__(self, name:str, selector:str, variants:dict[int, list[Field]]) -> None:
     self.name = name
     self.selector = selector
     self.variants = variants
@@ -280,7 +280,7 @@ class Variant:
     """Field layout for a selector value, empty for an unknown one."""
     return self.variants.get(selector_value, [])
 
-  def __str__(self):
+  def __str__(self) -> str:
     return f"Variant {self.name} (selector={self.selector}, {len(self.variants)} variants)"
 
 #------------------------------------------------------------------------------------------- Struct
@@ -488,6 +488,8 @@ class Struct:
     if self.align > 1:
       remainder = offset % self.align
       if remainder: offset += self.align - remainder
+    if offset > len(msg): # padding and alignment skip bytes without reading them
+      raise ValueError(f"Incomplete data for struct '{self.name}': {len(msg)} of {offset} bytes")
     if self.crc_frame:
       n = self.crc_frame.width // 8
       crc = msg[offset:offset + n]
@@ -505,7 +507,7 @@ class Struct:
     if self.crc: message = self.crc.encode(message)
     return message
 
-  def decode(self, message:bytes, endian:Endian|None=None) -> list[dict]|dict:
+  def decode(self, message:bytes, endian:Endian|None=None) -> list[dict[str, Any]]|dict[str, Any]:
     """Decode every record in the message, a bare dict when there is exactly one."""
     if self.crc:
       message = self.crc.decode(message)
@@ -516,11 +518,13 @@ class Struct:
     data_list = []
     while message:
       data, offset = self._decode_single(message, endian)
+      if offset <= 0:
+        raise ValueError(f"Struct '{self.name}' consumes no bytes, cannot decode a stream")
       data_list.append(data)
       message = message[offset:]
     return data_list[0] if len(data_list) == 1 else data_list
 
-  def export_c_header(self, guard:str=None) -> str:
+  def export_c_header(self, guard:str|None=None) -> str:
     """Export as a C header, `guard` defaulting to `_NAME_H_`."""
     if guard is None: guard = f"_{self.name.upper()}_H_"
     lines = [
@@ -596,21 +600,21 @@ class Struct:
         lines.append(f"| {member.name} | variant | - | selector={member.selector} |")
     return "\n".join(lines)
 
-  def __iter__(self):
+  def __iter__(self) -> Iterator[Field]:
     return iter(self.fields)
 
-  def __len__(self):
+  def __len__(self) -> int:
     return len(self.fields)
 
   def __getitem__(self, key:int|str) -> Field:
     if isinstance(key, int): return self.fields[key]
     return self.fields_by_name[key]
 
-  def __str__(self):
+  def __str__(self) -> str:
     if self.code is not None: return f"Struct {self.code}:{self.name}"
     return f"Struct {self.name}"
 
-  def __repr__(self):
+  def __repr__(self) -> str:
     return f"Struct(code={self.code!r}, name={self.name!r}, fields={len(self.fields)})"
 
 #-------------------------------------------------------------------------------------------- Frame
@@ -621,6 +625,8 @@ class Frame:
 
   Blocks concatenate, each one: | size-uint16 | code-uint16 | records |
   `size` counts the payload bytes only, `code` is the Struct code.
+  Decoding reads each block out of exactly its `size` bytes, so a header that lies is refused
+  rather than left to desynchronise everything after it.
   A struct's own `crc` and `crc_auth` are unused here, only its `crc_frame` wraps each record.
   """
   def __init__(
@@ -679,17 +685,23 @@ class Frame:
       if struct_code not in self.structs_by_code:
         raise KeyError(f"Unknown struct code: {struct_code}")
       struct = self.structs_by_code[struct_code]
-      remaining = size
-      while remaining > 0:
-        data, consumed = struct._decode_single(frame, self.endian)
+      if size > len(frame):
+        raise ValueError(f"Block declares {size} bytes, {len(frame)} left in the frame")
+      # records are read out of the block alone, so a wrong `size` cannot walk into the next one
+      block, frame = frame[:size], frame[size:]
+      while block:
+        data, consumed = struct._decode_single(block, self.endian)
+        if consumed <= 0:
+          raise ValueError(f"Struct '{struct.name}' consumes no bytes, cannot decode a block")
+        if consumed > len(block):
+          raise ValueError(f"Record of '{struct.name}' overruns its {size}-byte block")
         if struct.name in data_dict:
           existing = data_dict[struct.name]
           if not isinstance(existing, list): data_dict[struct.name] = [existing]
           data_dict[struct.name].append(data)
         else:
           data_dict[struct.name] = data
-        frame = frame[consumed:]
-        remaining -= consumed
+        block = block[consumed:]
     return data_dict
 
   def get_struct(self, tag:int|str) -> Struct:
@@ -697,10 +709,10 @@ class Frame:
     if isinstance(tag, int): return self.structs_by_code[tag]
     return self.structs_by_name[tag]
 
-  def __iter__(self):
+  def __iter__(self) -> Iterator[Struct]:
     return iter(self.structs)
 
-  def __len__(self):
+  def __len__(self) -> int:
     return len(self.structs)
 
   def __getitem__(self, key:int|str) -> Struct:

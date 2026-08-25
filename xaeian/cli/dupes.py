@@ -3,8 +3,9 @@
 """Duplicate file finder - content hashing, optionally reaching inside ZIP archives."""
 
 import os, sys, hashlib, zipfile
+from typing import Any
 from collections import defaultdict
-from ..files import FILE, JSON
+from ..files import PATH, DIR, FILE, JSON
 from ..log import Print
 from ..colors import Color as c
 
@@ -44,7 +45,7 @@ def _is_zip(path:str) -> bool:
   try: return zipfile.is_zipfile(path)
   except Exception: return False
 
-from ._args import _fmt_size
+from .args import fmt_size, make_parser, add_help
 
 #---------------------------------------------------------------------------------------------- API
 
@@ -54,38 +55,39 @@ def find_dupes(
   min_size:int = 1,
   zips:bool = False,
   follow_symlinks:bool = False,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
   """
   Find duplicate files under `root` by content hash.
 
   Groups by size first, hashes only size-collisions. Unreadable files and archives are skipped.
 
+  Every returned path lies under `root`: linked directories are never entered,
+  so a report you act on cannot name a file living somewhere else.
+
   Args:
     algo: Any `hashlib` name (sha256, md5, sha1).
     min_size: Skip files below N bytes.
     zips: Hash entries inside .zip archives instead of the archive itself.
-    follow_symlinks: Walk into symlinked directories, so link and target report as duplicates.
+    follow_symlinks: Measure a linked file as its target, so link and target can pair up.
 
   Returns:
     Dicts with keys: size, hash, count, paths - sorted by size ascending.
     A ZIP entry appears as `zip://<archive>::<entry>`.
   """
-  root = os.path.abspath(root)
-  if not os.path.isdir(root):
+  root = PATH.resolve(root)
+  if not DIR.exists(root):
     raise FileNotFoundError(f"Directory not found: {root}")
   by_size = defaultdict(list)
-  for dirpath, dirnames, filenames in os.walk(root, followlinks=follow_symlinks):
-    for name in filenames:
-      path = os.path.join(dirpath, name)
-      try:
-        st = os.stat(path) if follow_symlinks else os.lstat(path)
-      except Exception:
-        continue
-      if st.st_size < min_size: continue
-      if zips and _is_zip(path):
-        _scan_zip(path, min_size, by_size)
-      else:
-        by_size[st.st_size].append(("file", path, None, path))
+  for path in DIR.iter_files(root):
+    try:
+      st = os.stat(path) if follow_symlinks else os.lstat(path)
+    except OSError:
+      continue
+    if st.st_size < min_size: continue
+    if zips and _is_zip(path):
+      _scan_zip(path, min_size, by_size)
+    else:
+      by_size[st.st_size].append(("file", path, None, path))
   groups = []
   for size, items in by_size.items():
     if len(items) < 2: continue
@@ -110,31 +112,31 @@ EXAMPLES = """
 examples:
   xn dupes photos/            Find duplicates
   xn dupes docs/ --zips       Include ZIP contents
-  xn dupes . --min-size 1024  Skip files < 1 kB
+  xn dupes . --min-size 1024  Skip files < 1kB
   xn dupes . --algo md5       Use MD5 (faster)
   xn dupes . -o report.json   Save JSON report
 """
 
-def main():
-  from ._args import _make_parser, _add_help
-  parser = _make_parser("Find duplicate files by content hash", EXAMPLES)
+def main() -> None:
+  parser = make_parser("Find duplicate files by content hash", EXAMPLES)
   parser.add_argument("root", help="Directory to scan")
   parser.add_argument("--algo", default="sha256", metavar="ALG",
     choices=["sha256", "md5", "sha1"], help="Hash algorithm (default: sha256)")
   parser.add_argument("--min-size", type=int, default=1, metavar="N",
     help="Ignore files < N bytes (default: 1)")
   parser.add_argument("--zips", action="store_true", help="Scan inside .zip archives")
-  parser.add_argument("--follow-symlinks", action="store_true", help="Follow symbolic links")
+  parser.add_argument("--follow-symlinks", action="store_true",
+    help="Measure a linked file as its target")
   parser.add_argument("-o", "--output", default=None, metavar="PATH",
     help="Save JSON report to file")
-  _add_help(parser)
+  add_help(parser)
   args = parser.parse_args()
-  root = os.path.abspath(args.root)
-  if not os.path.isdir(root):
+  root = PATH.resolve(args.root)
+  if not DIR.exists(root):
     p.err(f"Directory {c.ORANGE}{root}{c.END} not found")
     sys.exit(1)
   p.inf(f"Scanning {c.ORANGE}{root}{c.END} "
-    f"{c.GREY}({args.algo}, min {_fmt_size(args.min_size)}"
+    f"{c.GREY}({args.algo}, min {fmt_size(args.min_size)}"
     f"{', +zips' if args.zips else ''}){c.END}")
   try:
     groups = find_dupes(root, args.algo, args.min_size, args.zips, args.follow_symlinks)
@@ -148,10 +150,10 @@ def main():
     wasted = sum((g["count"] - 1) * g["size"] for g in groups)
     p.wrn(f"Found {c.TEAL}{len(groups)}{c.END} duplicate groups, "
       f"{c.TEAL}{total_files}{c.END} files, "
-      f"{c.ORANGE}{_fmt_size(wasted)}{c.END} wasted")
+      f"{c.ORANGE}{fmt_size(wasted)}{c.END} wasted")
     print()
     for i, g in enumerate(groups, 1):
-      p.inf(f"[{c.GOLD}{i}{c.END}] {c.CYAN}{_fmt_size(g['size'])}{c.END} "
+      p.inf(f"[{c.GOLD}{i}{c.END}] {c.CYAN}{fmt_size(g['size'])}{c.END} "
         f"x{g['count']} {c.GREY}{g['hash'][:16]}...{c.END}")
       for path in g["paths"]:
         p.gap(f"{c.GREY}{_short(path, root)}{c.END}")

@@ -27,10 +27,24 @@ __extras__ = {
   "db-async": ["aiomysql", "asyncpg", "aiosqlite"],
 }
 
-import importlib
 from enum import Enum
-from typing import TYPE_CHECKING
 from ..log import Logger, Print
+from .errors import DatabaseError
+from .abstract import AbstractDatabase
+from .abstract_async import AbstractAsyncDatabase
+from .sqlite import SqliteDatabase
+from .mysql import MysqlDatabase
+from .postgres import PostgresDatabase
+from .sqlite_async import SqliteAsyncDatabase
+from .mysql_async import MysqlAsyncDatabase
+from .postgres_async import PostgresAsyncDatabase
+from .kv import KeyValue
+from .kv_async import AsyncKeyValue
+from .kv_common import KvEntry
+from .utils import (
+  ident, ph, to_dicts, serialize, serialize_params, serialize_dict,
+  split_sql, norm, parse_json, parse_row,
+)
 
 class DatabaseType(str, Enum):
   """Supported database types."""
@@ -38,110 +52,74 @@ class DatabaseType(str, Enum):
   mysql = "mysql"
   postgres = "postgres"
 
+# A backend module pulls in no driver: every one of them imports its driver inside `conn()`,
+# so a missing psycopg2 surfaces on connect, not on `import xaeian.db`.
 _SYNC = {
-  "sqlite": (".sqlite", "SqliteDatabase"),
-  "mysql": (".mysql", "MysqlDatabase"),
-  "postgres": (".postgres", "PostgresDatabase"),
+  "sqlite": SqliteDatabase,
+  "mysql": MysqlDatabase,
+  "postgres": PostgresDatabase,
 }
 
 _ASYNC = {
-  "sqlite": (".sqlite_async", "SqliteAsyncDatabase"),
-  "mysql": (".mysql_async", "MysqlAsyncDatabase"),
-  "postgres": (".postgres_async", "PostgresAsyncDatabase"),
+  "sqlite": SqliteAsyncDatabase,
+  "mysql": MysqlAsyncDatabase,
+  "postgres": PostgresAsyncDatabase,
 }
 
 _PORTS = {"mysql": 3306, "postgres": 5432}
+_USERS = {"mysql": "root", "postgres": "postgres"}
 
-def _norm(t:str|DatabaseType) -> str:
-  return t.value if isinstance(t, DatabaseType) else str(t).strip().lower()
-
-def _load(mapping:dict, key:str):
-  mod_name, cls_name = mapping[key]
-  mod = importlib.import_module(mod_name, __name__)
-  return getattr(mod, cls_name)
+def _norm(backend:str|DatabaseType) -> str:
+  return backend.value if isinstance(backend, DatabaseType) else str(backend).strip().lower()
 
 #------------------------------------------------------------------------------------------ Factory
 
 def Database(
-  type:str|DatabaseType,
+  backend:str|DatabaseType,
   db_name:str|None = None,
   host:str = "localhost",
   user:str|None = None,
   password:str = "",
   port:int|None = None,
   log:Logger|Print|None = None,
-):
+) -> AbstractDatabase:
   """
   Create sync database instance.
 
-  For SQLite `db_name` is the file path and host/user/password are ignored; when omitted it is
-  `":memory:"`, which only holds data for the span of one `transaction()`. Default port 3306
-  MySQL / 5432 PostgreSQL, default user `root` / `postgres`.
+  For SQLite `db_name` is the file path and host/user/password are ignored;
+  when omitted it is `":memory:"`, which only holds data for the span of one `transaction()`.
+  Default port 3306 MySQL / 5432 PostgreSQL, default user `root` / `postgres`.
   """
-  t = _norm(type)
-  if t not in _SYNC: raise ValueError(f"Unknown database type: {type!r}")
-  cls = _load(_SYNC, t)
-  if t == "sqlite": return cls(db_name or ":memory:", log=log)
-  user = user or ("postgres" if t == "postgres" else "root")
-  return cls(db_name, host, user, password, port or _PORTS[t], log=log)
+  name = _norm(backend)
+  if name not in _SYNC: raise ValueError(f"Unknown database type: {backend!r}")
+  cls = _SYNC[name]
+  if name == "sqlite": return cls(db_name or ":memory:", log=log)
+  return cls(db_name, host, user or _USERS[name], password, port or _PORTS[name], log=log)
 
 def AsyncDatabase(
-  type:str|DatabaseType,
+  backend:str|DatabaseType,
   db_name:str|None = None,
   host:str = "localhost",
   user:str|None = None,
   password:str = "",
   port:int|None = None,
   log:Logger|Print|None = None,
-):
+) -> AbstractAsyncDatabase:
   """Create async database instance, arguments as in `Database`."""
-  t = _norm(type)
-  if t not in _ASYNC: raise ValueError(f"Unknown database type: {type!r}")
-  cls = _load(_ASYNC, t)
-  if t == "sqlite": return cls(db_name or ":memory:", log=log)
-  user = user or ("postgres" if t == "postgres" else "root")
-  return cls(db_name, host, user, password, port or _PORTS[t], log=log)
+  name = _norm(backend)
+  if name not in _ASYNC: raise ValueError(f"Unknown database type: {backend!r}")
+  cls = _ASYNC[name]
+  if name == "sqlite": return cls(db_name or ":memory:", log=log)
+  return cls(db_name, host, user or _USERS[name], password, port or _PORTS[name], log=log)
 
 #------------------------------------------------------------------------------------------ Exports
 
-from .errors import DatabaseError
-from .utils import (
-  ident, ph, to_dicts, serialize, serialize_params, serialize_dict,
-  split_sql, norm, parse_json, parse_row,
-)
-from .kv_common import KvEntry
-
 __all__ = [
   "Database", "AsyncDatabase", "DatabaseType", "DatabaseError",
+  "AbstractDatabase", "AbstractAsyncDatabase",
+  "SqliteDatabase", "MysqlDatabase", "PostgresDatabase",
+  "SqliteAsyncDatabase", "MysqlAsyncDatabase", "PostgresAsyncDatabase",
+  "KeyValue", "AsyncKeyValue", "KvEntry",
   "ident", "ph", "to_dicts", "serialize", "serialize_params", "serialize_dict",
-  "split_sql", "norm", "parse_json", "parse_row", "KvEntry",
+  "split_sql", "norm", "parse_json", "parse_row",
 ]
-
-#------------------------------------------------------------------------------------- Lazy Imports
-
-_LAZY = {
-  "PostgresDatabase": (".postgres", "PostgresDatabase"),
-  "PostgresAsyncDatabase": (".postgres_async", "PostgresAsyncDatabase"),
-  "MysqlDatabase": (".mysql", "MysqlDatabase"),
-  "MysqlAsyncDatabase": (".mysql_async", "MysqlAsyncDatabase"),
-  "SqliteDatabase": (".sqlite", "SqliteDatabase"),
-  "SqliteAsyncDatabase": (".sqlite_async", "SqliteAsyncDatabase"),
-  "KeyValue": (".kv", "KeyValue"),
-  "AsyncKeyValue": (".kv_async", "AsyncKeyValue"),
-}
-
-if TYPE_CHECKING:
-  from .postgres import PostgresDatabase
-  from .postgres_async import PostgresAsyncDatabase
-  from .mysql import MysqlDatabase
-  from .mysql_async import MysqlAsyncDatabase
-  from .sqlite import SqliteDatabase
-  from .sqlite_async import SqliteAsyncDatabase
-  from .kv import KeyValue
-  from .kv_async import AsyncKeyValue
-
-def __getattr__(name:str):
-  if name not in _LAZY: raise AttributeError(f"module 'xaeian.db' has no attribute {name!r}")
-  return _load(_LAZY, name)
-
-__all__ += list(_LAZY.keys())

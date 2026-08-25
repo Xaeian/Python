@@ -7,7 +7,7 @@ from typing import Any
 from .abstract_async import AbstractAsyncDatabase
 from .kv_common import (
   JsonValue, KvEntry, check_key, check_table, dumps, loads, now_ms,
-  sql_create, sql_get_value, sql_get_meta, sql_read_all, sql_read_all_meta, where_key,
+  sql_create, sql_upsert, sql_get_value, sql_get_meta, sql_read_all, sql_read_all_meta, where_key,
 )
 from .utils import ph_list
 
@@ -17,12 +17,14 @@ class AsyncKeyValue:
   """
   JSON-canonical async key-value store backed by a database table.
 
-  Values are stored as canonical JSON text, reads return native Python types. `None` is a
-  legitimate value (JSON `null`), so use `has()` to tell a missing key from a stored `None`.
+  Values are stored as canonical JSON text, reads return native Python types.
+  `None` is a legitimate value (JSON `null`),
+  so use `has()` to tell a missing key from a stored `None`.
 
-  The table is created on the first operation, under an `asyncio.Lock` so concurrent tasks
-  create it once. Its existence is then assumed for the life of the instance: a table dropped
-  afterwards is never recreated.
+  The table is created on the first operation,
+  under an `asyncio.Lock` so concurrent tasks create it once.
+  Its existence is then assumed for the life of the instance:
+  a table dropped afterwards is never recreated.
 
   Example:
     >>> db = AsyncDatabase("postgres", "app", user="postgres", password="pass")
@@ -30,25 +32,27 @@ class AsyncKeyValue:
     >>> async with db:
     ...   await kv.set("maintenance", True)
   """
-  def __init__(self, db:AbstractAsyncDatabase, table:str="_config"):
+  def __init__(self, db:AbstractAsyncDatabase, table:str="_config") -> None:
     check_table(table)
     self.db = db
     self.table = table
     self._ready = False
     self._lock = asyncio.Lock()
-    ph = ph_list(1, db.ph)[0]
-    self._sql_get = sql_get_value(table, ph)
-    self._sql_meta = sql_get_meta(table, ph)
-    self._sql_all = sql_read_all(table)
-    self._sql_all_meta = sql_read_all_meta(table)
-    self._where = where_key(ph)
+    ph, q = ph_list(1)[0], db.quote
+    self._sql_get = sql_get_value(table, ph, q)
+    self._sql_meta = sql_get_meta(table, ph, q)
+    self._sql_all = sql_read_all(table, q)
+    self._sql_all_meta = sql_read_all_meta(table, q)
+    self._where = where_key(ph, q)
+    self._sql_create = sql_create(table, q)
+    self._sql_set = sql_upsert(table, ph, q, db.excluded)
 
   async def _ensure(self):
     """Create the table once, double-checked so later calls skip the lock."""
     if self._ready: return
     async with self._lock:
       if self._ready: return
-      await self.db.exec(sql_create(self.table))
+      await self.db.exec(self._sql_create)
       self._ready = True
 
   #------------------------------------------------------------------------------------------- Read
@@ -100,11 +104,7 @@ class AsyncKeyValue:
     await self._ensure()
     serialized = dumps(value)
     ts = now_ms()
-    await self.db.upsert(self.table, {
-      "key": key,
-      "value": serialized,
-      "updated_at": ts,
-    }, on="key")
+    await self.db.exec(self._sql_set, (key, serialized, ts))
     return ts
 
   async def delete(self, key:str) -> bool:

@@ -45,7 +45,7 @@ class CRC:
     reflect_out:bool,
     xor:int,
     invert_out:bool,
-  ):
+  ) -> None:
     self.width = width
     self.polynomial = polynomial
     self.initial = initial
@@ -57,7 +57,7 @@ class CRC:
     self.array: list[int] = []
     self.__init()
 
-  def __init(self):
+  def __init(self) -> None:
     """Build the remainder lookup table, plus the reflected-byte table when `reflect_in`."""
     for i in range(256):
       remainder = i << (self.width - 8)
@@ -143,6 +143,8 @@ crc8_smbus = CRC(8, 0x07, 0x00, False, False, 0x00, False)
 #-------------------------------------------------------------------------------------------- Tests
 
 if __name__ == "__main__":
+  from .log import Print
+  print = Print() # claims stdout for UTF-8, prints like the builtin
   msg = b"123456789"
   print("checksum:", hex(crc32_iso.checksum(msg)))
   print("checksum:", hex(crc16_modbus.checksum(msg)))

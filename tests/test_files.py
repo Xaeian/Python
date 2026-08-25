@@ -15,7 +15,7 @@ def _root_context(tmp_path):
   with file_context(root_path=str(tmp_path)):
     yield
 
-#----------------------------------------------------------------------------------------- PATH
+#--------------------------------------------------------------------------------------------- PATH
 
 @pytest.mark.parametrize("method, expected", [
   ("basename", "c.txt"),
@@ -66,11 +66,11 @@ def path_ext_empty_for_no_extension():
 def path_exists_is_file_is_dir():
   FILE.save("a.txt", "x")
   DIR.ensure("d/")
-  assert PATH.exists("a.txt") and PATH.is_file("a.txt") and not PATH.is_dir("a.txt")
-  assert PATH.is_dir("d") and not PATH.is_file("d")
-  assert not PATH.exists("nope.txt")
+  assert FILE.exists("a.txt") and not DIR.exists("a.txt")
+  assert DIR.exists("d") and not FILE.exists("d")
+  assert not FILE.exists("nope.txt")
 
-#----------------------------------------------------------------------------------------- FILE
+#--------------------------------------------------------------------------------------------- FILE
 
 def file_text_roundtrip():
   FILE.save("a.txt", "Hello!")
@@ -106,10 +106,11 @@ def file_load_missing_raises():
 def file_hash_and_size():
   FILE.save("h.txt", "abc")
   assert FILE.hash("h.txt", algo="md5") == "900150983cd24fb0d6963f7d28e17f72"      # md5("abc")
-  assert FILE.hash("h.txt") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" # sha256
+  # sha256 of "abc"
+  assert FILE.hash("h.txt") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
   assert FILE.size("h.txt") == 3 and FILE.mtime("h.txt") > 0
 
-#------------------------------------------------------------------------------------------ DIR
+#---------------------------------------------------------------------------------------------- DIR
 
 def dir_ensure_creates_dirs(tmp_path):
   DIR.ensure("a/b/c/")
@@ -119,16 +120,16 @@ def dir_ensure_creates_dirs(tmp_path):
 
 def dir_file_list_filters_by_ext():
   FILE.save("p/a.txt", "1"); FILE.save("p/b.py", "2"); FILE.save("p/sub/c.txt", "3")
-  assert sorted(DIR.file_list("p", exts=[".txt"], local=True)) == ["a.txt", "sub/c.txt"]
+  assert sorted(DIR.file_list("p", exts=[".txt"], shape="rel")) == ["a.txt", "sub/c.txt"]
 
 def dir_file_list_match_and_blacklist():
   FILE.save("p/a.txt", "1"); FILE.save("p/sub/c.py", "2")
-  assert DIR.file_list("p", match="*.py", local=True) == ["sub/c.py"]
-  assert DIR.file_list("p", blacklist=["sub"], local=True) == ["a.txt"]
+  assert DIR.file_list("p", match="*.py", shape="rel") == ["sub/c.py"]
+  assert DIR.file_list("p", blacklist=["sub"], shape="rel") == ["a.txt"]
 
 def dir_folder_list_and_iter_files():
   FILE.save("base/a.txt", "1"); FILE.save("base/sub/b.txt", "2")
-  assert DIR.folder_list("base", basename=True) == ["sub"]
+  assert DIR.folder_list("base", shape="name") == ["sub"]
   assert sorted(PATH.rel(f) for f in DIR.iter_files("base")) == ["base/a.txt", "base/sub/b.txt"]
 
 def dir_copy_move_remove(tmp_path):
@@ -153,9 +154,9 @@ def dir_zip_unzip_roundtrip():
   FILE.save("z/a.txt", "1"); FILE.save("z/inner/b.txt", "2")
   DIR.zip("z")
   DIR.unzip("z.zip", "out")
-  assert sorted(DIR.file_list("out", local=True)) == ["a.txt", "inner/b.txt"]
+  assert sorted(DIR.file_list("out", shape="rel")) == ["a.txt", "inner/b.txt"]
 
-#--------------------------------------------------------------------------------- INI/CSV/JSON
+#------------------------------------------------------------------------------------- INI/CSV/JSON
 
 def ini_roundtrip_preserves_types_and_sections():
   data = {"top": 1, "main": {"k": "v", "n": 42, "flag": True, "pi": 1.5}}
@@ -207,7 +208,8 @@ def csv_load_raw_and_vectors():
 
 def csv_load_vectors_group_by():
   CSV.save("g", [{"grp": "x", "v": 1}, {"grp": "x", "v": 2}, {"grp": "y", "v": 3}])
-  assert CSV.load_vectors("g", types={"v": int}, group_by="grp") == {"x": {"v": [1, 2]}, "y": {"v": [3]}}
+  grouped = CSV.load_vectors("g", types={"v": int}, group_by="grp")
+  assert grouped == {"x": {"v": [1, 2]}, "y": {"v": [3]}}
 
 def csv_add_row_dict_and_list_rows():
   CSV.add_row("e", {"x": 1, "y": 2}); CSV.add_row("e", {"x": 3, "y": 4})
@@ -259,7 +261,7 @@ def yaml_yml_extension_roundtrip():
   assert YAML.load("app.yml") == {"k": 1}
   assert YAML.load("app") == {"k": 1} # bare name still finds .yml
 
-#---------------------------------------------------------------------------------------- Modes
+#-------------------------------------------------------------------------------------------- Modes
 
 def file_context_restores_previous_root(tmp_path):
   a, b = tmp_path / "A", tmp_path / "B"
@@ -288,11 +290,11 @@ def files_object_independent_of_global_context(tmp_path):
   fs = Files(root_path=str(a))
   with file_context(root_path=str(b)):
     fs.FILE.save("iso.txt", "in-A") # bound to A despite active context B
-    FILE.save("ctx.txt", "in-B")    # global namespace follows the context → B
+    FILE.save("ctx.txt", "in-B") # global namespace follows the context → B
   assert (a / "iso.txt").exists() and not (b / "iso.txt").exists()
   assert (b / "ctx.txt").exists()
 
-#------------------------------------------------------------------------------------ PATH.real
+#---------------------------------------------------------------------------------------- PATH.real
 
 def real_resolves_symlinks(tmp_path):
   outside = tmp_path / "outside.txt"; outside.write_text("x")
@@ -309,15 +311,15 @@ def is_under_real_keeps_plain_files(tmp_path):
   f.parent.mkdir(); f.write_text("x")
   assert PATH.is_under(str(f), str(tmp_path / "base"), real=True)
 
-#------------------------------------------------------------------------------------- DIR deep
+#----------------------------------------------------------------------------------------- DIR deep
 
 def file_list_deep_flag():
   FILE.save("a.log", "1"); FILE.save("sub/b.log", "2")
-  assert sorted(DIR.file_list(".", basename=True)) == ["a.log", "b.log"]
-  assert DIR.file_list(".", basename=True, deep=False) == ["a.log"]
-  assert DIR.file_list(".", match="a.*", basename=True, deep=False) == ["a.log"]
+  assert sorted(DIR.file_list(".", shape="name")) == ["a.log", "b.log"]
+  assert DIR.file_list(".", shape="name", deep=False) == ["a.log"]
+  assert DIR.file_list(".", match="a.*", shape="name", deep=False) == ["a.log"]
 
-#------------------------------------------------------------------------------ FILE.save chmod
+#---------------------------------------------------------------------------------- FILE.save chmod
 
 def file_save_chmod_sets_final_permissions(tmp_path):
   FILE.save("s.env", "K=v\n", chmod=0o600)

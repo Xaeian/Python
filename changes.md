@@ -1,5 +1,14 @@
 # Changes `xaeian`
 
+## `0.9.0` Correctness & layers
+
+Breaking: `?` in raw SQL, `shape=` in `DIR` listings, `FILE.exists`/`DIR.exists`, one dict per file from `compress`,
+short names on `Print`, `Time` vs `Time`/`datetime`, no walk into a link, optional exports on first use.
+
+- Silent data faults fixed across `db`, `media`, `files`, `cstruct` and `eda`
+- One seam for sync and async in `db`, `files` and `net`
+- `import xaeian` 1.5s → 120ms, tests 465 → 685
+
 ## `0.8.2` CLI host keys
 
 - `cli`: `xn host` lists pinned hosts, `xn host <ip>` drops one after a server rebuild

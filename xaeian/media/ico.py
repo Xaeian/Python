@@ -6,18 +6,18 @@ Image to ICO conversion - multi-size favicon generator.
 Pillow decodes and resizes, the ICO container is packed by hand for full control.
 """
 
-import os, sys, struct
+import os, struct
 from io import BytesIO
 from typing import Literal
-from xaeian import Print, Color as c
 from .utils import require_file
+
+from ..extras import MissingExtra, absent
 
 try:
   from PIL import Image, ImageOps
-except ImportError:
-  raise ImportError("Pillow is required: pip install Pillow")
-
-p = Print()
+except ModuleNotFoundError as e:
+  if not absent(e, "PIL"): raise
+  raise MissingExtra("Install with: pip install xaeian[media]") from e
 
 DEFAULT_SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
 
@@ -38,14 +38,6 @@ def _make_square(img:Image.Image, fit:FitMode) -> Image.Image:
   out.paste(img, ((s - w) // 2, (s - h) // 2))
   return out
 
-def _pick_sizes(max_side:int, sizes:list[int]|None, upscale:bool) -> list[int]:
-  """Ascending pool sizes capped at `max_side` unless `upscale`, or `[max_side]` if none fit."""
-  pool = sizes if sizes else DEFAULT_SIZES
-  if upscale:
-    return sorted(pool)
-  picked = [s for s in pool if s <= max_side]
-  return sorted(picked) if picked else [max_side]
-
 def _write_ico(path:str, sizes:list[int], blobs:list[bytes]):
   """Pack PNG blobs into an ICO: 6-byte header, then one 16-byte directory entry per image."""
   count = len(sizes)
@@ -65,6 +57,14 @@ def _write_ico(path:str, sizes:list[int], blobs:list[bytes]):
       f.write(blob)
 
 #---------------------------------------------------------------------------------------------- API
+
+def pick_sizes(max_side:int, sizes:list[int]|None, upscale:bool) -> list[int]:
+  """Ascending pool sizes capped at `max_side` unless `upscale`, or `[max_side]` if none fit."""
+  pool = sizes if sizes else DEFAULT_SIZES
+  if upscale:
+    return sorted(pool)
+  picked = [s for s in pool if s <= max_side]
+  return sorted(picked) if picked else [max_side]
 
 def img_to_ico(
   src:str,
@@ -89,7 +89,7 @@ def img_to_ico(
   except Exception as e:
     raise ValueError(f"Cannot open image: {e}")
   img = _make_square(img, fit)
-  icon_sizes = _pick_sizes(max(img.size), sizes, upscale)
+  icon_sizes = pick_sizes(max(img.size), sizes, upscale)
   resample = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
   blobs = []
   for s in icon_sizes:
@@ -100,67 +100,7 @@ def img_to_ico(
   _write_ico(out_path, icon_sizes, blobs)
   return out_path
 
-#---------------------------------------------------------------------------------------------- CLI
-
-EXAMPLES = """
-examples:
-  xn ico logo.png                   Auto sizes → logo.ico
-  xn ico logo.png -o favicon.ico    Custom output
-  xn ico photo.jpg --fit crop       Center-crop to square
-  xn ico logo.png --sizes 16,32,48  Specific sizes
-  xn ico logo.png --upscale         Include sizes > source
-"""
-
-def main():
-  from ..cli._args import _make_parser, _add_help
-  parser = _make_parser("Convert image to multi-size .ico (auto-picks sizes from source)",
-    EXAMPLES)
-  parser.add_argument("src", help="Input image path")
-  parser.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
-    help="Output .ico path (default: <n>.ico)")
-  parser.add_argument("--fit", choices=["pad", "crop"], default="pad",
-    help="Non-square handling (default: pad)")
-  parser.add_argument("--sizes", default=None, metavar="LIST",
-    help="Comma-separated sizes (default: auto)")
-  parser.add_argument("--upscale", action="store_true",
-    help="Allow upscaling beyond source size")
-  _add_help(parser)
-  args = parser.parse_args()
-  name = os.path.basename(args.src)
-  sizes = None
-  if args.sizes:
-    try:
-      sizes = [int(s.strip()) for s in args.sizes.split(",")]
-      if any(s < 1 or s > 512 for s in sizes):
-        p.err(f"Sizes must be {c.CYAN}1{c.END}-{c.CYAN}512{c.END} px")
-        sys.exit(1)
-    except ValueError:
-      p.err(f"Invalid sizes {c.BLUE}{args.sizes}{c.END} {c.GREY}(expected comma-separated "
-        f"integers){c.END}")
-      sys.exit(1)
-  try:
-    result = img_to_ico(args.src, args.dst, sizes, args.fit, args.upscale)
-  except FileNotFoundError:
-    p.err(f"File {c.ORANGE}{name}{c.END} not found")
-    sys.exit(1)
-  except ValueError as e:
-    p.err(f"Cannot process {c.ORANGE}{name}{c.END} | {e}")
-    sys.exit(1)
-  except Exception as e:
-    p.err(f"Failed to convert {c.ORANGE}{name}{c.END} | {e}")
-    sys.exit(1)
-  out_name = os.path.basename(result)
-  img = Image.open(args.src)
-  src_w, src_h = img.size
-  side = min(src_w, src_h) if args.fit == "crop" else max(src_w, src_h)
-  icon_sizes = _pick_sizes(side, sizes, args.upscale)
-  sizes_str = f"{c.GREY},{c.END}".join(f"{c.CYAN}{s}{c.END}" for s in icon_sizes)
-  file_kB = os.path.getsize(result) / 1024
-  p.ok(f"Converted {c.ORANGE}{name}{c.END} → {c.BLUE}{out_name}{c.END} "
-    f"{c.GREY}({file_kB:.1f} kB){c.END}")
-  p.gap(f"Source: {c.CYAN}{src_w}{c.END}×{c.CYAN}{src_h}{c.END} px, "
-    f"fit: {c.BLUE}{args.fit}{c.END}, "
-    f"sizes: [{sizes_str}]")
-
-if __name__ == "__main__":
-  main()
+def source_side(src:str, fit:FitMode) -> tuple[int, int, int]:
+  """Source width, height, and the side `img_to_ico` squares it to under `fit`."""
+  w, h = Image.open(src).size
+  return w, h, (min(w, h) if fit == "crop" else max(w, h))

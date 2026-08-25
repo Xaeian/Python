@@ -85,10 +85,11 @@ def scan(
   """
   Split text into `(kind, chunk)` runs: `text`, `quote`, `unclosed`, `comment` or `sep`.
 
-  One pass settles the precedence the three concerns need, so no caller has to repeat it: a quote
-  opens only outside a comment, a comment marker is inert inside a quote, and `sep` matches only
-  outside both. A quote reaching the end of the input without its closing delimiter comes back as
-  `unclosed`, which lets a caller reject it or keep it. Concatenating every chunk rebuilds `text`.
+  One pass settles the precedence the three concerns need, so no caller has to repeat it:
+  a quote opens only outside a comment, a comment marker is inert inside a quote,
+  and `sep` matches only outside both.
+  A quote reaching the end of the input without its closing delimiter comes back as `unclosed`,
+  which lets a caller reject it or keep it. Concatenating every chunk rebuilds `text`.
 
   Example:
     >>> scan("a,'b,c'", quotes="'", sep=",")
@@ -97,7 +98,7 @@ def scan(
   out = []
   buf = []
   i, n = 0, len(text)
-  def flush():
+  def flush() -> None:
     if buf:
       out.append(("text", "".join(buf)))
       buf.clear()
@@ -152,8 +153,9 @@ def split_str(text:str, sep:str=" ", quote:str='"', esc:str|None=None) -> list[s
   """
   Split by `sep`, keeping quoted segments whole and their quotes in the output.
 
-  `sep` may be multi-char. `quote` may list several delimiters (`SQL_QUOTES` for SQL), each
-  closed only by itself. `esc` escapes inside quotes; when `None`, a doubled quote escapes.
+  `sep` may be multi-char.
+  `quote` may list several delimiters (`SQL_QUOTES` for SQL), each closed only by itself.
+  `esc` escapes inside quotes; when `None`, a doubled quote escapes.
   An unclosed quote raises `ValueError`.
 
   Example:
@@ -189,9 +191,10 @@ def split_sql(sqls:str) -> list[str]:
   """
   Split into `;`-terminated statements, dropping comments and normalizing spacing.
 
-  `'literals'` and `"identifiers"` are protected, so a `;` or `,` inside either one neither
-  splits the statement nor loses its spacing. `--` and `/* */` comments are removed before the
-  split, since collapsing newlines would otherwise let a line comment swallow what follows it.
+  `'literals'` and `"identifiers"` are protected,
+  so a `;` or `,` inside either one neither splits the statement nor loses its spacing.
+  `--` and `/* */` comments are removed before the split,
+  since collapsing newlines would otherwise let a line comment swallow what follows it.
 
   Example:
     >>> split_sql("SELECT 1; -- note\\nSELECT 2;")
@@ -216,8 +219,8 @@ def strip_comments(
   Remove line and block comments, leaving quoted strings untouched.
 
   `line` is the marker text, `block` an `(open, close)` pair, `None` disables that kind.
-  `quotes` lists every character that opens a string. `esc` escapes inside quotes; when
-  `None`, a doubled quote escapes.
+  `quotes` lists every character that opens a string.
+  `esc` escapes inside quotes; when `None`, a doubled quote escapes.
   """
   parts = scan(text, quotes=quotes, esc=esc, line=line, block=block)
   return "".join(chunk for kind, chunk in parts if kind != "comment")
@@ -242,8 +245,8 @@ def generate_token(length:int=32, alphabet:str=TOKEN_ALPHABET) -> str:
   """
   Generate a cryptographically secure random token.
 
-  Unlike `generate_password`, no character class is forced, so the alphanumeric default
-  survives a URL, an HTTP header or a filename unescaped.
+  Unlike `generate_password`, no character class is forced,
+  so the alphanumeric default survives a URL, an HTTP header or a filename unescaped.
   """
   if length < 1: raise ValueError("Token length must be >= 1")
   if not alphabet: raise ValueError("Token alphabet must not be empty")

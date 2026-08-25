@@ -2,11 +2,8 @@
 
 """Metadata removal for PDFs and images."""
 
-import os, sys
-from xaeian import Print, Color as c
+import os
 from .utils import PDF_EXTS, IMG_EXTS, require_file
-
-p = Print()
 
 #---------------------------------------------------------------------------------------------- API
 
@@ -25,45 +22,3 @@ def scrub_metadata(src:str, dst:str|None=None, inplace:bool=False) -> str:
     from .img import img_scrub_metadata
     return img_scrub_metadata(src, dst, inplace)
   raise ValueError(f"Unsupported format: {ext} (expected PDF or image)")
-
-#---------------------------------------------------------------------------------------------- CLI
-
-EXAMPLES = """
-examples:
-  xn meta report.pdf             Strip PDF metadata → report-nometa.pdf
-  xn meta photo.jpg              Strip EXIF → photo-nometa.jpg
-  xn meta photo.jpg -i           Strip EXIF in-place
-  xn meta scan.png -o clean.png  Custom output path
-"""
-
-def main():
-  from ..cli._args import _make_parser, _add_help
-  parser = _make_parser("Remove metadata from PDFs and images (auto-detects by extension)",
-    EXAMPLES)
-  parser.add_argument("src", help="Input file path")
-  parser.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
-    help="Output path (default: <n>-nometa.<ext>)")
-  parser.add_argument("-i", "--inplace", action="store_true", help="Overwrite source file")
-  _add_help(parser)
-  args = parser.parse_args()
-  name = os.path.basename(args.src)
-  ext = os.path.splitext(name)[1].lower()
-  try:
-    result = scrub_metadata(args.src, args.dst, args.inplace)
-  except FileNotFoundError:
-    p.err(f"File {c.ORANGE}{name}{c.END} not found")
-    sys.exit(1)
-  except ValueError:
-    p.err(f"Format {c.BLUE}{ext}{c.END} not supported {c.GREY}(PDF or image expected){c.END}")
-    sys.exit(1)
-  except Exception as e:
-    p.err(f"Failed to scrub {c.ORANGE}{name}{c.END} | {e}")
-    sys.exit(1)
-  if os.path.abspath(result) == os.path.abspath(args.src):
-    p.ok(f"Scrubbed {c.ORANGE}{name}{c.END} {c.GREY}(in-place){c.END}")
-  else:
-    out_name = os.path.basename(result)
-    p.ok(f"Scrubbed {c.ORANGE}{name}{c.END} → {c.BLUE}{out_name}{c.END}")
-
-if __name__ == "__main__":
-  main()

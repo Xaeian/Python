@@ -15,10 +15,13 @@ from .path import PATH
 from .dir import DIR
 from .file import FILE
 
+from ..extras import MissingExtra, absent
+
 try:
   import yaml
-except ImportError:
-  raise ImportError("Install with: pip install xaeian[yaml]")
+except ModuleNotFoundError as e:
+  if not absent(e, "yaml"): raise
+  raise MissingExtra("Install with: pip install xaeian[yaml]") from e
 
 #----------------------------------------------------------------------------------- YAML namespace
 
@@ -65,7 +68,7 @@ class YAML:
   @staticmethod
   def save(path:str, content:Any, flow:bool=False) -> None:
     """Save YAML, block style unless `flow`, key order preserved."""
-    path = DIR._resolve_write(YAML._ensure_ext(path), "")
+    path = YAML._ensure_ext(path)
     FILE.save(path, yaml.safe_dump(
       content, default_flow_style=flow,
       allow_unicode=True, sort_keys=False,
@@ -80,7 +83,7 @@ class YAML:
     flow:bool = False,
   ) -> None:
     """Save YAML with an explicit indent, keys in insertion order unless `sort_keys`."""
-    path = DIR._resolve_write(YAML._ensure_ext(path), "")
+    path = YAML._ensure_ext(path)
     FILE.save(path, yaml.safe_dump(
       content, indent=indent, sort_keys=sort_keys,
       default_flow_style=flow, allow_unicode=True,
@@ -89,7 +92,7 @@ class YAML:
   @staticmethod
   def save_all(path:str, documents:list[Any], flow:bool=False) -> None:
     """Save documents separated by `---`."""
-    path = DIR._resolve_write(YAML._ensure_ext(path), "")
+    path = YAML._ensure_ext(path)
     FILE.save(path, yaml.safe_dump_all(
       documents, default_flow_style=flow,
       allow_unicode=True, sort_keys=False,

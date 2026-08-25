@@ -3,286 +3,159 @@
 """
 Async wrappers for file operations.
 
-`DIR`, `FILE`, `INI`, `CSV`, `JSON`, `YAML` offloaded to `asyncio.to_thread()`. Same API as the
-sync versions, just `await` the calls, except the pure helpers (`INI.format`, `INI.parse`,
-`JSON.smart`) which are called directly; generators (`DIR.iter_files`, `FILE.iter_lines`) are
-sync-only. Object-oriented access via `AsyncFiles(root_path=...)`.
+`DIR`, `FILE`, `INI`, `CSV`, `JSON` and `YAML` offloaded to `asyncio.to_thread()`.
+Same API as the sync versions, just `await` the calls.
+
+Called directly, not awaited: the pure helpers `INI.format`, `INI.parse` and `JSON.smart`,
+which never touch the filesystem, and the generators `DIR.iter_files` and `FILE.iter_lines`,
+which the caller drives. `PATH` is sync throughout.
+
+Each name is listed once here and takes its signature from the sync method it wraps,
+so the class reads as a method list and a type checker still sees every parameter.
+
+Example:
+  >>> await FILE.save("config.json", "{}")
+  >>> fs = AsyncFiles(root_path="/data")
+  >>> await fs.JSON.load("state")
 """
 
 import asyncio
+from functools import wraps
+from inspect import isgeneratorfunction
+from typing import Any, Awaitable, Callable, ParamSpec, TypeVar
 from .files import (
-  PATH,
-  DIR as _DIR,
-  FILE as _FILE,
-  INI as _INI,
-  CSV as _CSV,
-  JSON as _JSON,
-  Files,
-  get_context, set_context, file_context,
-  _BoundNamespace,
+  PATH, DIR as _DIR, FILE as _FILE, INI as _INI, CSV as _CSV, JSON as _JSON,
+  Files, get_context, set_context, file_context, _BoundNamespace,
 )
 
-try:
-  from .files import YAML as _YAML
-except ImportError:
-  _YAML = None
-
 __all__ = [
-  "PATH", "DIR", "FILE", "INI", "CSV", "JSON",
+  "PATH", "DIR", "FILE", "INI", "CSV", "JSON", "YAML",
   "AsyncFiles",
   "get_context", "set_context", "file_context",
 ]
+
+#------------------------------------------------------------------------------------------ Offload
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+PURE = frozenset({"format", "parse", "smart"})
+"""Helpers that only shape text. A worker thread would cost more than the call itself."""
+
+def _stays_sync(name:str, method) -> bool:
+  """A generator is driven by the caller, and a pure helper has no IO to wait for."""
+  return name in PURE or isgeneratorfunction(method)
+
+def _offload(method:Callable[P, R]) -> Callable[P, Awaitable[R]]:
+  """
+  Same call, run in a worker thread.
+
+  `ParamSpec` is what carries the wrapped signature through to the awaited twin.
+  """
+  @wraps(method)
+  async def wrapper(*args:P.args, **kwargs:P.kwargs) -> R:
+    return await asyncio.to_thread(method, *args, **kwargs)
+  return wrapper
 
 #--------------------------------------------------------------------------------- Async namespaces
 
 class DIR:
   """Async directory operations."""
-  @staticmethod
-  async def ensure(path, is_file=None):
-    return await asyncio.to_thread(_DIR.ensure, path, is_file)
-
-  @staticmethod
-  async def remove(path, force=False):
-    return await asyncio.to_thread(_DIR.remove, path, force)
-
-  @staticmethod
-  async def move(src, dst):
-    return await asyncio.to_thread(_DIR.move, src, dst)
-
-  @staticmethod
-  async def copy(src, dst):
-    return await asyncio.to_thread(_DIR.copy, src, dst)
-
-  @staticmethod
-  async def folder_list(path, deep=False, basename=False, blacklist=None):
-    return await asyncio.to_thread(_DIR.folder_list, path, deep, basename, blacklist)
-
-  @staticmethod
-  async def file_list(
-    path,
-    exts = None,
-    match = None,
-    blacklist = None,
-    basename = False,
-    local = False,
-    deep = True,
-  ):
-    return await asyncio.to_thread(
-      _DIR.file_list, path, exts, match, blacklist, basename, local, deep,
-    )
-
-  @staticmethod
-  async def zip(path, zip_output=None, blacklist=None):
-    return await asyncio.to_thread(_DIR.zip, path, zip_output, blacklist)
-
-  @staticmethod
-  async def unzip(path, output=None):
-    return await asyncio.to_thread(_DIR.unzip, path, output)
-
-  @staticmethod
-  async def unzip_bytes(data, output):
-    return await asyncio.to_thread(_DIR.unzip_bytes, data, output)
+  exists = _offload(_DIR.exists)
+  ensure = _offload(_DIR.ensure)
+  remove = _offload(_DIR.remove)
+  move = _offload(_DIR.move)
+  copy = _offload(_DIR.copy)
+  folder_list = _offload(_DIR.folder_list)
+  file_list = _offload(_DIR.file_list)
+  zip = _offload(_DIR.zip)
+  unzip = _offload(_DIR.unzip)
+  unzip_bytes = _offload(_DIR.unzip_bytes)
+  iter_files = _DIR.iter_files # generator: the caller drives it
 
 class FILE:
-  """Async file read/write operations."""
-  @staticmethod
-  async def exists(path):
-    return await asyncio.to_thread(_FILE.exists, path)
-
-  @staticmethod
-  async def remove(path, missing_ok=True):
-    return await asyncio.to_thread(_FILE.remove, path, missing_ok)
-
-  @staticmethod
-  async def load(path, binary=False):
-    return await asyncio.to_thread(_FILE.load, path, binary)
-
-  @staticmethod
-  async def load_lines(path):
-    return await asyncio.to_thread(_FILE.load_lines, path)
-
-  @staticmethod
-  async def save(path, content, chmod=None):
-    return await asyncio.to_thread(_FILE.save, path, content, chmod)
-
-  @staticmethod
-  async def save_lines(path, lines):
-    return await asyncio.to_thread(_FILE.save_lines, path, lines)
-
-  @staticmethod
-  async def append(path, content):
-    return await asyncio.to_thread(_FILE.append, path, content)
-
-  @staticmethod
-  async def append_line(path, line, newline="\n"):
-    return await asyncio.to_thread(_FILE.append_line, path, line, newline)
-
-  @staticmethod
-  async def hash(path, algo="sha256", chunk_size=8192):
-    return await asyncio.to_thread(_FILE.hash, path, algo, chunk_size)
-
-  @staticmethod
-  async def size(path):
-    return await asyncio.to_thread(_FILE.size, path)
-
-  @staticmethod
-  async def mtime(path):
-    return await asyncio.to_thread(_FILE.mtime, path)
+  """Async file operations."""
+  load = _offload(_FILE.load)
+  save = _offload(_FILE.save)
+  append = _offload(_FILE.append)
+  load_lines = _offload(_FILE.load_lines)
+  save_lines = _offload(_FILE.save_lines)
+  append_line = _offload(_FILE.append_line)
+  exists = _offload(_FILE.exists)
+  remove = _offload(_FILE.remove)
+  size = _offload(_FILE.size)
+  mtime = _offload(_FILE.mtime)
+  hash = _offload(_FILE.hash)
+  iter_lines = _FILE.iter_lines # generator: the caller drives it
 
 class INI:
-  """Async INI file operations."""
+  """Async INI operations."""
   EXTS = _INI.EXTS
-  format = staticmethod(_INI.format)
-  parse = staticmethod(_INI.parse)
-
-  @staticmethod
-  async def load(path):
-    return await asyncio.to_thread(_INI.load, path)
-
-  @staticmethod
-  async def save(
-    path,
-    data,
-    comment_section = None,
-    comment_field = None,
-    comment_section_char = "# ",
-    comment_field_char = " # ",
-  ):
-    return await asyncio.to_thread(
-      _INI.save, path, data, comment_section, comment_field,
-      comment_section_char, comment_field_char,
-    )
+  load = _offload(_INI.load)
+  save = _offload(_INI.save)
+  format = _INI.format # pure: no IO to wait for
+  parse = _INI.parse # pure: no IO to wait for
 
 class CSV:
-  """Async CSV file operations."""
-  @staticmethod
-  async def load(path, delimiter=",", types=None):
-    return await asyncio.to_thread(_CSV.load, path, delimiter, types)
-
-  @staticmethod
-  async def load_raw(path, delimiter=",", types=None, include_header=True):
-    return await asyncio.to_thread(_CSV.load_raw, path, delimiter, types, include_header)
-
-  @staticmethod
-  async def load_vectors(path, delimiter=",", types=None, group_by=None):
-    return await asyncio.to_thread(_CSV.load_vectors, path, delimiter, types, group_by)
-
-  @staticmethod
-  async def add_row(path, datarow, delimiter=",", header=None):
-    return await asyncio.to_thread(_CSV.add_row, path, datarow, delimiter, header)
-
-  @staticmethod
-  async def save(path, data, field_names=None, delimiter=","):
-    return await asyncio.to_thread(_CSV.save, path, data, field_names, delimiter)
-
-  @staticmethod
-  async def save_vectors(path, *columns, header=None, delimiter=","):
-    return await asyncio.to_thread(
-      _CSV.save_vectors, path, *columns,
-      header=header, delimiter=delimiter,
-    )
+  """Async CSV operations."""
+  load = _offload(_CSV.load)
+  load_raw = _offload(_CSV.load_raw)
+  load_vectors = _offload(_CSV.load_vectors)
+  save = _offload(_CSV.save)
+  save_vectors = _offload(_CSV.save_vectors)
+  add_row = _offload(_CSV.add_row)
 
 class JSON:
-  """Async JSON file operations."""
-  smart = staticmethod(_JSON.smart)
+  """Async JSON operations."""
+  load = _offload(_JSON.load)
+  save = _offload(_JSON.save)
+  save_pretty = _offload(_JSON.save_pretty)
+  save_smart = _offload(_JSON.save_smart)
+  smart = _JSON.smart # pure: no IO to wait for
 
-  @staticmethod
-  async def load(path, otherwise=None):
-    return await asyncio.to_thread(_JSON.load, path, otherwise)
-
-  @staticmethod
-  async def save(path, content, ensure_ascii=False):
-    return await asyncio.to_thread(_JSON.save, path, content, ensure_ascii)
-
-  @staticmethod
-  async def save_pretty(path, content, indent=2, sort_keys=False, ensure_ascii=False):
-    return await asyncio.to_thread(
-      _JSON.save_pretty, path, content, indent, sort_keys, ensure_ascii,
-    )
-
-  @staticmethod
-  async def save_smart(
-    path,
-    content,
-    max_line = 100,
-    array_wrap = 10,
-    compact_dict = True,
-    ensure_ascii = False,
-  ):
-    return await asyncio.to_thread(
-      _JSON.save_smart, path, content, max_line, array_wrap,
-      compact_dict, ensure_ascii,
-    )
-
-#--------------------------------------------------------------------------------------- Async YAML
-
-if _YAML is not None:
+def __getattr__(name:str) -> Any:
+  """`YAML` is built on first use, mirroring the sync side."""
+  if name != "YAML": raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+  from .files.yaml import YAML as _YAML
   class YAML:
-    """Async YAML file operations."""
+    """Async YAML operations."""
     EXTS = _YAML.EXTS
-
-    @staticmethod
-    async def load(path, otherwise=None):
-      return await asyncio.to_thread(_YAML.load, path, otherwise)
-
-    @staticmethod
-    async def load_all(path):
-      return await asyncio.to_thread(_YAML.load_all, path)
-
-    @staticmethod
-    async def save(path, content, flow=False):
-      return await asyncio.to_thread(_YAML.save, path, content, flow)
-
-    @staticmethod
-    async def save_pretty(path, content, indent=2, sort_keys=False, flow=False):
-      return await asyncio.to_thread(_YAML.save_pretty, path, content, indent, sort_keys, flow)
-
-    @staticmethod
-    async def save_all(path, documents, flow=False):
-      return await asyncio.to_thread(_YAML.save_all, path, documents, flow)
-
-  __all__ += ["YAML"]
+    load = _offload(_YAML.load)
+    load_all = _offload(_YAML.load_all)
+    save = _offload(_YAML.save)
+    save_all = _offload(_YAML.save_all)
+    save_pretty = _offload(_YAML.save_pretty)
+  globals()[name] = YAML
+  return YAML
 
 #----------------------------------------------------------------------- AsyncFiles (bound context)
 
 class _AsyncBoundNamespace:
-  """
-  Async proxy over `_BoundNamespace`: callables become coroutines run in a worker thread.
-
-  `_SYNC_ONLY` names are called without `await`: pure helpers, and generators the caller drives.
-  """
-  _SYNC_ONLY = frozenset({
-    "normalize", "expand", "resolve", "local",
-    "basename", "dirname", "stem", "ext", "with_suffix",
-    "ensure_suffix", "is_under", "join", "match",
-    "format", "parse", "_strip_inline_comment", "_cast",
-    "smart",
-    "iter_files", "iter_lines",
-  })
-
-  def __init__(self, bound_ns:_BoundNamespace):
+  """Async proxy over `_BoundNamespace`, offloading by the same rule as the namespaces above."""
+  def __init__(self, bound_ns:_BoundNamespace) -> None:
     self._bound = bound_ns
     self._cache: dict = {}
 
-  def __getattr__(self, name:str):
+  def __getattr__(self, name:str) -> Any:
     cached = self._cache.get(name)
     if cached is not None: return cached
     method = getattr(self._bound, name)
-    if not callable(method) or name in self._SYNC_ONLY:
-      self._cache[name] = method
-      return method
-    async def wrapper(*args, **kwargs):
-      return await asyncio.to_thread(method, *args, **kwargs)
-    self._cache[name] = wrapper
-    return wrapper
+    if callable(method) and not _stays_sync(name, getattr(self._bound._cls, name, method)):
+      method = _offload(method)
+    self._cache[name] = method
+    return method
 
 class AsyncFiles:
   """
   Async object-oriented access to file operations with own config context.
 
-  `PATH` and the generators stay sync, every other call is awaited.
+  `PATH`, the pure helpers and the generators stay sync, every other call is awaited.
+
+  Example:
+    >>> fs = AsyncFiles(root_path="/data/project")
+    >>> await fs.FILE.load("test.txt")
   """
-  def __init__(self, root_path:str|None=None, **kwargs):
+  def __init__(self, root_path:str|None=None, **kwargs) -> None:
     sync = Files(root_path=root_path, **kwargs)
     self.PATH = sync.PATH
     self.DIR = _AsyncBoundNamespace(sync.DIR)
@@ -290,5 +163,11 @@ class AsyncFiles:
     self.INI = _AsyncBoundNamespace(sync.INI)
     self.CSV = _AsyncBoundNamespace(sync.CSV)
     self.JSON = _AsyncBoundNamespace(sync.JSON)
-    if hasattr(sync, "YAML"):
-      self.YAML = _AsyncBoundNamespace(sync.YAML)
+    self._sync = sync
+
+  def __getattr__(self, name:str) -> _AsyncBoundNamespace:
+    """`YAML` binds on first use, as it does on `Files`: the twins keep one surface."""
+    if name != "YAML": raise AttributeError(name)
+    bound = _AsyncBoundNamespace(self._sync.YAML)
+    setattr(self, name, bound)
+    return bound

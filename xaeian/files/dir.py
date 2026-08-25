@@ -3,22 +3,82 @@
 """Directory operations."""
 
 import io, os, stat, shutil, zipfile
-from typing import Iterator
+from dataclasses import dataclass
+from typing import Iterator, Literal, Sequence
 from .path import PATH
 from ..xstring import ensure_suffix
+
+Shape = Literal["abs", "name", "rel"]
+"""How a listing spells its entries: absolute, bare name, or relative to the listed root."""
+
+#---------------------------------------------------------------------------------------- Blacklist
+
+@dataclass(frozen=True)
+class _Blacklist:
+  """
+  What a listing skips, resolved once per call.
+
+  An entry without `/` skips that name at any depth, file or folder alike.
+  An entry with `/` is a path relative to the listed root.
+  A trailing slash only says "this is a folder", so `"build"` and `"build/"` mean the same.
+
+  Nothing here looks at the disk, so a listing cannot change its answer
+  because a directory happens to exist at the moment it runs.
+  """
+  names: frozenset[str]
+  rels: frozenset[str]
+
+  @staticmethod
+  def of(entries:Sequence[str]|None) -> "_Blacklist":
+    names: set[str] = set()
+    rels: set[str] = set()
+    for entry in entries or []:
+      clean = PATH.normalize(entry).strip("/")
+      if not clean: continue
+      (rels if "/" in clean else names).add(clean)
+    return _Blacklist(frozenset(names), frozenset(rels))
+
+  def skips(self, name:str, rel:str) -> bool:
+    """`name` is the bare entry name, `rel` its path relative to the listed root."""
+    return name in self.names or rel in self.rels
+
+def _linked(parent:str, name:str) -> bool:
+  """
+  Is this entry a symlink or a Windows junction?
+
+  A listing walks the tree that physically lives under the path,
+  so a link is neither entered nor listed.
+  `os.walk` would enter a junction as an ordinary directory, since `islink` is blind to one:
+  the walk then leaves the tree it was given,
+  or circles back onto an ancestor until the path runs out of room.
+  """
+  path = os.path.join(parent, name)
+  return os.path.islink(path) or os.path.isjunction(path)
+
+def _spell(full:str, root:str, shape:Shape) -> str:
+  """Render one listed path in the requested shape."""
+  if shape == "abs": return full
+  if shape == "name": return PATH.basename(full)
+  if shape == "rel": return PATH.normalize(os.path.relpath(full, root))
+  raise ValueError(f"Unknown shape: {shape!r}")
 
 #------------------------------------------------------------------------------------ DIR namespace
 
 class DIR:
   """Static directory helpers; paths resolve against the active `Config`."""
   @staticmethod
+  def exists(path:str) -> bool:
+    """Check if path is an existing directory."""
+    return os.path.isdir(PATH.resolve(path, read=True))
+
+  @staticmethod
   def ensure(path:str, is_file:bool|None=None) -> str:
     """
     Create directory if it doesn't exist.
 
-    `is_file=True` creates the parent dir instead. When `None` it is auto-detected: a trailing
-    `/` is always a directory, otherwise an extension on the last segment means file, so names
-    without one - `Makefile`, `.gitignore` - need an explicit `is_file=True`.
+    `is_file=True` creates the parent dir instead. When `None` it is auto-detected:
+    a trailing `/` is always a directory, otherwise an extension on the last segment means file.
+    A name without one - `Makefile`, `.gitignore` - needs an explicit `is_file=True`.
     """
     trailing = path.endswith("/") or path.endswith("\\")
     path = PATH.resolve(path, read=False)
@@ -30,15 +90,7 @@ class DIR:
     return PATH.normalize(path)
 
   @staticmethod
-  def _resolve_write(path:str, ext:str) -> str:
-    """Append `ext`, resolve for writing and create the parent directory."""
-    path = ensure_suffix(path, ext)
-    path = PATH.resolve(path, read=False)
-    DIR.ensure(path, is_file=True)
-    return path
-
-  @staticmethod
-  def remove(path:str, force:bool=False):
+  def remove(path:str, force:bool=False) -> None:
     """
     Recursively remove directory tree. `force` clears the read-only bit and retries.
 
@@ -47,7 +99,7 @@ class DIR:
     path = PATH.resolve(path, read=False)
     if not os.path.isdir(path):
       raise NotADirectoryError(f"Not a directory: {path}")
-    def on_error(func, fpath, exc):
+    def on_error(func, fpath, exc) -> None:
       if force:
         os.chmod(fpath, stat.S_IWRITE)
         func(fpath)
@@ -56,7 +108,7 @@ class DIR:
     shutil.rmtree(path, onexc=on_error)
 
   @staticmethod
-  def move(src:str, dst:str):
+  def move(src:str, dst:str) -> None:
     """Move file or directory. Works across filesystems."""
     src = PATH.resolve(src, read=False)
     dst = PATH.resolve(dst, read=False)
@@ -66,7 +118,7 @@ class DIR:
     shutil.move(src, dst)
 
   @staticmethod
-  def copy(src:str, dst:str):
+  def copy(src:str, dst:str) -> None:
     """Copy file or directory tree, overwriting files and merging into existing directories."""
     src = PATH.resolve(src, read=False)
     dst = PATH.resolve(dst, read=False)
@@ -82,34 +134,26 @@ class DIR:
   def folder_list(
     path:str,
     deep:bool = False,
-    basename:bool = False,
+    shape:Shape = "abs",
     blacklist:list[str]|None = None,
   ) -> list[str]:
     """
     List subdirectories under given path.
 
-    `deep` walks recursively, `basename` returns bare names. A `blacklist` entry without `/`
-    skips that folder name at any depth, one with `/` a path relative to `path`.
+    `deep` walks recursively, `shape` picks how each entry is spelled, and `blacklist` filters
+    as described on `_Blacklist`.
     """
     path = PATH.resolve(path, read=True)
     if not os.path.isdir(path): return []
-    bl = set(blacklist or [])
-    bl_names = {b for b in bl if "/" not in b.rstrip("/")}
-    bl_rels = {b.rstrip("/") for b in bl if "/" in b.rstrip("/")}
+    skip = _Blacklist.of(blacklist)
     folders: list[str] = []
-    if deep:
-      for root, dirs, _ in os.walk(path):
-        root_rel = PATH.normalize(os.path.relpath(root, path))
-        prefix = "" if root_rel == "." else root_rel + "/"
-        dirs[:] = [d for d in dirs if d not in bl_names and prefix + d not in bl_rels]
-        for d in dirs:
-          folders.append(d if basename else PATH.normalize(os.path.join(root, d)))
-    else:
-      for name in os.listdir(path):
-        if name in bl: continue
-        full = os.path.join(path, name)
-        if os.path.isdir(full):
-          folders.append(name if basename else PATH.normalize(full))
+    walker = os.walk(path) if deep else [(path, next(os.walk(path))[1], [])]
+    for root, dirs, _ in walker:
+      root_rel = PATH.normalize(os.path.relpath(root, path))
+      prefix = "" if root_rel == "." else root_rel + "/"
+      dirs[:] = [d for d in dirs if not skip.skips(d, prefix + d) and not _linked(root, d)]
+      for d in dirs:
+        folders.append(_spell(PATH.normalize(os.path.join(root, d)), path, shape))
     return folders
 
   @staticmethod
@@ -123,23 +167,13 @@ class DIR:
     """
     Iterate files under directory (memory efficient), yielding absolute paths.
 
-    `exts` carry the leading dot and match case-insensitively (`[".py", ".txt"]`), `match` is a
-    glob on the filename (`"test_*.py"`), `blacklist` holds names or paths relative to `path`,
-    `deep=False` stays on the top level.
+    `exts` carry the leading dot and match case-insensitively (`[".py", ".txt"]`),
+    `match` is a glob on the filename (`"test_*.py"`), `deep=False` stays on the top level,
+    and `blacklist` filters as described on `_Blacklist`.
     """
     path = PATH.resolve(path, read=True)
     if not os.path.isdir(path): return
-    bl_dirs: set[str] = set()
-    bl_files: set[str] = set()
-    bl_names: set[str] = set()
-    for b in (blacklist or []):
-      full = path + "/" + b.rstrip("/")
-      if os.path.isdir(full) or b.endswith("/"):
-        bl_dirs.add(full)
-      else:
-        bl_files.add(b)
-      if "/" not in b.rstrip("/"):
-        bl_names.add(b.rstrip("/"))
+    skip = _Blacklist.of(blacklist)
     ext_tuple = tuple(ext.lower() for ext in (exts or []))
     if deep:
       walker = os.walk(path)
@@ -148,10 +182,11 @@ class DIR:
       walker = [(path, [], names)]
     for root, dirs, files in walker:
       root_norm = PATH.normalize(root)
-      dirs[:] = [d for d in dirs if root_norm + "/" + d not in bl_dirs and d not in bl_names]
+      root_rel = PATH.normalize(os.path.relpath(root_norm, path))
+      prefix = "" if root_rel == "." else root_rel + "/"
+      dirs[:] = [d for d in dirs if not skip.skips(d, prefix + d) and not _linked(root, d)]
       for name in files:
-        rel = PATH.normalize(os.path.relpath(root_norm + "/" + name, path))
-        if rel in bl_files or name in bl_files: continue
+        if skip.skips(name, prefix + name): continue
         if ext_tuple and not name.lower().endswith(ext_tuple): continue
         if match and not PATH.match(name, match): continue
         yield root_norm + "/" + name
@@ -162,25 +197,15 @@ class DIR:
     exts:list[str]|None = None,
     match:str|None = None,
     blacklist:list[str]|None = None,
-    basename:bool = False,
-    local:bool = False,
+    shape:Shape = "abs",
     deep:bool = True,
   ) -> list[str]:
-    """
-    List files under directory, filtered as in `iter_files`.
-
-    Paths come back absolute, as bare names under `basename`, relative to `path` under `local`.
-    """
+    """List files under directory, filtered as in `iter_files`; `shape` picks the spelling."""
     path = PATH.resolve(path, read=True)
-    result: list[str] = []
-    for f in DIR.iter_files(path, exts=exts, match=match, blacklist=blacklist, deep=deep):
-      if basename:
-        result.append(PATH.basename(f))
-      elif local:
-        result.append(PATH.normalize(os.path.relpath(f, path)))
-      else:
-        result.append(f)
-    return result
+    return [
+      _spell(f, path, shape)
+      for f in DIR.iter_files(path, exts=exts, match=match, blacklist=blacklist, deep=deep)
+    ]
 
   @staticmethod
   def zip(path:str, zip_output:str|None=None, blacklist:list[str]|None=None) -> str:

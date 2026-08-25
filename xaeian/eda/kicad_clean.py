@@ -143,8 +143,8 @@ def clean_footprint(
   """
   Clean and compact a hand-drawn `.kicad_mod` footprint, `restyle` applies the `style` tier.
 
-  Rewrites in place: the Value property is forced to the file stem at a fixed position, so the
-  filename is the single source of the footprint name.
+  Rewrites in place: the Value property is forced to the file stem at a fixed position,
+  so the filename is the single source of the footprint name.
   """
   text = FILE.load(filepath)
   orig_size = len(text)
@@ -235,8 +235,8 @@ def clean_step(filepath:str, dry:bool=False) -> tuple[int, int]:
   """
   Clean a `.step` / `.stp` file: strip comments, minimize header, fix names.
 
-  `FILE_NAME`, `FILE_DESCRIPTION` and `PRODUCT` are rebuilt from the path, so the model names
-  itself `<parent>/<file>` regardless of what the CAD tool wrote.
+  `FILE_NAME`, `FILE_DESCRIPTION` and `PRODUCT` are rebuilt from the path,
+  so the model names itself `<parent>/<file>` regardless of what the CAD tool wrote.
   Raises `ValueError` and writes nothing if the ISO-10303 end markers did not survive.
   """
   text = FILE.load(filepath)

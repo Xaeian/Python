@@ -3,8 +3,8 @@
 """
 Serial port communication with colored console output.
 
-`SerialPort` prints timestamped colored lines, logs to file with ANSI preserved, filters by
-address on multi-device buses, checks CRC, and closes itself as a context manager.
+`SerialPort` prints timestamped colored lines, logs to file with ANSI preserved,
+filters by address on multi-device buses, checks CRC, and closes itself as a context manager.
 Colors are class attributes: `COLOR_TIME`, `COLOR_ADDR`, `COLOR_INFO`, `COLOR_ERROR`, `COLOR_OK`.
 
 Requires: `pyserial`
@@ -20,10 +20,13 @@ import re
 from datetime import datetime, timezone
 from typing import Protocol
 
+from ..extras import MissingExtra, absent
+
 try:
   import serial as pyserial
-except ImportError:
-  raise ImportError("Install with: pip install xaeian[serial]")
+except ModuleNotFoundError as e:
+  if not absent(e, "serial"): raise
+  raise MissingExtra("Install with: pip install xaeian[serial]") from e
 
 from ..colors import Color as c
 
@@ -89,7 +92,7 @@ class SerialPort:
     print_limit:int = 256,
     crc:CRCProto|None = None,
     debug:bool = False,
-  ):
+  ) -> None:
     self.serial = None
     self.port = port
     self.baudrate = baudrate
@@ -121,7 +124,7 @@ class SerialPort:
     now = datetime.now(timezone.utc) if self.time_utc else datetime.now()
     return now.strftime(self.time_format)
 
-  def print(self, text:str, prefix:str=""):
+  def print(self, text:str, prefix:str="") -> None:
     """Render line with timestamp, prefix, address. Output to console + file."""
     if len(text) > self.print_limit:
       text = text[:self.print_limit] + f"...{c.END}" # reset color in case cut mid-ANSI
@@ -139,15 +142,15 @@ class SerialPort:
       except Exception:
         if self.debug: raise
 
-  def print_info(self, text:str):
+  def print_info(self, text:str) -> None:
     """Print a line in `COLOR_INFO`."""
     self.print(f"{self.COLOR_INFO}{text}{c.END}")
 
-  def print_error(self, text:str):
+  def print_error(self, text:str) -> None:
     """Print a line in `COLOR_ERROR`. Used for every swallowed exception."""
     self.print(f"{self.COLOR_ERROR}{text}{c.END}")
 
-  def print_ok(self, text:str):
+  def print_ok(self, text:str) -> None:
     """Print a line in `COLOR_OK`."""
     self.print(f"{self.COLOR_OK}{text}{c.END}")
 
@@ -188,13 +191,14 @@ class SerialPort:
       if self.debug: raise
     return False
 
-  def disconnect(self):
+  def disconnect(self) -> None:
     """Close serial port. Idempotent."""
     if not self.connected: return
     self.print_info(f"Disconnect {self.port}")
     try: self.serial.close()
     except Exception:
       if self.debug: raise
+    self.serial = None
     self.connected = False
 
   #---------------------------------------------------------------------------------- Address & CRC
@@ -219,7 +223,22 @@ class SerialPort:
       return result
     return data
 
+  def _require_connected(self):
+    """A read or write before `connect()` is a programming error, not a quiet miss."""
+    if self.serial is None:
+      raise RuntimeError(f"Not connected: {self.port} - call connect() or use `with`")
+
   #------------------------------------------------------------------------------------------- Read
+
+  def _read_chunk(self) -> bytes:
+    """One physical read: up to `buffer_size` bytes, `b""` when nothing arrived."""
+    self._require_connected()
+    try:
+      return self.serial.read(self.buffer_size) or b""
+    except Exception as e:
+      self.print_error(f"Read error: {e}")
+      if self.debug: raise
+      return b""
 
   def read(
     self,
@@ -238,12 +257,7 @@ class SerialPort:
       print_conv2str: Try utf-8 decode for display, fallback to raw bytes.
       remove_ansi: Strip ANSI escape codes from the returned data.
     """
-    try:
-      resp = self.serial.read(self.buffer_size)
-    except Exception as e:
-      self.print_error(f"Read error: {e}")
-      if self.debug: raise
-      return None
+    resp = self._read_chunk()
     if not resp: return None
     resp = self._crc_decode(resp) # CRC covers the address byte, as send() writes it
     if resp and self.address is not None: resp = self._check_address(resp)
@@ -260,6 +274,7 @@ class SerialPort:
     remove_ansi:bool = True,
   ) -> bytes|str|None:
     """Read until newline. `str` when `conv2str`, else `bytes`. `None` on empty."""
+    self._require_connected()
     try:
       resp = self.serial.readline(self.buffer_size)
     except Exception as e:
@@ -280,15 +295,10 @@ class SerialPort:
     Entries are `str` when `conv2str`, with a `None` entry where utf-8 decoding failed,
     raw `bytes` otherwise. Blank lines are dropped.
     """
-    try:
-      resp = self.serial.read(self.buffer_size)
-    except Exception as e:
-      self.print_error(f"Read error: {e}")
-      if self.debug: raise
-      return None
+    resp = self._read_chunk()
     if self.address is not None: resp = self._check_address(resp)
     if not resp: return None
-    # collapse CR/LF runs and strip edges first, so no empty lines survive the split
+    # so the split cannot yield empty lines
     lines = re.sub(b"[\r\n]+", b"\n", resp).strip(b"\n").split(b"\n")
     result = []
     for line in lines:
@@ -298,14 +308,14 @@ class SerialPort:
         result.append(line)
     return result
 
-  def clear(self, color=c.GREY):
+  def clear(self, color=c.GREY) -> None:
     """Drain the input buffer and flush output. The final empty read costs one `timeout`."""
     while True:
       resp = self.read_lines(color)
       if not resp: break
     self.flush()
 
-  def flush(self):
+  def flush(self) -> None:
     """Flush the pending tx bytes."""
     try: self.serial.flush()
     except Exception:
@@ -313,7 +323,7 @@ class SerialPort:
 
   #------------------------------------------------------------------------------------------- Send
 
-  def send(self, message:str|bytes, str_color=c.GREY, bytes_color=c.SALMON):
+  def send(self, message:str|bytes, str_color=c.GREY, bytes_color=c.SALMON) -> None:
     """Write to port. `str` is utf-8 encoded, `bytes` sent raw. Address + CRC applied."""
     if isinstance(message, str):
       self.print(f"{str_color}{message.strip()}{c.END}")
@@ -321,6 +331,7 @@ class SerialPort:
     else:
       data = message
       self.print(f"{bytes_color}{data}{c.END}")
+    self._require_connected()
     if self.address is not None: data = bytes([self.address]) + data # addr before CRC
     data = self._crc_encode(data)
     try: self.serial.write(data)

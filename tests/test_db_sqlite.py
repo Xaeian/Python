@@ -1,10 +1,10 @@
 # tests/test_db_sqlite.py
 
-"""SQLite end-to-end: drives AbstractDatabase + SqliteDatabase + KeyValue against a
-real on-disk database. No server needed - this is the only backend testable in isolation.
+"""SQLite end to end: `AbstractDatabase`, `SqliteDatabase` and `KeyValue` on a real file.
+The only backend testable without a server.
 
-A file under tmp_path (not ":memory:") is used on purpose: each operation opens a fresh
-connection, so an in-memory db would be wiped between calls outside a transaction.
+A file rather than `":memory:"` on purpose: each call outside a transaction opens a fresh
+connection, and an in-memory database would be wiped between them.
 """
 
 import pytest
@@ -19,7 +19,7 @@ def db(tmp_path):
   )
   return database
 
-#-------------------------------------------------------------------------------------- execute
+#------------------------------------------------------------------------------------------ execute
 
 def ping_succeeds_on_live_db(db):
   assert db.ping() is True
@@ -31,7 +31,7 @@ def bad_sql_raises_database_error(db):
   with pytest.raises(DatabaseError):
     db.get_value("SELECT * FROM does_not_exist")
 
-#----------------------------------------------------------------------------------------- CRUD
+#--------------------------------------------------------------------------------------------- CRUD
 
 def insert_returning_gives_back_the_new_id(db):
   assert db.insert("users", {"name": "Jan"}, returning="id") == 1
@@ -48,7 +48,7 @@ def update_and_delete_return_affected_rows(db):
   assert db.delete("users", "active = ?", 1) == 2
   assert db.count("users") == 0
 
-#-------------------------------------------------------------------------------- query builder
+#------------------------------------------------------------------------------------ query builder
 
 def find_filters_orders_and_limits(db):
   db.insert_many("users", [
@@ -69,7 +69,7 @@ def paginate_splits_results_into_pages(db):
   assert page["pages"] == 3
   assert len(page["items"]) == 2
 
-#------------------------------------------------------------------------------- automatic JSON
+#----------------------------------------------------------------------------------- automatic JSON
 
 def dict_value_is_stored_as_json_and_parsed_back(db):
   db.insert("users", {"name": "Jan", "meta": {"role": "admin", "tags": [1, 2]}})
@@ -80,7 +80,7 @@ def dict_value_is_stored_as_json_and_parsed_back(db):
   revived = db.find_one("users", json=["meta"], name="Jan")["meta"]
   assert revived == {"role": "admin", "tags": [1, 2]}
 
-#--------------------------------------------------------------------------------- transactions
+#------------------------------------------------------------------------------------- transactions
 
 def transaction_commits_on_success(db):
   with db.transaction():
@@ -102,7 +102,7 @@ def nested_transaction_is_rejected(db):
       with db.transaction():
         pass
 
-#--------------------------------------------------------------------------------------- upsert
+#------------------------------------------------------------------------------------------- upsert
 
 def upsert_inserts_then_updates_on_conflict(db):
   db.exec("CREATE TABLE kv (k TEXT PRIMARY KEY, v INTEGER)")
@@ -111,7 +111,7 @@ def upsert_inserts_then_updates_on_conflict(db):
   assert db.count("kv") == 1
   assert db.get_value("SELECT v FROM kv WHERE k = ?", "hits") == 99
 
-#------------------------------------------------------------------------------- batch & schema
+#----------------------------------------------------------------------------------- batch & schema
 
 def exec_batch_runs_a_semicolon_string(db):
   rows = db.exec_batch(
@@ -152,7 +152,7 @@ def repr_and_transaction_flag(db):
   with db.transaction():
     assert db.in_transaction() is True
 
-#--------------------------------------------------------------------------- database file mgmt
+#------------------------------------------------------------------------------- database file mgmt
 
 def database_file_create_and_drop(tmp_path):
   db = Database("sqlite", str(tmp_path / "fresh.db"))
@@ -161,9 +161,9 @@ def database_file_create_and_drop(tmp_path):
   assert db.has_database() is True
   assert db.create_database() is False # already there
   assert db.drop_database() is True
-  assert db.drop_database() is False  # already gone
+  assert db.drop_database() is False # already gone
 
-#------------------------------------------------------------------------------- KeyValue store
+#----------------------------------------------------------------------------------- KeyValue store
 
 @pytest.fixture
 def kv(db):

@@ -13,7 +13,7 @@ from xaeian.crc import (
 
 CHECK = b"123456789" # the standard CRC catalog test vector
 
-#---------------------------------------------------------------------------------- reflect_bit
+#-------------------------------------------------------------------------------------- reflect_bit
 
 def reflect_reverses_bit_order():
   assert reflect_bit(0b1100, 4) == 0b0011
@@ -26,7 +26,7 @@ def reflect_is_its_own_inverse():
 def reflect_palindrome_is_unchanged():
   assert reflect_bit(0b1001_1001, 8) == 0b1001_1001
 
-#------------------------------------------------------------------------------- catalog values
+#----------------------------------------------------------------------------------- catalog values
 
 # Every predefined instance matched against its published check value for "123456789".
 CATALOG = [
@@ -53,7 +53,7 @@ def checksum_is_deterministic(crc, _):
 def checksum_fits_width(crc, _):
   assert 0 <= crc.checksum(b"random payload") < (1 << crc.width)
 
-#---------------------------------------------------------------------------- to_bytes / to_int
+#-------------------------------------------------------------------------------- to_bytes / to_int
 
 @pytest.mark.parametrize("crc", [crc8_smbus, crc16_kermit, crc32_iso])
 def bytes_int_round_trip(crc):
@@ -74,7 +74,7 @@ def to_int_rejects_unsupported_width():
   with pytest.raises(ValueError):
     odd.to_int(b"\x00\x00\x00")
 
-#--------------------------------------------------------------------------------------- encode
+#------------------------------------------------------------------------------------------- encode
 
 def encode_appends_crc_after_message():
   assert crc16_modbus.encode(b"hello") == b"hello\xf64"
@@ -86,7 +86,7 @@ def encode_keeps_message_and_adds_width_bytes(crc, n):
   assert frame[:len(msg)] == msg
   assert len(frame) == len(msg) + n
 
-#--------------------------------------------------------------------------------------- decode
+#------------------------------------------------------------------------------------------- decode
 
 @pytest.mark.parametrize("crc", [crc8_smbus, crc16_modbus, crc16_kermit, crc32_iso])
 def decode_recovers_encoded_message(crc):
@@ -107,7 +107,7 @@ def decode_rejects_frame_shorter_than_crc(crc):
   assert crc.decode(b"") is None
   assert crc.decode(b"\x00" * (crc.width // 8 - 1)) is None
 
-#---------------------------------------------------------------------------- parameter effects
+#-------------------------------------------------------------------------------- parameter effects
 
 def reflect_in_out_change_the_result():
   plain = CRC(16, 0x8005, 0x0000, False, False, 0x0000, False)
@@ -129,7 +129,7 @@ def custom_crc_from_docstring_example():
   crc = CRC(16, 0x8005, 0xFFFF, True, True, 0x0000, False)
   assert crc.checksum(b"123456789") == 0x4B37
 
-#--------------------------------------------------------------------------- real-world vectors
+#------------------------------------------------------------------------------- real-world vectors
 
 @pytest.mark.parametrize("data", [b"", b"The quick brown fox", bytes(range(256))])
 def crc32_iso_equals_zlib(data):

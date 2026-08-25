@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from contextlib import contextmanager
+from typing import Iterator
 from ..log import Logger, Print
 
 from .abstract import AbstractDatabase
@@ -15,22 +16,22 @@ class SqliteDatabase(AbstractDatabase):
   """
   SQLite database. `db_name` is a file path or `":memory:"`.
 
-  `insert(..., returning=)` needs SQLite 3.35+ for the `RETURNING` clause. Every call outside
-  a transaction opens its own connection, so `":memory:"` starts empty each time and keeps
-  data only for the span of one `transaction()`.
+  `insert(..., returning=)` needs SQLite 3.35+ for the `RETURNING` clause.
+  Every call outside a transaction opens its own connection,
+  so `":memory:"` starts empty each time and keeps data only for the span of one `transaction()`.
   """
-  def __init__(self, db_name:str, log:Logger|Print|None=None):
+  def __init__(self, db_name:str, log:Logger|Print|None=None) -> None:
     super().__init__()
-    self.db_name = db_name
+    self.db_name:str = db_name
     self.log = log
 
-  def conn(self):
+  def conn(self) -> sqlite3.Connection:
     return sqlite3.connect(self.db_name)
 
   #------------------------------------------------------------------------------------ Transaction
 
   @contextmanager
-  def transaction(self):
+  def transaction(self) -> Iterator[SqliteDatabase]:
     with super().transaction():
       self._cur.execute("BEGIN") # driver opens one only for DML, leaving DDL outside
       yield self
@@ -54,7 +55,7 @@ class SqliteDatabase(AbstractDatabase):
 
   def upsert(self, table:str, data:dict, on:str|list[str], update:list[str]|None=None) -> int:
     """INSERT ON CONFLICT (SQLite 3.24+). `on` must be a UNIQUE or PRIMARY KEY column set."""
-    sql, params = _upsert_sql(table, data, on, update, self.ph, "excluded")
+    sql, params = _upsert_sql(table, data, on, update, self.excluded)
     return self.exec(sql, params)
 
   #---------------------------------------------------------------------------- Database Management

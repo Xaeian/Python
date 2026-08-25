@@ -73,7 +73,7 @@ vals = mr.read_values() # [12.5, 0.34, 25.0, 1500] or None
 
 ## Recording pattern
 
-Recorders are pure data sources: `start()` spawns a reader thread that keeps `.value` / `.values` fresh. Output (CSV, DB, MQTT, plot) is application code - run a reap loop that snapshots values at a fixed period. See `rec_app.py` for a complete multimeter logger with hotkey capture.
+Recorders are pure data sources: `start()` spawns a reader thread that keeps `.value` / `.values` fresh. Output (CSV, DB, MQTT, plot) is application code - run a reap loop that snapshots values at a fixed period, as below.
 
 ```py
 import threading

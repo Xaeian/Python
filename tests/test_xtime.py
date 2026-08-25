@@ -102,8 +102,28 @@ def compares_by_instant_across_zones():
   assert Time("2025-03-01T12:00:00+00:00") == Time("2025-03-01T13:00:00+01:00") # same instant
   assert Time("2025-03-01T12:00:00+00:00") < Time("2025-03-01T12:00:01+00:00")
 
-def equals_equivalent_string():
-  assert Time("2025-03-01 12:00:00") == "2025-03-01 12:00:00"
+def a_comparison_takes_only_a_time_or_a_datetime():
+  """
+  The frozen 1.0 contract: wrap the operand yourself.
+
+  A string used to be parsed inside `__eq__`, so a typo compared as `False` instead of saying
+  it was a typo, and an unrelated object could be declared equal to a point in time.
+  """
+  t = Time("2025-03-01 12:00:00")
+  assert t == Time("2025-03-01 12:00:00")
+  assert t == datetime(2025, 3, 1, 12, 0, 0)
+  assert t != "2025-03-01 12:00:00"
+  assert t != t.timestamp()
+  for other in ("2025-03-02", 1740000000, None):
+    with pytest.raises(TypeError):
+      t < other
+
+def a_constructor_still_takes_anything_it_used_to():
+  """Parsing is not comparing: `between` and the arithmetic still read a string."""
+  t = Time("2025-03-01")
+  assert t.between("2025-02-01", "2025-04-01")
+  assert (t + "1d").to("iso").startswith("2025-03-02")
+  assert Time("2025-03-01 12:00:00") == Time("2025-03-01 12:00:00")
 
 def between_respects_inclusivity():
   t = Time("2025-03-01")
@@ -131,12 +151,12 @@ def strftime_passthrough():
 
 @pytest.mark.parametrize("unit, expected", [
   ("ms", "2025-03-05 14:37:23.123000"),
-  ("s",  "2025-03-05 14:37:23"),
-  ("m",  "2025-03-05 14:37:00"),
-  ("h",  "2025-03-05 14:00:00"),
-  ("d",  "2025-03-05 00:00:00"),
+  ("s", "2025-03-05 14:37:23"),
+  ("m", "2025-03-05 14:37:00"),
+  ("h", "2025-03-05 14:00:00"),
+  ("d", "2025-03-05 00:00:00"),
   ("mo", "2025-03-01 00:00:00"),
-  ("y",  "2025-01-01 00:00:00"),
+  ("y", "2025-01-01 00:00:00"),
 ])
 def rounds_down_to_unit(unit, expected):
   assert str(Time("2025-03-05 14:37:23.123456").round(unit)) == expected
@@ -162,4 +182,26 @@ def copy_equals_but_is_new_object():
 def time_to_passes_through_none_and_blank():
   assert time_to(None, "iso") is None
   assert time_to("   ", "iso") is None
-  assert time_to("2025-03-01T12:00:00+00:00", "ts") == datetime(2025, 3, 1, 12, tzinfo=timezone.utc).timestamp()
+  noon_utc = datetime(2025, 3, 1, 12, tzinfo=timezone.utc)
+  assert time_to("2025-03-01T12:00:00+00:00", "ts") == noon_utc.timestamp()
+
+#-------------------------------------------------------------------------------------- regressions
+
+def an_ambiguous_hour_keeps_the_pass_it_was_given():
+  """Rebuilding the fields dropped `fold`, moving the second pass of a repeated hour by an hour."""
+  import zoneinfo
+  tz = zoneinfo.ZoneInfo("Europe/Warsaw")
+  second_pass = datetime(2025, 10, 26, 2, 30, tzinfo=tz, fold=1)
+  t = Time(second_pass)
+  assert t.fold == 1
+  assert t.timestamp() == second_pass.timestamp()
+  assert t.to_datetime().fold == 1
+  assert t.copy().fold == 1
+
+def values_that_compare_equal_hash_equal():
+  """Equality ran in UTC while the hash did not, so a set kept one instant twice."""
+  naive = Time("2025-03-01 12:00")
+  aware = Time(naive.to_datetime().astimezone(timezone.utc))
+  assert naive == aware
+  assert hash(naive) == hash(aware)
+  assert len({naive, aware}) == 1

@@ -63,6 +63,9 @@ t + "1w"          # add 1 week
 t - "3d"          # subtract 3 days
 t2 - t            # timedelta
 
+t == Time("2025-03-01")   # comparison takes Time or datetime
+t < Time("2025-06-01")    # a raw string raises: wrap it first
+
 t.round("h")      # round to hour
 t.round("w")      # round to week (Monday)
 
@@ -134,7 +137,12 @@ sensor.add(
   Field(Type.float, "temperature", "°C"),
 )
 
-encoded = sensor.encode({"timestamp": 1234567890, "temperature": 23.5, ...})
+data = {
+  "timestamp": 1234567890,
+  "flags": {"enabled": 1, "error": 0, "mode": 5},
+  "temperature": 23.5,
+}
+encoded = sensor.encode(data)
 decoded = sensor.decode(encoded)
 sensor.export_c_header()
 sensor.export_doc()
@@ -157,7 +165,7 @@ run("make -j4", cwd="build")  # CompletedProcess
 Requires `pip install xaeian[sftp]`.
 
 ```py
-from xaeian.sftp import SFTP
+from xaeian.net import SFTP
 
 with SFTP("10.0.0.1", "pi", key="~/.ssh/id_rsa", log=Print()) as s:
   s.put("dist/app.py", "/srv/app/app.py")

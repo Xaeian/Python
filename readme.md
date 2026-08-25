@@ -14,7 +14,7 @@ This follows the **Zen** of Python:
 - Readability counts: code reads like intentions, not implementation
 - One obvious way to do it: `crc16_modbus.encode(frame)`, `JSON.load(path)`, `Time(ts).to("iso")`
 - Errors should never pass silently: `DatabaseError` wraps driver exceptions with context
-- Namespaces are one honking great idea: `FILE`, `DIR`, `PATH`, `CSV`, `JSON`, `CRC` as static classes
+- Namespaces are one honking great idea: `FILE`, `DIR`, `PATH`, `CSV`, `JSON` as static classes
 
 Trade-offs:
 
@@ -54,7 +54,7 @@ CSV.save("users", [{"name": "Jan", "age": 30}, {"name": "Anna", "age": 25}])
 # Time: parse anything, arithmetic with strings
 t = Time("2025-03-01") + "2w 3d"
 t.round("w") # Monday 00:00
-t.to("iso") # "2025-03-17T00:00:00+01:00"
+t.to("iso") # "2025-03-18T00:00:00+01:00"
 
 # CRC: encode/decode with Modbus, ISO, custom
 frame = crc16_modbus.encode(b"\x01\x03\x00\x00\x00\x0A")
@@ -68,8 +68,8 @@ generate_password(16) # 'aB3$xY9!mN2@pQ7&'
 db = Database("sqlite", "app.db")
 db.insert("users", {"name": "Jan", "settings": {"theme": "dark"}})
 db.find("users", order="name", limit=10)
-async with db.transaction():
-  db.update("users", {"verified": True}, "id = ?", 42)
+with db.transaction():
+  db.update("users", {"verified": True}, "id = ?", 42) # `?` on every backend
 
 # Serial recorders: threaded read, latest value via .value
 from xaeian.serial import Recorder
@@ -114,7 +114,7 @@ compress("photos/", max_px=1280) # → photos-min/ (recursive)
 
 # Logging: colored, rotating
 log = logger("app", file="app.log")
-log.info("started") # 2025-03-01 14:32:01 INF started
+log.inf("started") # 2025-03-01 14:32:01 INF started
 ```
 
 ## CLI
@@ -150,4 +150,4 @@ xn ico logo.png -o favicon.ico
 | `media`       | Compress, convert, strip metadata _(PDF & images)_       | [xaeian/media/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/media/readme.md)     |
 | `eda`         | E-series, KiCad export, NgSpice runner                   | [xaeian/eda/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/eda/readme.md)         |
 | `net`         | Network clients _(SFTP, FTP)_                            | [xaeian/net/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/net/readme.md)         |
-| `cli`         | tree, dupes, wifi scripts                                | [xaeian/cli/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/cli/readme.md)         |
+| `cli`         | tree, dupes, wifi, fonts, host, min, meta, ico            | [xaeian/cli/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/cli/readme.md)         |
