@@ -193,8 +193,10 @@ jobs:
       - run: cd /tmp/t && python -m pytest tests
 """
 
-def generate_publish(project:Project) -> str:
-  """Publishing over OIDC, gated on `ci.yml` so nothing ships from a state CI has not passed."""
+def generate_publish(project:Project, ci:bool=False) -> str:
+  """Publishing over OIDC. With `ci`, it waits for the gate instead of shipping unchecked."""
+  gate = "  ci:\n    uses: ./.github/workflows/ci.yml\n\n" if ci else ""
+  needs = "    needs: ci\n" if ci else ""
   cairo_step = (
     "      - run: sudo apt-get update && "
     "sudo apt-get install -y libcairo2-dev pkg-config python3-dev\n"
@@ -206,12 +208,8 @@ on:
     types: [published]
 
 jobs:
-  ci:
-    uses: ./.github/workflows/ci.yml
-
-  publish:
-    needs: ci
-    runs-on: ubuntu-latest
+{gate}  publish:
+{needs}    runs-on: ubuntu-latest
     environment: pypi
     permissions:
       id-token: write
@@ -230,12 +228,13 @@ jobs:
 
 #------------------------------------------------------------------------------------------- Public
 
-def generate(package:str, folder:str|None=None) -> None:
+def generate(package:str, folder:str|None=None, ci:bool=False) -> None:
   """
-  Write both workflows for `package` into `folder`, default `.github/workflows`.
+  Write `publish.yml` for `package` into `folder`, default `.github/workflows`.
 
   Args:
     package: Package directory path.
+    ci: Also write `ci.yml` and make publishing wait for it. Not every repo wants a gate.
   """
   pkg_dir = PATH.resolve(package)
   if not DIR.exists(pkg_dir):
@@ -253,7 +252,8 @@ def generate(package:str, folder:str|None=None) -> None:
   if project.typed:
     p.inf(f"Types: {c.VIOLET}mypy{c.GREY} (py.typed detected){c.END}")
   out = folder or PATH.join(PATH.dirname(pkg_dir), ".github", "workflows")
-  written = {"ci.yml": generate_ci(project), "publish.yml": generate_publish(project)}
+  written = {"publish.yml": generate_publish(project, ci)}
+  if ci: written["ci.yml"] = generate_ci(project)
   for file, text in written.items():
     FILE.save(PATH.join(out, file), text)
     p.ok(f"Generated {c.GREY}{out}/{c.END}{c.ORANGE}{file}{c.END}")
@@ -262,7 +262,8 @@ def generate(package:str, folder:str|None=None) -> None:
 
 EXAMPLES = """
 examples:
-  py workflow.py xaeian              Write both workflows
+  py workflow.py xaeian              Just publish.yml
+  py workflow.py xaeian --ci         Add ci.yml and gate publishing on it
   py workflow.py xaeian -o .github   Custom output folder
 """
 
@@ -272,6 +273,8 @@ if __name__ == "__main__":
   parser.add_argument("package", metavar="PACKAGE", help="Package directory to scan")
   parser.add_argument("-o", "--output", default=None, metavar="DIR",
     help="Output folder (default: .github/workflows)")
+  parser.add_argument("--ci", action="store_true",
+    help="Also write ci.yml and make publishing wait for it")
   add_help(parser)
   args = parser.parse_args()
-  generate(args.package, args.output)
+  generate(args.package, args.output, args.ci)

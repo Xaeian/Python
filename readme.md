@@ -52,9 +52,9 @@ JSON.save("config", {"debug": True, "port": 8080})
 CSV.save("users", [{"name": "Jan", "age": 30}, {"name": "Anna", "age": 25}])
 
 # Time: parse anything, arithmetic with strings
-t = Time("2025-03-01") + "2w 3d"
+t = Time("2025-03-01T00:00:00+01:00") + "2w 3d"
 t.round("w") # Monday 00:00
-t.to("iso") # "2025-03-18T00:00:00+01:00"
+t.to("iso") # "2025-03-18T00:00:00+01:00", the offset you gave is the offset you get
 
 # CRC: encode/decode with Modbus, ISO, custom
 frame = crc16_modbus.encode(b"\x01\x03\x00\x00\x00\x0A")

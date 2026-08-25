@@ -5,6 +5,9 @@ The GitHub Actions workflows, held against their generator.
 
 `workflow.py` owns `.github/workflows`, so a hand edit there is lost on the next run.
 These tests fail while the committed files and the generator disagree.
+
+This repo keeps a gate, so it regenerates with `--ci`. A repo without one writes `publish.yml`
+alone, and publishing then waits for nothing.
 """
 
 from pathlib import Path
@@ -27,7 +30,7 @@ def the_committed_workflows_are_what_the_generator_writes(project):
   """A workflow edited by hand looks fine until someone regenerates and loses the edit."""
   written = {
     "ci.yml": workflow.generate_ci(project),
-    "publish.yml": workflow.generate_publish(project),
+    "publish.yml": workflow.generate_publish(project, ci=True),
   }
   for name, text in written.items():
     on_disk = (WORKFLOWS / name).read_text(encoding="utf-8")
@@ -37,11 +40,12 @@ def both_workflows_say_they_are_generated():
   for name in ("ci.yml", "publish.yml"):
     assert (WORKFLOWS / name).read_text(encoding="utf-8").startswith(workflow.HEADER)
 
-def publishing_waits_for_the_gate(project):
-  """The wheel must never ship from a state CI has not passed."""
-  published = workflow.generate_publish(project)
-  assert "uses: ./.github/workflows/ci.yml" in published
-  assert "needs: ci" in published
+def publishing_waits_for_the_gate_only_when_asked(project):
+  """A gate is opt-in: not every repo wants one, and publishing must not name a missing file."""
+  gated = workflow.generate_publish(project, ci=True)
+  assert "uses: ./.github/workflows/ci.yml" in gated and "needs: ci" in gated
+  plain = workflow.generate_publish(project)
+  assert "ci.yml" not in plain and "needs:" not in plain
 
 #------------------------------------------------------------------------------------ what it reads
 

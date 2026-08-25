@@ -69,8 +69,9 @@ t < Time("2025-06-01")    # a raw string raises: wrap it first
 t.round("h")      # round to hour
 t.round("w")      # round to week (Monday)
 
+t = Time("2025-03-01T12:00:00+02:00")
 t.to("ts")        # unix timestamp (float)
-t.to("iso")       # "2025-03-01T12:00:00+01:00"
+t.to("iso")       # "2025-03-01T12:00:00+02:00", the offset survives
 t.to("utc")       # Time in UTC
 t.to("%Y-%m-%d")  # "2025-03-01"
 ```

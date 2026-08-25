@@ -144,8 +144,8 @@ def the_logging_example_calls_a_method_that_exists():
 def the_time_example_states_the_value_it_produces():
   """The iso comment once carried the rounded date instead of the value on that line."""
   text = Front.text()
-  expr = re.search(r'^t = Time\("([\d-]+)"\) \+ "(.+?)"$', text, re.M)
-  shown = re.search(r'^t\.to\("iso"\) # "(.+?)"$', text, re.M)
+  expr = re.search(r'^t = Time\("([^"]+)"\) \+ "(.+?)"$', text, re.M)
+  shown = re.search(r'^t\.to\("iso"\) # "([^"]+)"', text, re.M)
   assert expr and shown, "the Time example changed shape"
   assert (Time(expr.group(1)) + expr.group(2)).to("iso") == shown.group(1)
 
