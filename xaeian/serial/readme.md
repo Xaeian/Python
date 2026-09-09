@@ -14,14 +14,14 @@ serial_scan() # ["COM3", "COM4", "/dev/ttyUSB0"]
 
 with SerialPort("COM3", 115200) as sp:
   sp.send(b"AT\r\n")
-  raw = sp.read()                  # bytes
-  lines = sp.read_lines()          # list[str]
-  line = sp.read_line()            # one line, str
+  raw = sp.read()          # bytes
+  lines = sp.read_lines()  # list[str]
+  line = sp.read_line()    # one line, str
 
 # Multi-device bus with address filter + CRC
 with SerialPort("COM3", 9600, address=0x42, crc=crc16_modbus) as sp:
-  sp.send(b"\x01\x03\x00\x00")     # auto-prepend address, append CRC
-  resp = sp.read()                 # auto-verify CRC, strip address
+  sp.send(b"\x01\x03\x00\x00")  # auto-prepend address, append CRC
+  resp = sp.read()              # auto-verify CRC, strip address
 ```
 
 Color attrs are class-level - override in subclass or per instance:
@@ -108,12 +108,12 @@ from xaeian.serial import Shell
 
 with Shell("/dev/ttyUSB0") as sh:
   # basic
-  sh.ping()         # True/False (retries 3x)
-  sh.uid()          # bytes (12-byte device UID)
+  sh.ping()  # True/False (retries 3x)
+  sh.uid()   # bytes (12-byte device UID)
 
   # RTC
-  sh.set_time()     # sync to host time
-  sh.get_time()     # datetime|None
+  sh.set_time()  # sync to host time
+  sh.get_time()  # datetime|None
 
   # MBB file operations
   sh.mbb_list()                # ["config", "data", "log"]
@@ -125,12 +125,16 @@ with Shell("/dev/ttyUSB0") as sh:
   sh.mbb_clear()
 
   # Cooperative wakeup
-  sh.trig(42)       # wakes TRIG_Wait / TRIG_WaitFor on device
+  sh.trig(42) # wakes TRIG_Wait / TRIG_WaitFor on device
 
   # Power
   sh.reboot()
   sh.reset()
   sh.sleep("standby") # stop|stop0|stop1|standby|shutdown
+
+  # Firmware of a build under the bootloader (`PRO_BOOT`, `CMD_BOOT` on the device)
+  sh.boot_info()      # {"boot": 1, "app": 0x08002000, "slot": 253952, "crc": ..., ...}
+  sh.boot("app.bin")  # path or bytes of the .bin or .hex; the device resets to install it
 
   # Non-standard via exec
   sh.exec("alarm 1 set everyday 06:00:00")
@@ -144,10 +148,10 @@ Helper for parsing response tokens:
 ```py
 from xaeian.serial import convert_value
 
-convert_value("true")  # True
-convert_value("123")   # 123
-convert_value("3.14")  # 3.14
-convert_value("hello") # "hello"
-convert_value("null")  # None
-convert_value(None)    # None
+convert_value("true")   # True
+convert_value("123")    # 123
+convert_value("3.14")   # 3.14
+convert_value("hello")  # "hello"
+convert_value("null")   # None
+convert_value(None)     # None
 ```

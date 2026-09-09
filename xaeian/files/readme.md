@@ -10,11 +10,11 @@ Read, write, append, hash. Auto-creates parent directories on write.
 from xaeian import FILE
 
 FILE.save("data.txt", "Hello!")
-FILE.load("data.txt")              # → "Hello!"
+FILE.load("data.txt")               # → "Hello!"
 FILE.append("data.txt", "\nmore")
-FILE.load("data.bin", binary=True) # → bytes
-FILE.hash("data.bin", algo="md5")  # → "5d41402abc..."
-FILE.exists("data.txt")            # → True
+FILE.load("data.bin", binary=True)  # → bytes
+FILE.hash("data.bin", algo="md5")   # → "5d41402abc..."
+FILE.exists("data.txt")             # → True
 ```
 
 ## `JSON`
@@ -25,10 +25,10 @@ Auto `.json` extension. Three save modes: compact, pretty (human-edited), smart 
 from xaeian import JSON
 
 JSON.save("config", {"debug": True, "port": 8080})
-JSON.load("config")                   # → dict
-JSON.load("missing", otherwise={})    # → {} if not found
-JSON.save_pretty("config", cfg)       # indented, sorted (configs)
-JSON.save_smart("data", measurements) # compact arrays inline (machine state)
+JSON.load("config")                    # → dict
+JSON.load("missing", otherwise={})     # → {} if not found
+JSON.save_pretty("config", cfg)        # indented, sorted (configs)
+JSON.save_smart("data", measurements)  # compact arrays inline (machine state)
 ```
 
 ## `CSV`
@@ -40,8 +40,8 @@ from xaeian import CSV
 
 CSV.save("users", [{"name": "Jan", "age": 30}])
 CSV.load("users", types={"age": int})
-CSV.load_vectors("sensors", types={"temp": float}) # → {"temp": [...], "ts": [...]}
-CSV.add_row("log", {"ts": 1234, "val": 3.14})      # append single row
+CSV.load_vectors("sensors", types={"temp": float})  # → {"temp": [...], "ts": [...]}
+CSV.add_row("log", {"ts": 1234, "val": 3.14})       # append single row
 ```
 
 ## `INI`
@@ -103,8 +103,8 @@ Scope all operations to a root directory via `Files` instance or `file_context` 
 from xaeian import Files, file_context
 
 fs = Files(root_path="/app/data")
-fs.JSON.load("config")        # → /app/data/config.json
-fs.FILE.save("log.txt", "ok") # → /app/data/log.txt
+fs.JSON.load("config")         # → /app/data/config.json
+fs.FILE.save("log.txt", "ok")  # → /app/data/log.txt
 
 with file_context(root_path="/tmp"):
   FILE.save("temp.txt", "...") # → /tmp/temp.txt

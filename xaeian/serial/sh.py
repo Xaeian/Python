@@ -18,11 +18,13 @@ Example:
   ...     data = sh.mbb_load_str()
 """
 
-import re, time
+import re, struct, time
 from datetime import datetime, timezone
 from typing import Callable
-from .port import SerialPort
+from .port import SerialPort, _remove_ansi
 from ..colors import Color as c
+from ..crc import crc32_iso
+from ..files import FILE
 
 #------------------------------------------------------------------------------------------ Helpers
 
@@ -41,6 +43,34 @@ def convert_value(value:str|None) -> bool|int|float|str|None:
     try: return float(value)
     except ValueError: return value
 
+def ihex_to_bin(text:str) -> bytes:
+  """
+  Intel HEX to the bytes `objcopy -O binary` writes: from the lowest address up, gaps zero.
+
+  Data, end-of-file and both extended-address records are honoured, the start-address
+  ones carry nothing for an image. A bad checksum or an empty file raises ValueError.
+  """
+  chunks: dict[int, bytes] = {}
+  base = 0
+  for line in text.splitlines():
+    line = line.strip()
+    if not line.startswith(":"): continue
+    raw = bytes.fromhex(line[1:])
+    if sum(raw) & 0xFF: raise ValueError("Intel HEX record with a bad checksum")
+    count, addr, kind = raw[0], int.from_bytes(raw[1:3], "big"), raw[3]
+    data = raw[4:4 + count]
+    if kind == 0: chunks[base + addr] = data
+    elif kind == 1: break
+    elif kind == 2: base = int.from_bytes(data, "big") << 4
+    elif kind == 4: base = int.from_bytes(data, "big") << 16
+  if not chunks: raise ValueError("no data in the Intel HEX file")
+  start = min(chunks)
+  end = max(addr + len(data) for addr, data in chunks.items())
+  image = bytearray(end - start)
+  for addr, data in chunks.items():
+    image[addr - start:addr - start + len(data)] = data
+  return bytes(image)
+
 #-------------------------------------------------------------------------------------------- Shell
 
 class Shell(SerialPort):
@@ -57,6 +87,8 @@ class Shell(SerialPort):
   RE_MBB_LIST = re.compile(r"(?:mbb|file)\s+list:\s*(.*)", re.IGNORECASE)
   RE_MBB_SIZE = re.compile(r"(\d+)\s*/\s*(\d+)")
   RE_PACK_NBR = re.compile(r"pack:\s*(\d+)")
+  RE_BOOT = re.compile(r"\bBOOT (\w+)((?: \w+:[0-9a-fA-F]+)*)")
+  BOOT_MAGIC = 0x4E45504F # "OPEN" at 0x200 of an image built under the bootloader
 
   def __init__(
     self,
@@ -306,6 +338,88 @@ class Shell(SerialPort):
     if not text: return None
     match = cls.RE_PACK_NBR.search(text)
     return int(match.group(1)) if match else None
+
+  #------------------------------------------------------------------------------------------- BOOT
+
+  def _boot_reply(self, verb:str, timeout_s:float) -> dict[str, int]|None:
+    """
+    Lines up to the `BOOT <verb>` reply, its `key:value` fields as numbers.
+
+    The echo of the command and any log line in between are printed and skipped.
+    `None` on a refusal (`ERR`/`WRN` naming `boot`) or silence past `timeout_s`.
+    """
+    deadline = time.monotonic() + timeout_s
+    pending = b""
+    while time.monotonic() < deadline:
+      pending += self.serial.readline(self.buffer_size) # short of the newline on a timeout
+      if not pending.endswith(b"\n"): continue
+      line = _remove_ansi(pending.decode("utf-8", errors="ignore")).strip()
+      pending = b""
+      self.print(f"{c.WHITE}{line}{c.END}")
+      if line.startswith(("ERR", "WRN")) and "boot" in line.lower():
+        self.print_error(line)
+        return None
+      match = self.RE_BOOT.search(line)
+      if match and match.group(1) == verb:
+        pairs = (field.split(":") for field in match.group(2).split())
+        return {key: int(value, 16 if key in ("app", "crc") else 10) for key, value in pairs}
+    return None
+
+  def _boot_exec(self, command:str, verb:str, timeout_s:float=2.0) -> dict[str, int]|None:
+    """One `boot` line and its reply; a data line of 2kB takes 0.4s to go and echo at 115200."""
+    self.send(command + "\n")
+    return self._boot_reply(verb, timeout_s)
+
+  def boot_info(self) -> dict[str, int]|None:
+    """
+    `boot info` of a build under the bootloader.
+
+    `boot` (1 = a slot exists), `app` (slot address), `slot` and `page` [B], `line` (console
+    line limit), `image` [B] and `crc` of the running image, `active` (a transfer is open).
+    """
+    return self._boot_exec("boot info", "info")
+
+  def boot(self, image:bytes|str) -> bool:
+    """
+    Install a `PRO_BOOT` build: the bytes or the path of its `.bin` or `.hex`.
+
+    The image goes over `boot begin`/`data`/`end` and the device resets, so its bootloader
+    installs it. `False` on a file without the header, a device without a slot, an image
+    over the slot or a refused line; the old image keeps running then.
+    """
+    if isinstance(image, str):
+      if not FILE.exists(image):
+        self.print_error(f"File {image} not found")
+        return False
+      image = FILE.load(image, binary=True)
+    if image[:1] == b":":
+      try:
+        image = ihex_to_bin(image.decode(errors="ignore"))
+      except ValueError as e:
+        self.print_error(str(e))
+        return False
+    magic, size = struct.unpack_from("<II", image, 0x200) if len(image) >= 0x208 else (0, 0)
+    if magic != self.BOOT_MAGIC or size > len(image):
+      self.print_error("Not an image built under the bootloader")
+      return False
+    image = image[:size] # the header's size: the file may carry an erased tail
+    crc = crc32_iso.checksum(image)
+    info = self.boot_info()
+    if not info or not info.get("boot"):
+      self.print_error("No bootloader slot on the device")
+      return False
+    if size + 4 > info["slot"]: # the slot holds the image and its trailer
+      self.print_error(f"Image of {size} B over the {info['slot']} B slot")
+      return False
+    # a data line holds the longest offset and the hex of a chunk, kept a multiple of 16 B
+    room = (info["line"] - len("boot data 4294967295 ")) // 2
+    chunk = min(self.pack_size, room // 16 * 16)
+    if not self._boot_exec(f"boot begin {size} 0x{crc:08x}", "begin"): return False
+    for offset in range(0, size, chunk):
+      part = image[offset:offset + chunk]
+      reply = self._boot_exec(f"boot data {offset} {part.hex()}", "data")
+      if not reply or reply.get("offset") != offset + len(part): return False
+    return self._boot_exec("boot end", "end") is not None
 
   #-------------------------------------------------------------------------------------------- RTC
 

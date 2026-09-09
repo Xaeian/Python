@@ -50,6 +50,10 @@ def _store_lines() -> list[bytes]:
   """Trust store as raw lines; bytes, so a stray non-UTF-8 byte cannot break reading it."""
   return Path(_known_hosts()).read_bytes().splitlines(keepends=True)
 
+def _names(host:str, port:int) -> set[str]:
+  """The two forms one host is filed under: bare, and bracketed when the port is named."""
+  return {host, f"[{host}]:{port}"}
+
 def _parses(line:bytes) -> bool:
   """Whether paramiko can read this entry back; blank and comment lines it skips on its own."""
   text = line.decode("utf-8", "replace").strip()
@@ -139,6 +143,14 @@ class SFTP:
     return out
 
   @staticmethod
+  def recorded(host:str, port:int=22) -> str|None:
+    """The key type the trust store holds for `host`, or `None` when it holds none."""
+    names = _names(host, port)
+    for entry, kind in SFTP.known():
+      if names & set(entry.split(",")): return kind
+    return None
+
+  @staticmethod
   def forget(host:str, port:int=22) -> bool:
     """
     Drop `host` from the library's trust store, so its next connection records the key anew.
@@ -146,7 +158,7 @@ class SFTP:
     For a server rebuilt on purpose. A match in the system `known_hosts` is never touched:
     that file belongs to the user (`ssh-keygen -R host` cleans it).
     """
-    names = {host, f"[{host}]:{port}"}
+    names = _names(host, port)
     lines = _store_lines()
     kept = []
     for line in lines:
@@ -167,6 +179,9 @@ class SFTP:
     `~/.ssh/known_hosts.xaeian`, where a host accepted on first contact is recorded,
     so a changed server key aborts from the second connection on.
     `strict=True` rejects an unknown host outright.
+
+    A failure here is raised and never also logged: the message carries the whole story,
+    so a caller that prints what it catches would otherwise print it twice.
     """
     self._can_utime = True
     self._ssh = paramiko.SSHClient()
@@ -190,14 +205,14 @@ class SFTP:
       if self.log:
         self.log.inf(f"connected {c.TURQUS}{self.host}{c.END} user:{c.VIOLET}{self.user}{c.END}")
     except paramiko.BadHostKeyException as e:
-      if self.log: self.log.err(f"host key changed {c.TURQUS}{self.host}{c.END} | {e}")
       raise ConnectionError(
-        f"SFTP host key changed host:{self.host} | {e} | "
-        f"rebuilt on purpose? drop the old key with: xn host {self.host}"
+        f"SFTP host key changed on {c.TURQUS}{self.host}{c.END} | {e} | "
+        f"rebuilt on purpose? drop the old key with: "
+        f"xn host {self.host} {c.GREY}--drop{c.END}"
       ) from e
     except Exception as e:
-      if self.log: self.log.err(f"connect failed {c.TURQUS}{self.host}{c.END} | {e}")
-      raise ConnectionError(f"SFTP connect failed host:{self.host} | {e}") from e
+      raise ConnectionError(
+        f"SFTP connect failed on {c.TURQUS}{self.host}{c.END} | {e}") from e
 
   def disconnect(self) -> None:
     """Close SFTP and SSH sessions."""
@@ -303,8 +318,14 @@ class SFTP:
 
   #------------------------------------------------------------------------------------ Directories
 
-  def mkdir(self, remote:str) -> None:
-    """Create remote directory recursively, idempotent."""
+  def mkdir(self, remote:str, *, verify:bool = True) -> None:
+    """
+    Create remote directory recursively, idempotent.
+
+    Args:
+      verify: Raise when the directory is not there afterwards. Off for callers that write
+        into it next, where the write reports the refusal at no extra round trip.
+    """
     self._require_connected()
     if not remote or remote == "/": return
     parts = [p for p in remote.replace("\\", "/").split("/") if p]
@@ -315,7 +336,10 @@ class SFTP:
       try: self._sftp.stat(current)
       except FileNotFoundError:
         try: self._sftp.mkdir(current)
-        except OSError: self._sftp.stat(current) # lost a concurrent create: fine if it exists now
+        except OSError as e:
+          if verify:
+            try: self._sftp.stat(current) # a lost race leaves it there, a refusal does not
+            except FileNotFoundError: raise e from None
 
   def ls(self, remote:str) -> list["paramiko.SFTPAttributes"]:
     """List remote directory with attributes. Symlinks are reported as links, not resolved."""
@@ -328,7 +352,7 @@ class SFTP:
     for attr in self.ls(remote):
       path = f"{remote}/{attr.filename}"
       if _is_dir(attr): self.rmdir(path)
-      else: self._sftp.remove(path)
+      else: self.remove(path) # through `remove`, so a file already gone stays silent
     self._sftp.rmdir(remote)
 
   #--------------------------------------------------------------------------------- Batch transfer

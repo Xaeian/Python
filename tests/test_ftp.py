@@ -20,10 +20,11 @@ class Server:
   """
   def __init__(
     self, files=None, dirs=(), mlsd=True, mfmt=True,
-    unlistable=(), strict_rename=True, store_fail=False,
+    unlistable=(), strict_rename=True, store_fail=False, unwritable=(), unreadable=(),
   ):
     self.files = dict(files or {})
     self.dirs = set(dirs)
+    self.unwritable, self.unreadable = set(unwritable), set(unreadable)
     self.mlsd_ok, self.mfmt_ok = mlsd, mfmt
     self.unlistable = set(unlistable)
     self.strict_rename, self.store_fail = strict_rename, store_fail
@@ -95,6 +96,9 @@ class Server:
   def storbinary(self, cmd, handle, callback=None):
     self.binary = True
     path = cmd[5:]
+    parent = path.rsplit("/", 1)[0] if "/" in path else ""
+    if parent and parent not in self.dirs: raise PERM("550 no such directory")
+    if path in self.unwritable: raise PERM("550 permission denied")
     if self.store_fail:
       self.files[path] = (1, 1_000_000.0) # a partial file already landed on the server
       raise OSError("transfer aborted")
@@ -103,6 +107,7 @@ class Server:
   def retrbinary(self, cmd, callback):
     self.binary = True
     path = cmd[5:]
+    if path in self.unreadable: raise PERM("550 permission denied")
     if path not in self.files: raise PERM("550")
     callback(b"x" * self.files[path][0])
 
@@ -112,14 +117,18 @@ class Server:
     self.files[dst] = self.files.pop(src)
 
   def delete(self, path):
+    if path in self.unwritable: raise PERM("550 permission denied")
     if path not in self.files: raise PERM("550")
     del self.files[path]
 
   def mkd(self, path):
     if path in self.dirs: raise PERM("550 exists")
+    if path in self.unwritable: raise PERM("550 permission denied")
     self.dirs.add(path)
 
-  def rmd(self, path): self.dirs.discard(path)
+  def rmd(self, path):
+    if path in self.unwritable: raise PERM("550 permission denied")
+    self.dirs.discard(path)
 
   def pwd(self): return self.cwd_path
 
@@ -179,6 +188,18 @@ def stat_does_not_disguise_a_dead_connection_as_a_missing_file(client):
   with pytest.raises(OSError):
     session.stat("/d/a.txt")
 
+def stat_does_not_disguise_a_lost_login_as_a_missing_file(client):
+  """
+  The dead connection above arrives as a transport error; a lost login arrives as a refusal,
+  the same class 550 comes in. Only 550 means "absent, or a directory", so a 530 has to
+  travel: swallowed, it reports every file on the box as missing.
+  """
+  session = client(dirs=["/d"])
+  def logged_out(path): raise PERM("530 Not logged in")
+  session._ftp.size = logged_out
+  with pytest.raises(PERM):
+    session.stat("/d/a.txt")
+
 def atomic_put_overwrites_a_target_on_a_server_that_refuses_rnto(client, tmp_path):
   (tmp_path / "a.txt").write_bytes(b"hello")
   session = client(files={"/r/a.txt": (2, 1.0)}, dirs=["/r"])
@@ -193,11 +214,63 @@ def a_failed_upload_removes_the_partial_tmp_file(client, tmp_path):
     session.put(str(tmp_path / "a.txt"), "/r/a.txt")
   assert not [p for p in session._ftp.files if p.endswith(".tmp")]
 
+def an_upload_into_a_directory_that_is_not_there_is_a_missing_path(client, tmp_path):
+  """
+  `put` skips the verify on its `mkdir`, so a refused parent surfaces from STOR instead.
+  Not as `ftplib.error_perm` though: `SFTP` raises `FileNotFoundError` here, and code
+  holding a `Remote` client catches one of the two.
+  """
+  (tmp_path / "a.txt").write_bytes(b"hello")
+  session = client(dirs=["/r"], unwritable={"/r/denied"})
+  with pytest.raises(FileNotFoundError):
+    session.put(str(tmp_path / "a.txt"), "/r/denied/a.txt")
+
+def a_file_the_server_will_not_write_is_a_refusal_not_a_missing_path(client, tmp_path):
+  """The parent is there, so the 550 was about the file: a broken box, not a 404."""
+  (tmp_path / "a.txt").write_bytes(b"hello")
+  session = client(dirs=["/r"], unwritable={"/r/ro.txt"})
+  with pytest.raises(PermissionError):
+    session.put(str(tmp_path / "a.txt"), "/r/ro.txt", atomic=False)
+
+def a_file_that_may_not_be_read_is_a_refusal_not_a_missing_path(client, tmp_path):
+  """RETR answers both with 550; the file is still listed, so it was never gone."""
+  session = client(files={"/r/secret.txt": (5, 1.0)}, dirs=["/r"], unreadable={"/r/secret.txt"})
+  with pytest.raises(PermissionError):
+    session.get("/r/secret.txt", str(tmp_path / "out.txt"))
+
 def rename_does_not_destroy_the_target_when_the_source_is_gone(client):
   session = client(files={"/r/live.txt": (5, 1.0)}, dirs=["/r"])
-  with pytest.raises(PERM):
+  with pytest.raises(FileNotFoundError):
     session.rename("/r/missing.tmp", "/r/live.txt")
   assert "/r/live.txt" in session._ftp.files
+
+#---------------------------------------------------------------------------------------- Directory
+
+def mkdir_reports_a_refusal_the_server_answered_with_a_bare_550(client):
+  """
+  MKD says "already there" and "you may not" the same way, so every reply is swallowed and
+  the tree is asked instead. Without that last question a refused directory reads as created,
+  and the caller whose whole request was creating it hears success.
+  """
+  session = client(dirs=["/r"], unwritable={"/r/denied"})
+  with pytest.raises(PermissionError):
+    session.mkdir("/r/denied")
+
+def mkdir_asks_nothing_extra_when_the_caller_writes_next(client):
+  """`put` lands thousands of files through `put_dir`; the STOR that follows says whether the
+  directory was there, so the probe would be a round trip per file for nothing."""
+  session = client(dirs=["/r"], unwritable={"/r/denied"})
+  session.mkdir("/r/denied", verify=False) # no raise: the write is what reports
+
+def mkdir_is_idempotent_on_a_directory_that_is_already_there(client):
+  session = client(dirs=["/r", "/r/sub"])
+  session.mkdir("/r/sub")
+
+def mkdir_keeps_a_relative_path_relative(client):
+  """A root written without a leading slash is the login's own home, not the box root."""
+  session = client(dirs=["r"])
+  session.mkdir("r/sub/deep")
+  assert {"r/sub", "r/sub/deep"} <= session._ftp.dirs
 
 #------------------------------------------------------------------------------------------ Listing
 

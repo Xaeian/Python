@@ -5,8 +5,8 @@ Lightweight database abstraction. SQLite, MySQL, PostgreSQL: sync and async.
 ## Install
 
 ```sh
-pip install xaeian[db] # sync: pymysql, psycopg2
-pip install xaeian[db-async] # async: aiomysql, asyncpg, aiosqlite
+pip install xaeian[db]        # sync: pymysql, psycopg2
+pip install xaeian[db-async]  # async: aiomysql, asyncpg, aiosqlite
 ```
 
 ## Quick Start
@@ -25,7 +25,7 @@ db = AsyncDatabase("postgres", "mydb", user="postgres", password="secret")
 
 ```py
 # Insert
-db.insert("users", {"name": "Jan", "email": "jan@x.com"})  # returns row count
+db.insert("users", {"name": "Jan", "email": "jan@x.com"})      # returns row count
 user_id = db.insert("users", {"name": "Jan"}, returning="id")  # returns new id
 # Insert many
 db.insert_many("users", [
@@ -37,7 +37,7 @@ users = db.get_dicts("SELECT * FROM users WHERE active = ?", True)
 user = db.get_dict("SELECT * FROM users WHERE id = ?", 42)
 names = db.get_column("SELECT name FROM users")
 count = db.get_value("SELECT COUNT(*) FROM users")
-rows = db.get_rows("SELECT * FROM users")  # list of lists
+rows = db.get_rows("SELECT * FROM users")                      # list of lists
 row = db.get_row("SELECT * FROM users WHERE id = ?", 42)
 # Update (returns affected count)
 n = db.update("users", {"name": "John"}, "id = ?", 42)
@@ -102,9 +102,9 @@ For explicit lifecycle _(recommended for services)_:
 
 ```py
 db = AsyncDatabase("postgres", "mydb", user="postgres", password="secret")
-await db.start() # create pool eagerly, fail fast if DB unreachable
+await db.start()  # create pool eagerly, fail fast if DB unreachable
 # ... use db ...
-await db.close() # clean shutdown
+await db.close()  # clean shutdown
 
 # or as context manager:
 async with AsyncDatabase("postgres", "mydb", user="postgres", password="secret") as db:
@@ -155,8 +155,8 @@ from xaeian.db import Database, KeyValue, AsyncKeyValue
 db = Database("sqlite", "app.db")
 kv = KeyValue(db)
 kv.set("active_table", "pilot")
-kv.get("active_table")       # "pilot"
-kv.read_all()                # {"active_table": "pilot", ...}
+kv.get("active_table")  # "pilot"
+kv.read_all()           # {"active_table": "pilot", ...}
 kv.delete("active_table")
 
 # Async
@@ -164,7 +164,7 @@ db = AsyncDatabase("postgres", "mydb", user="postgres", password="secret")
 kv = AsyncKeyValue(db)
 await kv.set("maintenance", "true")
 await kv.get("maintenance")  # "true"
-await kv.read_all()               # {"maintenance": "true", ...}
+await kv.read_all()          # {"maintenance": "true", ...}
 ```
 
 Custom table name:
@@ -200,12 +200,12 @@ db.get_dict("SELECT * FROM users WHERE id = ?", user_id)
 ## Utilities
 
 ```py
-db.ping() # health check
-db.debug = True # print all queries
-db.has_table("users") # True/False
-db.tables() # ["users", "orders", ...]
+db.ping()                     # health check
+db.debug = True               # print all queries
+db.has_table("users")         # True/False
+db.tables()                   # ["users", "orders", ...]
 db.drop_table("temp")
-db.drop_table("a", "b", "c") # multiple
+db.drop_table("a", "b", "c")  # multiple
 db.has_database("mydb")
 db.create_database("newdb")
 db.drop_database("olddb")

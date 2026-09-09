@@ -44,6 +44,29 @@ def remote(request):
   session._ssh = test_sftp.Ssh()
   return session, lambda entry: (entry.filename, sftp_is_dir(entry))
 
+@pytest.fixture(params=["ftp", "sftp"])
+def denied(request):
+  """
+  A connected client over a `root` the server guards: it will not create `denied` inside it,
+  and will not delete the `locked.txt` that is already there.
+  """
+  if request.param == "ftp":
+    session = FTP("host", "user")
+    session._ftp = test_ftp.Server(
+      files={"root/locked.txt": (3, EPOCH)},
+      dirs={"root"},
+      unwritable={"root/denied", "root/locked.txt"},
+    )
+    session._has_mlsd, session._has_mfmt = True, True
+    return session
+  session = SFTP("host", "user")
+  session._sftp = test_sftp.Client(
+    tree={"root": [test_sftp.Attr("locked.txt", size=3, mtime=EPOCH)]},
+    unwritable={"root/denied", "root/locked.txt"},
+  )
+  session._ssh = test_sftp.Ssh()
+  return session
+
 #------------------------------------------------------------------------------------- the contract
 
 def a_file_exists_and_a_missing_path_does_not(remote):
@@ -64,3 +87,44 @@ def stat_reports_the_size_and_none_for_a_missing_path(remote):
 def ls_lists_the_same_names_and_kinds(remote):
   client, kind = remote
   assert sorted(kind(e) for e in client.ls("root")) == [("a.txt", False), ("sub", True)]
+
+def ls_of_an_empty_directory_is_empty(remote):
+  client, _ = remote
+  assert client.ls("root/sub") == []
+
+def a_missing_directory_is_not_an_empty_one(remote):
+  """
+  FTP answers both with 550, and answering `[]` to either made a directory that vanished
+  read as one that was simply empty. Code handed a client by `Remote` cannot tell them apart
+  unless both raise.
+  """
+  client, _ = remote
+  with pytest.raises(FileNotFoundError):
+    client.ls("root/nope")
+
+def mkdir_says_nothing_about_a_directory_that_is_already_there(remote):
+  client, _ = remote
+  client.mkdir("root/sub")
+
+def a_missing_file_cannot_be_downloaded(remote, tmp_path):
+  client, _ = remote
+  with pytest.raises(FileNotFoundError):
+    client.get("root/nope.txt", str(tmp_path / "out.txt"))
+
+def a_refused_delete_is_not_a_silent_one(denied):
+  """
+  Deleting what is already gone is the outcome the caller asked for, so both clients keep
+  quiet about it. Being told no is the opposite, and `ftplib.error_perm` is not an `OSError`,
+  so code written against `Remote` caught it on one client and missed it on the other.
+  """
+  with pytest.raises(PermissionError):
+    denied.remove("root/locked.txt")
+
+def a_refused_directory_is_not_a_missing_one(denied):
+  """
+  Both clients swallow the reply to a create and read the answer from the tree instead, and
+  both used to read a refusal as "not there". `FileNotFoundError` promises a path nobody
+  has; a path this login may not have is a different answer.
+  """
+  with pytest.raises(PermissionError):
+    denied.mkdir("root/denied")

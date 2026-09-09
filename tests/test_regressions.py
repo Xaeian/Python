@@ -258,12 +258,17 @@ class _Refusing:
   def delete(self, remote): raise ftplib.error_perm("550 Permission denied")
 
 def removing_a_file_the_server_refuses_to_delete_raises(monkeypatch):
-  """550 answers both "no such file" and "permission denied"; both were reported as success."""
+  """
+  550 answers both "no such file" and "permission denied"; both were reported as success.
+
+  It reads as `PermissionError` now, not `ftplib.error_perm`: that one is no `OSError`, so
+  code holding a `Remote` client caught it on SFTP and missed it here.
+  """
   ftp = FTP.__new__(FTP)
   ftp._ftp = _Refusing()
   monkeypatch.setattr(FTP, "_require_connected", lambda self: None)
   monkeypatch.setattr(FTP, "exists", lambda self, remote: True)
-  with pytest.raises(ftplib.error_perm):
+  with pytest.raises(PermissionError):
     ftp.remove("locked.txt")
   monkeypatch.setattr(FTP, "exists", lambda self, remote: False)
   ftp.remove("gone.txt") # already absent: nothing to report

@@ -1,8 +1,10 @@
 # `xaeian`
 
-Python utilities. Zero dependencies for core. Optional extras for time, serial, media, database and more...
+Python utilities.
+Zero dependencies for core.
+Optional extras for time, serial, media, database and more...
 
-See submodule READMEs for `xaeian.files` and `xaeian.serial`.
+Modules with a readme of their own: `files`, `serial`, `db`, `net`, `media`, `eda`, `cli`.
 
 ## `table`
 
@@ -50,7 +52,7 @@ generate_password(16)                                 # 'aB3$xY9!mN2@pQ7&'
 Requires `pip install xaeian[time]`.
 
 ```py
-from xaeian.xtime import Time
+from xaeian import Time
 
 t = Time()                             # now
 t = Time("2025-03-01")                 # parse date
@@ -59,15 +61,15 @@ t = Time(1700000000)                   # unix timestamp
 t = Time("2d")                         # now + 2 days
 t = Time("-6h 30m")                    # now - 6.5 hours
 
-t + "1w"          # add 1 week
-t - "3d"          # subtract 3 days
-t2 - t            # timedelta
+t + "1w"  # add 1 week
+t - "3d"  # subtract 3 days
+t2 - t    # timedelta
 
-t == Time("2025-03-01")   # comparison takes Time or datetime
-t < Time("2025-06-01")    # a raw string raises: wrap it first
+t == Time("2025-03-01")  # comparison takes Time or datetime
+t < Time("2025-06-01")   # a raw string raises: wrap it first
 
-t.round("h")      # round to hour
-t.round("w")      # round to week (Monday)
+t.round("h")  # round to hour
+t.round("w")  # round to week (Monday)
 
 t = Time("2025-03-01T12:00:00+02:00")
 t.to("ts")        # unix timestamp (float)
@@ -87,8 +89,8 @@ log.warning("low disk")  # 2025-03-01 14:32:01 WRN low disk
 log.error("failed")      # 2025-03-01 14:32:01 ERR failed
 log.panic("fatal")       # custom level above CRITICAL
 
-log.stream = False       # toggle console
-log.file = False         # toggle file
+log.stream = False  # toggle console
+log.file = False    # toggle file
 ```
 
 ## `colors`
@@ -100,11 +102,11 @@ print(f"{Color.RED}Error!{Color.END}")
 print(f"{Color.GREEN}OK{Color.END}")
 
 p = Print()
-p.inf("info message")    # INF info message
-p.err("something broke") # ERR something broke
-p.ok("done")             # INF done OK
-p.wrn("careful")         # WRN careful
-p.run("starting...")     # RUN starting...
+p.inf("info message")     # INF info message
+p.err("something broke")  # ERR something broke
+p.ok("done")              # INF done OK
+p.wrn("careful")          # WRN careful
+p.run("starting...")      # RUN starting...
 ```
 
 ## `crc`
@@ -112,12 +114,12 @@ p.run("starting...")     # RUN starting...
 ```py
 from xaeian.crc import crc32_iso, crc16_modbus, crc8_maxim, CRC
 
-crc16_modbus.checksum(b"123456789") # 0x4B37
-crc32_iso.checksum(b"123456789") # 0xCBF43926
+crc16_modbus.checksum(b"123456789")  # 0x4B37
+crc32_iso.checksum(b"123456789")     # 0xCBF43926
 
 encoded = crc16_modbus.encode(b"Hello!")
-crc16_modbus.decode(encoded) # b'Hello!'
-crc16_modbus.decode(b"bad\x00\x00") # None (CRC mismatch)
+crc16_modbus.decode(encoded)         # b'Hello!'
+crc16_modbus.decode(b"bad\x00\x00")  # None (CRC mismatch)
 
 my_crc = CRC(16, 0x8005, 0xFFFF, True, True, 0x0000, False)
 ```
@@ -159,31 +161,6 @@ exists("gcc")                 # True/False
 which("python3", "python")    # "/usr/bin/python3"
 output("git rev-parse HEAD")  # "a1b2c3d..."
 run("make -j4", cwd="build")  # CompletedProcess
-```
-
-## `sftp`
-
-Requires `pip install xaeian[sftp]`.
-
-```py
-from xaeian.net import SFTP
-
-with SFTP("10.0.0.1", "pi", key="~/.ssh/id_rsa", log=Print()) as s:
-  s.put("dist/app.py", "/srv/app/app.py")
-  s.get("/srv/app/log.txt", "local/log.txt")
-  s.put_dir("./dist", "/srv/app")
-  s.get_dir("/srv/app/data", "./backup")
-  s.exec("systemctl restart app")
-
-# Sync (skip unchanged by mtime + size)
-with SFTP("host", "user", password="pass") as s:
-  s.sync_push("./dist", "/srv/app", delete=True)
-  s.sync_pull("/srv/data", "./local", dry_run=True)  # plan only
-
-# Auth: key > password > agent
-SFTP("host", "user", key="~/.ssh/id_rsa", passphrase="secret")
-SFTP("host", "user", password="pass")
-SFTP("host", "user", agent=True)
 ```
 
 ## `plot`
@@ -244,39 +221,39 @@ from xaeian.dsp import Signal
 # From raw ADC / accelerometer data
 sig = Signal.from_accel(raw_x, fs=6666, bits=16, g_range=2, label="X")
 sig = Signal.from_adc(raw, fs=1000, bits=12, vref=3.3, units="V")
-sig = Signal(samples, fs=1000) # from array
+sig = Signal(samples, fs=1000)  # from array
 # Operators: immutable, returns new Signal
-sig * 2      # scale
-sig1 + sig2  # add (same fs required)
--sig         # invert
-abs(sig)     # rectify
+sig * 2                         # scale
+sig1 + sig2                     # add (same fs required)
+-sig                            # invert
+abs(sig)                        # rectify
 # Filter chain: SOS Butterworth, zero-phase
 clean = sig.highpass(10).lowpass(500).detrend()
 bp = sig.bandpass(100, 1000)
-notch = sig.bandstop(49, 51) # mains rejection
+notch = sig.bandstop(49, 51)    # mains rejection
 # Vibration metrics
-sig.rms           # root mean square
-sig.peak          # max absolute value
-sig.peak_to_peak  # max - min
-sig.crest_factor  # peak / rms (>3 = bearing fault)
+sig.rms                         # root mean square
+sig.peak                        # max absolute value
+sig.peak_to_peak                # max - min
+sig.crest_factor                # peak / rms (>3 = bearing fault)
 # Integration (accel → velocity → displacement)
 vel = sig.integrate(highpass_Hz=5, units="m/s")
 disp = vel.integrate(highpass_Hz=1, units="m")
 # FFT → Spectrum object
 sp = sig.fft("hann")
-sp.peak_freq    # dominant frequency
-sp.centroid     # spectral centroid
-sp.median_freq  # median frequency
-sp.magnitudes   # amplitude array
-sp.power        # power array
+sp.peak_freq                    # dominant frequency
+sp.centroid                     # spectral centroid
+sp.median_freq                  # median frequency
+sp.magnitudes                   # amplitude array
+sp.power                        # power array
 # PSD (Welch)
 f, pxx = sig.psd(nperseg=1024)
 # Other transforms
-sig.normalize()     # scale to [-1, 1]
-sig.envelope()      # Hilbert amplitude envelope
-sig.derivative()    # numerical derivative
-sig.window("hann")  # apply window function
-sig.trim(0.1, 0.5)  # trim by time in seconds
+sig.normalize()                 # scale to [-1, 1]
+sig.envelope()                  # Hilbert amplitude envelope
+sig.derivative()                # numerical derivative
+sig.window("hann")              # apply window function
+sig.trim(0.1, 0.5)              # trim by time in seconds
 # Multi-axis magnitude
 mag = Signal.magnitude(sig_x, sig_y, sig_z)
 # Test signals

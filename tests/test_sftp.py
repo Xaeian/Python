@@ -2,6 +2,7 @@
 
 """SFTP client: host-key policy, symlink handling, and destructive-action guards."""
 
+import errno
 import stat as statmod
 import threading
 import pytest
@@ -25,11 +26,12 @@ class Attr:
 class Client:
   """Fake paramiko.SFTPClient over a scripted tree."""
   def __init__(
-    self, tree=None, targets=None, missing=(), nostat=(),
+    self, tree=None, targets=None, missing=(), nostat=(), unwritable=(),
     put_fails=False, close_fails=False, utime_fails=False,
   ):
     self.tree = tree or {}
     self.targets = targets or {}
+    self.unwritable = set(unwritable)
     self.missing, self.nostat = set(missing), set(nostat)
     self.put_fails, self.close_fails, self.utime_fails = put_fails, close_fails, utime_fails
     self.files, self.removed = {}, []
@@ -47,6 +49,7 @@ class Client:
     raise FileNotFoundError(path)
 
   def get(self, remote, local, callback=None):
+    self.stat(remote) # a missing path raises here, the way paramiko opens before it reads
     with open(local, "wb") as handle: handle.write(b"xxx")
 
   def put(self, local, remote, callback=None):
@@ -58,11 +61,14 @@ class Client:
 
   def remove(self, path):
     self.removed.append(path)
+    if path in self.unwritable: raise PermissionError(errno.EACCES, "Permission denied", path)
     if path not in self.files: raise FileNotFoundError(path)
     del self.files[path]
 
   def rmdir(self, path): pass
-  def mkdir(self, path): pass
+
+  def mkdir(self, path):
+    if path in self.unwritable: raise PermissionError(errno.EACCES, "Permission denied", path)
 
   def utime(self, path, times):
     if self.utime_fails: raise OSError("SETSTAT denied")
@@ -191,6 +197,15 @@ def file_symlinks_resolve_to_their_target_and_directory_links_are_skipped(client
   assert sorted(idx) == ["flink", "real.txt"]
   assert idx["flink"].st_size == 42 # the target's size, not the link's
   assert idx["flink"].st_mtime == EPOCH
+
+def rmdir_ignores_a_file_that_vanished_mid_walk(client):
+  """
+  The walk deletes through `remove`, which keeps quiet about a path already gone. Reaching
+  past it into `_sftp.remove` let a file someone else deleted abort the whole tree, where
+  `FTP.rmdir` finished it.
+  """
+  session = client(tree={"/r": [Attr("ghost.txt")]})
+  session.rmdir("/r")
 
 def rmdir_unlinks_a_symlink_instead_of_following_it(client):
   session = client(tree={"/r": [Attr("dlink", mode=LNK)]},

@@ -1,5 +1,11 @@
 # Changes `xaeian`
 
+## `0.9.1` Boot
+
+- `serial`: `Shell.boot` installs a `.bin` or `.hex` image, `Shell.boot_info` reads the slot
+- `net`: FTP and SFTP fail alike: missing is `FileNotFoundError`, refused is `PermissionError`
+- `cli`: `xn host <ip>` shows an entry, `--drop` removes it
+
 ## `0.9.0` Correctness & layers
 
 Breaking: `?` in raw SQL, `shape=` in `DIR` listings, `FILE.exists`/`DIR.exists`, one dict per file from `compress`,
@@ -19,8 +25,8 @@ short names on `Print`, `Time` vs `Time`/`datetime`, no walk into a link, option
 
 ## `0.8.0` Safety audit
 
-Breaking: `FILE.save`/`append` preserve line endings, `split_sql` drops comments, and
-`pdf_compress` verifies its output.
+Breaking: `FILE.save`/`append` preserve line endings, `split_sql` drops comments,
+and `pdf_compress` verifies its output.
 
 - Safer atomic writes, paths, database transactions, file transfers, and media replacement
 - Correctness and performance fixes across serial, EDA, strings, time, and checksums

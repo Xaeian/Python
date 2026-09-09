@@ -2,7 +2,7 @@
 
 """FTP client on stdlib `ftplib`, mirroring the `SFTP` API so either can be dropped in."""
 
-import os, ftplib, datetime
+import os, errno, ftplib, datetime
 from pathlib import Path
 from ..log import Logger, Print
 from ..colors import Color as c
@@ -16,6 +16,14 @@ def _parse_mtime(s:str) -> float|None:
     dt = datetime.datetime.strptime(s.strip()[:14], "%Y%m%d%H%M%S")
     return dt.replace(tzinfo=datetime.timezone.utc).timestamp()
   except Exception: return None
+
+def _gone(remote:str) -> FileNotFoundError:
+  """What `SFTP` raises for a path that is not there, so both clients read alike."""
+  return FileNotFoundError(errno.ENOENT, "No such file or directory", remote)
+
+def _refused(remote:str) -> PermissionError:
+  """Other half of a refusal: the path is there, this login may not have it."""
+  return PermissionError(errno.EACCES, "Permission denied", remote)
 
 #---------------------------------------------------------------------------------------------- FTP
 
@@ -54,15 +62,20 @@ class FTP:
   #------------------------------------------------------------------------------------- Connection
 
   def connect(self) -> None:
-    """Open FTP session and detect server capabilities (MLSD, MFMT)."""
+    """
+    Open FTP session and detect server capabilities (MLSD, MFMT).
+
+    A failure here is raised and never also logged: the message carries the whole story,
+    so a caller that prints what it catches would otherwise print it twice.
+    """
     self._ftp = ftplib.FTP()
     try:
       self._ftp.connect(self.host, self.port, timeout=30)
       self._ftp.login(self.user, self._password or "")
       self._ftp.set_pasv(True)
     except Exception as e:
-      if self.log: self.log.err(f"connect failed {c.TURQUS}{self.host}{c.END} | {e}")
-      raise ConnectionError(f"FTP connect failed host:{self.host} | {e}") from e
+      raise ConnectionError(
+        f"FTP connect failed on {c.TURQUS}{self.host}{c.END} | {e}") from e
     if not self._binary() and self.log:
       self.log.wrn(f"binary mode rejected by {c.TURQUS}{self.host}{c.END}: stat may fail")
     try:
@@ -106,8 +119,9 @@ class FTP:
   def _rename_overwrite(self, src:str, dst:str):
     """Rename, falling back to delete-then-rename: RFC 959 RNTO may refuse an existing target."""
     try: self._ftp.rename(src, dst)
-    except ftplib.error_perm:
-      if not self.exists(src): raise # src is gone: fail before dst gets destroyed
+    except ftplib.error_perm as e:
+      # src is gone: fail before dst gets destroyed
+      if not self.exists(src): raise _gone(src) from e
       try: self._ftp.delete(dst)
       except ftplib.error_perm: pass
       self._ftp.rename(src, dst)
@@ -115,11 +129,18 @@ class FTP:
   #------------------------------------------------------------------------------------ Single file
 
   def stat(self, remote:str) -> Attrs|None:
-    """Attributes via SIZE + MDTM: `None` when absent, and also for a directory."""
+    """
+    Attributes via SIZE + MDTM: `None` when absent, and also for a directory.
+
+    Only 550 answers `None`. A 530 is the session saying nobody is logged in any more, and
+    reading that as a missing file turns every path on the box into one that is not there.
+    """
     self._require_connected()
     self._binary()
     try: size = self._ftp.size(remote)
-    except ftplib.error_perm: return None # 550: absent, or a directory
+    except ftplib.error_perm as e:
+      if not str(e).startswith("550"): raise
+      return None # 550: absent, or a directory
     if size is None: return None
     return Attrs(st_size=size, st_mtime=self._mdtm(remote))
 
@@ -134,6 +155,17 @@ class FTP:
   def exists(self, remote:str) -> bool:
     """Check if a remote path exists, directories included, as `SFTP.exists` answers."""
     return self.stat(remote) is not None or self._is_dir(remote)
+
+  def _fault(self, remote:str, probe:str|None = None) -> OSError:
+    """
+    Which of the two a refusal was. FTP answers "not there" and "not for you" alike, so the
+    tree decides: `probe` is what must exist for a refusal, `remote` when unset.
+
+    One round trip, spent only after the call it explains has already failed.
+    """
+    at = remote if probe is None else probe
+    if at and not self.exists(at): return _gone(at)
+    return _refused(remote)
 
   def put(
     self,
@@ -153,7 +185,9 @@ class FTP:
       preserve_mtime: Set remote mtime via MFMT, a no-op when the server lacks it.
     """
     self._require_connected()
-    self.mkdir(os.path.dirname(remote))
+    # No verify: put_dir and sync_push land thousands of files, and STOR reports a refused
+    # directory anyway - `_stor` probes only once the upload has already failed.
+    self.mkdir(os.path.dirname(remote), verify=False)
     label = _label or remote
     dst = f"{remote}.{os.getpid()}.{next(_tmp_seq)}.tmp" if atomic else remote
     try:
@@ -162,9 +196,9 @@ class FTP:
           total = os.path.getsize(local)
           sent = [0]
           def _cb(block): sent[0] += len(block); callback(label, sent[0], total)
-          self._ftp.storbinary(f"STOR {dst}", f, callback=_cb)
+          self._stor(dst, f, remote, _cb)
         else:
-          self._ftp.storbinary(f"STOR {dst}", f)
+          self._stor(dst, f, remote)
     except Exception:
       if atomic:
         try: self._ftp.delete(dst) # drop the partial .tmp
@@ -179,6 +213,11 @@ class FTP:
       except Exception:
         if self.log: self.log.wrn(f"MFMT failed {c.GREY}{remote}{c.END}: mtime not preserved")
     if self.log: self.log.dot(f"{c.GREY}{local}{c.END} → {c.GREY}{remote}{c.END}")
+
+  def _stor(self, dst:str, f, remote:str, callback=None):
+    """Upload, reading a refusal against the parent directory `put` did not verify."""
+    try: self._ftp.storbinary(f"STOR {dst}", f, callback=callback)
+    except ftplib.error_perm as e: raise self._fault(remote, os.path.dirname(remote)) from e
 
   def get(
     self,
@@ -207,21 +246,27 @@ class FTP:
         except Exception: total = 0
         recv = [0]
         def _write(block): f.write(block); recv[0] += len(block); callback(label, recv[0], total)
-        self._ftp.retrbinary(f"RETR {remote}", _write)
+        self._retr(remote, _write)
       else:
-        self._ftp.retrbinary(f"RETR {remote}", f.write)
+        self._retr(remote, f.write)
     if preserve_mtime:
       mtime = self._mdtm(remote)
       if mtime: os.utime(local, (mtime, mtime))
       elif self.log: self.log.wrn(f"MDTM failed {c.GREY}{remote}{c.END}: mtime not preserved")
     if self.log: self.log.dot(f"{c.GREY}{remote}{c.END} → {c.GREY}{local}{c.END}")
 
+  def _retr(self, remote:str, write):
+    """Download, reading a refusal against the file itself."""
+    try: self._ftp.retrbinary(f"RETR {remote}", write)
+    except ftplib.error_perm as e: raise self._fault(remote) from e
+
   def remove(self, remote:str) -> None:
     """Delete remote file. Silent if it was not there, but a refusal to delete is raised."""
     self._require_connected()
     try: self._ftp.delete(remote)
-    except ftplib.error_perm:
-      if self.exists(remote): raise # 550 answers both "no such file" and "permission denied"
+    except ftplib.error_perm as e:
+      # 550 answers both "no such file" and "permission denied"; still there means the latter
+      if self.exists(remote): raise _refused(remote) from e
 
   def rename(self, src:str, dst:str) -> None:
     """Rename/move remote file: overwrites target."""
@@ -230,8 +275,18 @@ class FTP:
 
   #------------------------------------------------------------------------------------ Directories
 
-  def mkdir(self, remote:str) -> None:
-    """Create remote directory recursively, idempotent."""
+  def mkdir(self, remote:str, *, verify:bool = True) -> None:
+    """
+    Create remote directory recursively, idempotent.
+
+    MKD answers "it is already there" and "you may not" with the same 550, so each reply is
+    swallowed and the result is read from the tree instead: one probe at the end, not one
+    per component.
+
+    Args:
+      verify: Raise when the directory is not there afterwards. Off for callers that write
+        into it next, where the write reports the refusal at no extra round trip.
+    """
     self._require_connected()
     if not remote or remote == "/": return
     parts = [p for p in remote.replace("\\", "/").split("/") if p]
@@ -241,19 +296,25 @@ class FTP:
       cur = f"{prefix}{p}" if not cur else f"{cur}/{p}"
       try: self._ftp.mkd(cur)
       except ftplib.error_perm: pass
+    if verify and not self._is_dir(remote): raise _refused(remote)
 
   def ls(self, remote:str) -> list[Attrs]:
     """
     List remote directory with attributes.
 
-    Empty means empty or unlistable, the two are not distinguishable.
+    A missing directory raises `FileNotFoundError`, as `SFTP.ls` does. Empty means empty or
+    unlistable, which 550 does not tell apart: on NLST it is also how servers answer an
+    empty directory, so the tree is probed before the answer is chosen.
+
     Without MLSD `st_mtime` stays `None`: entries carry size and kind only.
     """
     self._require_connected()
     result = []
     if self._has_mlsd:
       try: entries = list(self._ftp.mlsd(remote, facts=["size", "modify", "type"]))
-      except ftplib.error_perm: return result
+      except ftplib.error_perm as e:
+        if not self._is_dir(remote): raise _gone(remote) from e
+        return result
       for name, facts in entries:
         if not safe_name(name): continue
         ftype = facts.get("type", "file").lower() # MLSD fact values are case-insensitive
@@ -265,7 +326,9 @@ class FTP:
         ))
     else:
       try: paths = self._ftp.nlst(remote)
-      except ftplib.error_perm: return result # 550 also means "empty" for NLST
+      except ftplib.error_perm as e: # a refusal also means "empty" for NLST
+        if not self._is_dir(remote): raise _gone(remote) from e
+        return result
       self._binary() # nlst reset TYPE to ASCII
       for path in paths:
         name = _leaf(path)
@@ -286,7 +349,8 @@ class FTP:
       path = f"{remote}/{attr.filename}"
       if attr.is_dir: self.rmdir(path)
       else: self.remove(path)
-    self._ftp.rmd(remote)
+    try: self._ftp.rmd(remote)
+    except ftplib.error_perm as e: raise self._fault(remote) from e
 
   #--------------------------------------------------------------------------------- Batch transfer
 

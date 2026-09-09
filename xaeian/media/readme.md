@@ -14,8 +14,8 @@ compress("report.pdf")              # → report-min.pdf (Ghostscript /ebook)
 compress("photo.jpg", max_px=1280)  # → photo-min.jpg
 compress("photos/", quality=70)     # → photos-min/ (recursive)
 
-scrub_metadata("report.pdf")        # → report-nometa.pdf
-scrub_metadata("photo.jpg")         # → photo-nometa.jpg
+scrub_metadata("report.pdf")  # → report-nometa.pdf
+scrub_metadata("photo.jpg")   # → photo-nometa.jpg
 ```
 
 Both `compress()` and `scrub_metadata()` auto-detect PDF vs image by extension.
@@ -91,14 +91,14 @@ xn min photos/ -f auto                # batch, pick smallest format per file
 xn min photos/ -f webp -o web/        # batch convert to WebP → web/
 xn min photos/ --no-recursive         # flat directory only
 
-xn meta report.pdf                    # strip PDF metadata
-xn meta report.pdf -i                 # strip in-place
-xn meta photo.jpg -o clean.jpg        # strip EXIF, custom output
-xn meta photo.jpg -i                  # strip EXIF in-place
+xn meta report.pdf              # strip PDF metadata
+xn meta report.pdf -i           # strip in-place
+xn meta photo.jpg -o clean.jpg  # strip EXIF, custom output
+xn meta photo.jpg -i            # strip EXIF in-place
 
-xn ico logo.png                       # auto sizes → logo.ico
-xn ico logo.png -o favicon.ico        # custom output
-xn ico logo.svg --sizes 16,32,48      # specific sizes only
-xn ico photo.jpg --fit crop           # center-crop to square
-xn ico logo.png --upscale             # include sizes > source
+xn ico logo.png                   # auto sizes → logo.ico
+xn ico logo.png -o favicon.ico    # custom output
+xn ico logo.svg --sizes 16,32,48  # specific sizes only
+xn ico photo.jpg --fit crop       # center-crop to square
+xn ico logo.png --upscale         # include sizes > source
 ```

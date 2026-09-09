@@ -12,8 +12,8 @@ from xaeian.eda.ee import RDIV, AOZ1282, MC34063, LM317, LM337
 expand_series(E12, decades=(1, 10, 100)) # [1.0, 1.2, ..., 82.0]
 
 # Direct calculation
-AOZ1282(5.6, 1.0) # 5.28V
-RDIV(10, 10) # 1.65V
+AOZ1282(5.6, 1.0)  # 5.28V
+RDIV(10, 10)       # 1.65V
 
 # Find R1/R2 for target voltage
 AOZ1282.find(3.3)
@@ -36,27 +36,27 @@ from xaeian.eda.kicad import KiCad
 
 kc = KiCad("./kicad", "./produce")
 
-kc.bom() # generic BOM
-kc.bom("JLCPCB") # JLCPCB format (LCSC parts)
-kc.bom("EuroCircuits") # EuroCircuits format
-kc.bom(dnp_ref=["CN*"], dnp_package=["TO220-3"]) # depopulate for this production
+kc.bom()                                          # generic BOM
+kc.bom("JLCPCB")                                  # JLCPCB format (LCSC parts)
+kc.bom("EuroCircuits")                            # EuroCircuits format
+kc.bom(dnp_ref=["CN*"], dnp_package=["TO220-3"])  # depopulate for this production
 
-kc.gerber() # gerbers + drill → ZIP
-kc.cpl() # pick & place CSV
-kc.cpl(jlcpcb_format=True) # JLCPCB CPL format
+kc.gerber()                 # gerbers + drill → ZIP
+kc.cpl()                    # pick & place CSV
+kc.cpl(jlcpcb_format=True)  # JLCPCB CPL format
 kc.cpl(
-  blacklist=["CP", "TP"], # skip these ref prefixes
-  rot_ref={"U1": 90}, # rotation corrections, degrees added to Rot
+  blacklist=["CP", "TP"],   # skip these ref prefixes
+  rot_ref={"U1": 90},       # rotation corrections, degrees added to Rot
   rot_package={"SOT23-3": 180},
-  dnp_ref=["R99"], # do not place
+  dnp_ref=["R99"],          # do not place
 )
 
-kc.pdf_layout() # multi-page PCB layout PDF
-kc.pdf_layout(el="both", cu="both", desc="top") # pick sides per page kind
-kc.pdf_schema() # schematic PDF
+kc.pdf_layout()                                  # multi-page PCB layout PDF
+kc.pdf_layout(el="both", cu="both", desc="top")  # pick sides per page kind
+kc.pdf_schema()                                  # schematic PDF
 
-kc.zip_prod("1.0.0") # ZIP everything
-kc.ok() # print success
+kc.zip_prod("1.0.0")  # ZIP everything
+kc.ok()               # print success
 ```
 
 Every export, PDFs included, lands in `produce_path`. A failed `kicad-cli` call raises
@@ -97,7 +97,7 @@ data["TIME"]  # [0.0, 1e-4, 2e-4, ...]
 
 # Parametric sweep (parallel, cached)
 results = sim.sweep(RLOAD=["1k", "2.2k", "4.7k", "10k"])
-results["2.2k"]["vout"]  # [0.0, 0.12, ...]
+results["2.2k"]["vout"] # [0.0, 0.12, ...]
 
 # Plot with family()
 from xaeian.plot import Plot

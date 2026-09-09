@@ -38,6 +38,16 @@ def _requires(root:str) -> str:
   for group in project.get("optional-dependencies", {}).values(): names += group
   return " ".join(names).lower()
 
+def floor(root:str, pkg_dir:str) -> str:
+  """
+  The lowest Python the project supports.
+
+  `pyproject.toml` wins, because that is where pip reads it and where a package not built
+  by `toml.py` declares it. Falling back on `__init__.py` keeps the packages that are.
+  """
+  declared = _pyproject(root).get("project", {}).get("requires-python", "")
+  return (declared or get_meta(pkg_dir)["python"]).replace(">=", "").replace(">", "").strip()
+
 NEWEST = "3.14"
 """Newest Python the workflows cover. One line to bump when the next one ships."""
 
@@ -60,13 +70,15 @@ class Project:
   services: list[str]
   extra: str
   typed: bool
+  tests: bool
 
 def scan(pkg_dir:str) -> Project:
   """
   Read the facts the workflows depend on out of the package and its `pyproject.toml`.
 
   Nothing here is guessed: a server starts because a driver is declared, Cairo is installed
-  because `svglib` is, and `mypy` runs because the package publishes its annotations.
+  because `svglib` is, `mypy` runs because the package publishes its annotations, and the
+  suite runs because there is a `tests/` to run.
   """
   root = PATH.dirname(pkg_dir)
   deps = _requires(root)
@@ -76,11 +88,12 @@ def scan(pkg_dir:str) -> Project:
   if any(d in deps for d in ("pymysql", "aiomysql")): services.append("mysql")
   return Project(
     name=PATH.basename(pkg_dir),
-    pythons=pythons(get_meta(pkg_dir)["python"].replace(">=", "").replace(">", "")),
+    pythons=pythons(floor(root, pkg_dir)),
     cairo="svglib" in deps,
     services=services,
     extra="[all]" if "all" in extras else "",
     typed=FILE.exists(PATH.join(pkg_dir, "py.typed")),
+    tests=DIR.exists(PATH.join(root, "tests")),
   )
 
 #----------------------------------------------------------------------------------------- Generate
@@ -112,6 +125,24 @@ SERVICE = {
 """,
 }
 
+def verify_block(project:Project) -> str:
+  """
+  How a built wheel is proven, as far as the repo allows.
+
+  With a suite, the artifact under test is the wheel: the tests are copied away from the
+  source tree so `import` can only answer from site-packages. Without one, installing it is
+  still worth doing, because a wheel that cannot be installed is a wheel nobody can use.
+  """
+  if not project.tests:
+    return f'      - run: pip install "$(echo dist/*.whl){project.extra}"\n'
+  typing = " mypy" if project.typed else "" # the published annotations, checked once
+  return (
+    f'      - run: pip install pytest{typing} "$(echo dist/*.whl){project.extra}"\n'
+    "      # pyproject carries the pytest config; no source tree beside it, so the wheel answers\n"
+    "      - run: mkdir /tmp/t && cp -r tests pyproject.toml /tmp/t/\n"
+    "      - run: cd /tmp/t && python -m pytest tests\n"
+  )
+
 def services_block(project:Project) -> str:
   """The service containers and the passwords the suite reads, empty when none apply."""
   if not project.services: return ""
@@ -131,8 +162,9 @@ def generate_ci(project:Project) -> str:
   every = ", ".join(f'"{v}"' for v in project.pythons)
   ends = ", ".join(f'"{v}"' for v in dict.fromkeys([project.pythons[0], project.pythons[-1]]))
   matrix_python = "${{ matrix.python }}"
-  install = f'pip install pytest ".{project.extra}"'
-  typing = " mypy" if project.typed else ""
+  pytest = "pytest " if project.tests else ""
+  install = f'pip install {pytest}".{project.extra}"'
+  suite = "      - run: python -m pytest tests -q\n" if project.tests else ""
   return HEADER + f"""name: CI
 
 on:
@@ -158,8 +190,7 @@ jobs:
         with:
           python-version: {matrix_python}
       - run: {install}
-      - run: python -m pytest tests -q
-
+{suite}
   windows:
     runs-on: windows-latest
     timeout-minutes: 20
@@ -174,8 +205,7 @@ jobs:
           python-version: {matrix_python}
       - run: {install}
       # no server here, so whatever needs one skips itself
-      - run: python -m pytest tests -q
-
+{suite}
   wheel:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -186,12 +216,7 @@ jobs:
           python-version: "{project.pythons[0]}"
       - run: pip install build
       - run: python -m build
-      # the artifact that ships is the artifact under test: the wheel, with every extra
-      - run: pip install pytest{typing} "$(echo dist/*.whl){project.extra}"
-      # pyproject carries the pytest config; no source tree beside it, so the wheel answers
-      - run: mkdir /tmp/t && cp -r tests pyproject.toml /tmp/t/
-      - run: cd /tmp/t && python -m pytest tests
-"""
+{verify_block(project)}"""
 
 def generate_publish(project:Project, ci:bool=False) -> str:
   """Publishing over OIDC. With `ci`, it waits for the gate instead of shipping unchecked."""
@@ -220,10 +245,7 @@ jobs:
           python-version: "{project.pythons[0]}"
 {cairo_step}      - run: pip install build
       - run: python -m build
-      - run: pip install pytest "$(echo dist/*.whl){project.extra}"
-      - run: mkdir /tmp/t && cp -r tests pyproject.toml /tmp/t/
-      - run: cd /tmp/t && python -m pytest tests
-      - uses: pypa/gh-action-pypi-publish@release/v1
+{verify_block(project)}      - uses: pypa/gh-action-pypi-publish@release/v1
 """
 
 #------------------------------------------------------------------------------------------- Public

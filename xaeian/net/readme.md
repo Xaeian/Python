@@ -46,13 +46,13 @@ r.put("local/file.json", "/srv/file.json")
 r.get("/srv/file.json", "local/file.json")
 r.remove("/srv/old.json")
 r.rename("/srv/tmp.json", "/srv/file.json")
-r.stat("/srv/file.json")   # → Attrs | SFTPAttributes | None
-r.exists("/srv/file.json") # → bool
+r.stat("/srv/file.json")    # → Attrs | SFTPAttributes | None
+r.exists("/srv/file.json")  # → bool
 
 # Directories
-r.mkdir("/srv/new/dir")    # recursive, idempotent
-r.rmdir("/srv/old")        # recursive
-r.ls("/srv/data")          # → list[Attrs | SFTPAttributes]
+r.mkdir("/srv/new/dir")  # recursive, idempotent
+r.rmdir("/srv/old")      # recursive
+r.ls("/srv/data")        # → list[Attrs | SFTPAttributes]
 
 # Batch
 r.put_dir("./dist", "/srv/app", filter=lambda p: not p.endswith(".pyc"))
@@ -67,13 +67,18 @@ actions = r.sync_pull("/srv/data", "./local")
 
 `sync_pull` refuses to `delete` on an incomplete remote listing.
 
+Failures read alike from either client: `FileNotFoundError` for a path that is not there,
+`PermissionError` for one this login may not have, `ConnectionError` for a session that
+cannot be opened.
+FTP answers the first two with one code, so it asks the server which it was before raising.
+
 ## SFTP extras
 
 ```py
 from xaeian.net import SFTP
 
 with SFTP("host", "user", key="~/.ssh/id_rsa") as s:
-  s.exec("systemctl restart app")  # → (stdout, stderr)
+  s.exec("systemctl restart app") # → (stdout, stderr)
 
 # Auth priority: key > password > agent
 SFTP("host", "user", key="~/.ssh/id_rsa", passphrase="secret")
@@ -84,7 +89,7 @@ SFTP("host", "user", agent=True)
 Host keys are checked against `~/.ssh/known_hosts`. An unknown host is trusted on first
 contact and its key is pinned to `~/.ssh/known_hosts.xaeian`, so a changed server key aborts
 the next connect; `strict=True` rejects unknown hosts outright. `xn host` lists the pinned
-keys and `xn host <ip>` drops one after a server rebuild.
+keys, `xn host <ip>` shows one, and `xn host <ip> --drop` removes it after a server rebuild.
 
 ## FTP notes
 
