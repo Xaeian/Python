@@ -20,7 +20,8 @@ from ..log import Logger, Print
 from ..colors import Color as c
 from ..files import FILE
 from .common import (
-  local_index, _tmp_seq, Filter, Progress, Action, atomic_local, safe_name, unchanged,
+  local_index, _tmp_seq, Filter, Progress, Action, atomic_local, log_sync, pruned, safe_name,
+  unchanged,
 )
 
 from ..extras import MissingExtra, absent
@@ -207,7 +208,7 @@ class SFTP:
     except paramiko.BadHostKeyException as e:
       raise ConnectionError(
         f"SFTP host key changed on {c.TURQUS}{self.host}{c.END} | {e} | "
-        f"rebuilt on purpose? drop the old key with: "
+        f"Rebuilt on purpose? Drop the old key with: "
         f"xn host {self.host} {c.GREY}--drop{c.END}"
       ) from e
     except Exception as e:
@@ -376,7 +377,7 @@ class SFTP:
     if self.log:
       self.log.inf(f"put_dir {c.CYAN}{len(files)}{c.END} files → {c.SKY}{remote}{c.END}")
     for rel, f in files.items():
-      if filter and not filter(rel): continue
+      if pruned(rel, filter): continue
       self.put(str(f), f"{remote}/{rel}", atomic=atomic, callback=callback, _label=rel)
 
   def get_dir(
@@ -425,7 +426,7 @@ class SFTP:
     remote_idx = self._index_remote(remote, filter=filter)
     actions: list[Action] = []
     for rel, lpath in local_files.items():
-      if filter and not filter(rel): continue
+      if pruned(rel, filter): continue
       ls = lpath.stat()
       rs = remote_idx.get(rel)
       if rs and unchanged(rs, ls.st_mtime, ls.st_size, use_mtime=self._can_utime):
@@ -439,10 +440,10 @@ class SFTP:
         if self.log: self.log.wrn("delete skipped: local source is not a directory")
       else:
         for rel in remote_idx:
-          if rel not in local_files and not (filter and not filter(rel)):
+          if rel not in local_files: # `_index_remote` pruned it, so `filter` has had its say
             actions.append(("delete", rel))
             if not dry_run: self.remove(f"{remote}/{rel}")
-    self._log_sync("sync_push", actions, dry_run)
+    log_sync(self.log, "sync_push", actions, dry_run)
     return actions
 
   def sync_pull(
@@ -474,7 +475,6 @@ class SFTP:
     remote_idx = self._index_remote(remote, filter=filter)
     actions: list[Action] = []
     for rel, rs in remote_idx.items():
-      if filter and not filter(rel): continue
       lpath = root / rel
       if lpath.exists():
         ls = lpath.stat()
@@ -489,10 +489,10 @@ class SFTP:
         if self.log: self.log.wrn("delete skipped: remote listing incomplete")
       else:
         for rel in local_idx:
-          if rel not in remote_idx and not (filter and not filter(rel)):
+          if rel not in remote_idx and not pruned(rel, filter):
             actions.append(("delete", rel))
             if not dry_run: (root / rel).unlink(missing_ok=True)
-    self._log_sync("sync_pull", actions, dry_run)
+    log_sync(self.log, "sync_pull", actions, dry_run)
     return actions
 
   #------------------------------------------------------------------------------------------- Exec
@@ -599,14 +599,6 @@ class SFTP:
       else:
         if filter and not filter(rel): continue
         self.get(rpath, str(lpath), callback=callback, _label=rel)
-
-  def _log_sync(self, op:str, actions:list[Action], dry_run:bool):
-    if not self.log: return
-    counts = {k: sum(1 for a, _ in actions if a == k) for k in ("put", "get", "skip", "delete")}
-    hue = {"put": c.LIME, "skip": c.MAGNTA}
-    parts = [f"{k}:{hue.get(k, c.CYAN)}{v}{c.END}" for k, v in counts.items() if v]
-    suffix = f" {c.GREY}(dry){c.END}" if dry_run else ""
-    self.log.inf(f"{op} {' '.join(parts)}{suffix}")
 
 #------------------------------------------------------------------------------------------ Helpers
 

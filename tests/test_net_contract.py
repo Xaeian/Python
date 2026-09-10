@@ -67,6 +67,19 @@ def denied(request):
   session._ssh = test_sftp.Ssh()
   return session
 
+@pytest.fixture(params=["ftp", "sftp"])
+def empty(request):
+  """A connected client over a bare `root`, and a lens answering what has landed in it."""
+  if request.param == "ftp":
+    session = FTP("host", "user")
+    session._ftp = test_ftp.Server(dirs={"root"})
+    session._has_mlsd, session._has_mfmt = True, True
+    return session, lambda: set(session._ftp.files)
+  session = SFTP("host", "user")
+  session._sftp = test_sftp.Client(tree={"root": []})
+  session._ssh = test_sftp.Ssh()
+  return session, lambda: set(session._sftp.files)
+
 #------------------------------------------------------------------------------------- the contract
 
 def a_file_exists_and_a_missing_path_does_not(remote):
@@ -128,3 +141,21 @@ def a_refused_directory_is_not_a_missing_one(denied):
   """
   with pytest.raises(PermissionError):
     denied.mkdir("root/denied")
+
+def a_filter_prunes_the_local_side_as_it_prunes_the_remote(empty, tmp_path):
+  """
+  The remote index prunes per folder, so a local side that did not would send the excluded
+  files on every run and never once read one back as unchanged.
+
+  The filter names the folder only. A flat check would be asked about `vendor/x.txt`, which
+  it has no opinion on, and would let it through.
+  """
+  client, landed = empty
+  (tmp_path / "keep.txt").write_bytes(b"hello")
+  (tmp_path / "vendor").mkdir()
+  (tmp_path / "vendor" / "x.txt").write_bytes(b"hello")
+  actions = client.sync_push(str(tmp_path), "root",
+    filter=lambda p: p not in ("vendor", "vendor/"))
+  assert ("put", "keep.txt") in actions
+  assert not [a for a in actions if a[1].startswith("vendor")]
+  assert not [path for path in landed() if "vendor" in path]

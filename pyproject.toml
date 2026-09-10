@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xaeian"
-version = "0.9.1"
+version = "0.9.2"
 description = "Python utilities for files, strings, time, serial, structs, media, electronics, plotting, and database and more..."
 readme = "readme.md"
 license = "MIT"
 license-files = ["license"]
 requires-python = ">=3.12"
 authors = [{name = "Xaeian"}]
-keywords = ["utilities", "files", "database", "serial", "crc", "struct", "media", "kicad", "plot", "matplotlib", "ngspice", "spice", "dsp", "signal", "filter", "fft", "vibration", "ftp", "sftp"]
+keywords = ["utilities", "files", "database", "serial", "crc", "struct", "media", "kicad", "plot", "matplotlib", "ngspice", "spice", "dsp", "signal", "filter", "fft", "vibration", "ftp", "sftp", "s3", "r2"]
 dependencies = []
 
 [project.optional-dependencies]

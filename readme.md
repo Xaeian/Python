@@ -162,6 +162,6 @@ xn ico logo.png -o favicon.ico  # multi-size .ico
 | `db`      | Database abstraction _(SQLite, MySQL, PostgreSQL)_      | [xaeian/db/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/db/readme.md)         |
 | `media`   | Compress, convert, strip metadata _(PDF & images)_      | [xaeian/media/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/media/readme.md)   |
 | `eda`     | E-series, KiCad export, NgSpice runner                  | [xaeian/eda/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/eda/readme.md)       |
-| `net`     | Network clients _(SFTP, FTP)_                           | [xaeian/net/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/net/readme.md)       |
+| `net`     | Network clients _(SFTP, FTP, S3)_                       | [xaeian/net/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/net/readme.md)       |
 | `cli`     | Command-line utilities behind `xn`                      | [xaeian/cli/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/cli/readme.md)       |
 | `cli`     | tree, dupes, wifi, fonts, host, min, meta, ico          | [xaeian/cli/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/cli/readme.md)       |

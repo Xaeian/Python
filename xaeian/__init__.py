@@ -12,7 +12,7 @@ Example:
   >>> from xaeian import logger, JSON, split_sql, Files, Plot
 """
 
-__version__ = "0.9.1"
+__version__ = "0.9.2"
 __repo__ = "Xaeian/Python"
 __python__ = ">=3.12"
 __description__ = (
@@ -23,7 +23,7 @@ __author__ = "Xaeian"
 __keywords__ = [
   "utilities", "files", "database", "serial", "crc", "struct",
   "media", "kicad", "plot", "matplotlib", "ngspice", "spice",
-  "dsp", "signal", "filter", "fft", "vibration", "ftp", "sftp",
+  "dsp", "signal", "filter", "fft", "vibration", "ftp", "sftp", "s3", "r2",
 ]
 __scripts__ = {
   "xn": "xaeian.__main__:main",

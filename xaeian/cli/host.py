@@ -40,7 +40,7 @@ def _show(host:str, port:int) -> int:
     p.wrn(f"Not recorded: {c.TURQUS}{host}{c.END}")
     return 1
   p.inf(f"{c.TURQUS}{host}{c.END} {c.GREY}{kind}{c.END}")
-  p.tip(f"drop it with: {c.YELLOW}xn{c.END} host {host} {c.GREY}--drop{c.END}")
+  p.tip(f"Drop it with: {c.YELLOW}xn{c.END} host {host} {c.GREY}--drop{c.END}")
   return 0
 
 #----------------------------------------------------------------------------------------- Commands

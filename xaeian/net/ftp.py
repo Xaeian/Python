@@ -2,12 +2,13 @@
 
 """FTP client on stdlib `ftplib`, mirroring the `SFTP` API so either can be dropped in."""
 
-import os, errno, ftplib, datetime
+import os, ftplib, datetime
 from pathlib import Path
 from ..log import Logger, Print
 from ..colors import Color as c
 from .common import (
-  local_index, _tmp_seq, Filter, Progress, Action, Attrs, atomic_local, safe_name, unchanged,
+  local_index, _tmp_seq, Filter, Progress, Action, Attrs, atomic_local, log_sync,
+  pruned, safe_name, unchanged, _gone, _refused,
 )
 
 def _parse_mtime(s:str) -> float|None:
@@ -16,14 +17,6 @@ def _parse_mtime(s:str) -> float|None:
     dt = datetime.datetime.strptime(s.strip()[:14], "%Y%m%d%H%M%S")
     return dt.replace(tzinfo=datetime.timezone.utc).timestamp()
   except Exception: return None
-
-def _gone(remote:str) -> FileNotFoundError:
-  """What `SFTP` raises for a path that is not there, so both clients read alike."""
-  return FileNotFoundError(errno.ENOENT, "No such file or directory", remote)
-
-def _refused(remote:str) -> PermissionError:
-  """Other half of a refusal: the path is there, this login may not have it."""
-  return PermissionError(errno.EACCES, "Permission denied", remote)
 
 #---------------------------------------------------------------------------------------------- FTP
 
@@ -185,8 +178,9 @@ class FTP:
       preserve_mtime: Set remote mtime via MFMT, a no-op when the server lacks it.
     """
     self._require_connected()
-    # No verify: put_dir and sync_push land thousands of files, and STOR reports a refused
-    # directory anyway - `_stor` probes only once the upload has already failed.
+    # No verify: put_dir and sync_push land thousands of files,
+    # and STOR reports a refused directory anyway.
+    # `_stor` probes only once the upload has already failed.
     self.mkdir(os.path.dirname(remote), verify=False)
     label = _label or remote
     dst = f"{remote}.{os.getpid()}.{next(_tmp_seq)}.tmp" if atomic else remote
@@ -373,7 +367,7 @@ class FTP:
     if self.log:
       self.log.inf(f"put_dir {c.CYAN}{len(files)}{c.END} files → {c.SKY}{remote}{c.END}")
     for rel, f in files.items():
-      if filter and not filter(rel): continue
+      if pruned(rel, filter): continue
       self.put(str(f), f"{remote}/{rel}", atomic=atomic, callback=callback, _label=rel)
 
   def get_dir(
@@ -422,7 +416,7 @@ class FTP:
     remote_idx = self._index_remote(remote, filter=filter)
     actions: list[Action] = []
     for rel, lpath in local_files.items():
-      if filter and not filter(rel): continue
+      if pruned(rel, filter): continue
       ls = lpath.stat()
       rs = remote_idx.get(rel)
       if rs and unchanged(rs, ls.st_mtime, ls.st_size, use_mtime=self._has_mfmt):
@@ -436,10 +430,10 @@ class FTP:
         if self.log: self.log.wrn("delete skipped: local source is not a directory")
       else:
         for rel in remote_idx:
-          if rel not in local_files and not (filter and not filter(rel)):
+          if rel not in local_files: # `_index_remote` pruned it, so `filter` has had its say
             actions.append(("delete", rel))
             if not dry_run: self.remove(f"{remote}/{rel}")
-    self._log_sync("sync_push", actions, dry_run)
+    log_sync(self.log, "sync_push", actions, dry_run)
     return actions
 
   def sync_pull(
@@ -474,7 +468,6 @@ class FTP:
     remote_idx = self._index_remote(remote, filter=filter)
     actions: list[Action] = []
     for rel, rs in remote_idx.items():
-      if filter and not filter(rel): continue
       lpath = root / rel
       if lpath.exists():
         ls = lpath.stat()
@@ -489,10 +482,10 @@ class FTP:
         if self.log: self.log.wrn("delete skipped: remote listing incomplete")
       else:
         for rel in local_idx:
-          if rel not in remote_idx and not (filter and not filter(rel)):
+          if rel not in remote_idx and not pruned(rel, filter):
             actions.append(("delete", rel))
             if not dry_run: (root / rel).unlink(missing_ok=True)
-    self._log_sync("sync_pull", actions, dry_run)
+    log_sync(self.log, "sync_pull", actions, dry_run)
     return actions
 
   #---------------------------------------------------------------------------------------- Helpers
@@ -562,14 +555,6 @@ class FTP:
       else:
         if filter and not filter(rel): continue
         self.get(rpath, str(local / rel), callback=callback, _label=rel)
-
-  def _log_sync(self, op:str, actions:list[Action], dry_run:bool):
-    if not self.log: return
-    counts = {k: sum(1 for a, _ in actions if a == k) for k in ("put", "get", "skip", "delete")}
-    hue = {"put": c.LIME, "skip": c.MAGNTA}
-    parts = [f"{k}:{hue.get(k, c.CYAN)}{v}{c.END}" for k, v in counts.items() if v]
-    suffix = f" {c.GREY}(dry){c.END}" if dry_run else ""
-    self.log.inf(f"{op} {' '.join(parts)}{suffix}")
 
 #------------------------------------------------------------------------------------------ Helpers
 
