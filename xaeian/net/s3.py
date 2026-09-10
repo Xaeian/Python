@@ -239,6 +239,9 @@ class S3:
   Args:
     endpoint: Host only, no scheme. R2 is `<account>.r2.cloudflarestorage.com`.
     region: Signed into every request. R2 has none and signs `auto`; AWS needs the bucket's.
+    verify: Ask the bucket whether it is there while connecting.
+      Worth a round trip once per session, and worth none to a caller that opens a connection
+      per operation and would pay it on every one of them.
   """
   def __init__(
     self,
@@ -248,6 +251,7 @@ class S3:
     bucket:str,
     *,
     region:str = "auto",
+    verify:bool = True,
     log:Logger|Print|None = None,
   ) -> None:
     self.endpoint = endpoint
@@ -255,6 +259,7 @@ class S3:
     self.region = region
     self._key_id = key_id
     self._secret = secret
+    self._verify = verify
     self.log = log
     self._conn: http.client.HTTPSConnection|None = None
 
@@ -271,10 +276,13 @@ class S3:
     and turns a wrong endpoint, a wrong key and a bucket under another account into a failure
     here, where the message can say so, instead of into a failure inside the first transfer.
 
+    `verify=False` drops it, and the same faults then arrive one call later.
+
     A failure here is raised and never also logged: the message carries the whole story,
     so a caller that prints what it catches would otherwise print it twice.
     """
     self._conn = http.client.HTTPSConnection(self.endpoint, timeout=TIMEOUT_S)
+    if not self._verify: return # nothing went over the wire, so there is nothing to report
     try:
       self._send("HEAD").read()
     except Exception as e:

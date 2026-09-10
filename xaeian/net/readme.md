@@ -123,6 +123,7 @@ password, so a factory taking `host, user, password` would be lying in its own s
 | `secret`   | -        | Secret access key                      |
 | `bucket`   | -        | The bucket every key lives in          |
 | `region`   | `"auto"` | R2 has none; AWS needs the bucket's    |
+| `verify`   | `True`   | Ask the bucket on connect              |
 | `log`      | `None`   | `Print`, `Logger`, or `None`           |
 
 Cloudflare R2, Backblaze B2, Wasabi, MinIO and AWS itself. SigV4 is signed by hand over stdlib

@@ -219,6 +219,37 @@ def wire():
   client._conn = conn
   return client, conn
 
+#--------------------------------------------------------------------------------------- Connecting
+
+def connecting_asks_the_bucket_whether_it_is_there(monkeypatch):
+  """
+  One round trip turns a wrong endpoint, a wrong key and a bucket under another account into
+  a failure here, where the message can name it, rather than one inside the first transfer.
+  """
+  conn = Conn()
+  monkeypatch.setattr(s3mod.http.client, "HTTPSConnection", lambda *a, **kw: conn)
+  with S3("endpoint", "key", "secret", "bucket"):
+    pass
+  assert [url for _method, url in conn.calls] == ["/bucket"]
+
+def a_bucket_that_will_not_answer_fails_while_connecting(monkeypatch):
+  conn = Conn(deny=[""])
+  monkeypatch.setattr(s3mod.http.client, "HTTPSConnection", lambda *a, **kw: conn)
+  with pytest.raises(ConnectionError):
+    S3("endpoint", "key", "secret", "bucket").connect()
+
+def a_caller_that_connects_per_operation_can_skip_that_question(monkeypatch):
+  """
+  A server backend opens a connection for every object it serves,
+  so the question would land on every request rather than once on the session.
+  Turned off, nothing goes over the wire until the call the caller actually wanted.
+  """
+  conn = Conn(objects={"cdn/a.txt": b"abc"})
+  monkeypatch.setattr(s3mod.http.client, "HTTPSConnection", lambda *a, **kw: conn)
+  with S3("endpoint", "key", "secret", "bucket", verify=False) as s3:
+    s3.stat("cdn/a.txt")
+  assert [url for _method, url in conn.calls] == ["/bucket/cdn/a.txt"]
+
 #-------------------------------------------------------------------------------- What the store is
 
 def a_missing_object_reads_as_absent_not_as_a_fault(wire):

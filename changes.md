@@ -2,15 +2,8 @@
 
 ## `0.9.2` S3
 
-Breaking: a `filter` prunes folders on the local side of `put_dir` and `sync_push` too, so one
-that never matches a folder name now prunes everything below it.
-
-- `net`: `S3` joins `FTP` and `SFTP`, stdlib only: SigV4 by hand, one TLS connection per context
-- `net`: sync skips on size then ETag, so a same-size edit is caught, not guessed at
-- `net`: `put` over 5 GiB goes up in parts, and takes the upload back down if one fails
+- `net`: `S3` joins `FTP` and `SFTP`, stdlib only: SigV4 by hand, sync exact on the ETag
 - `net`: one `filter` prunes one tree, on every client and on both sides of a sync
-  _(a folder it held back was emptied by `sync_pull(delete=True)` on FTP and SFTP, and sent
-  by every push, and sent again on every run after that)_
 
 ## `0.9.1` Boot
 
