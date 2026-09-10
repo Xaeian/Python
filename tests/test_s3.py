@@ -3,11 +3,13 @@
 """
 S3 client: what the store answers, and what the translation above it makes of that.
 
-Driven against a literal stand-in for the wire, because the cases that matter are the ones no
-live bucket reproduces on demand: a copy that failed inside a 200, a listing that spans pages,
+Driven against a literal stand-in for the wire,
+because the cases that matter are the ones no live bucket reproduces on demand:
+a copy that failed inside a 200, a listing that spans pages,
 a key that would escape the root once it became a local path.
 
-The stand-in also refuses to let a response go unread. An undrained body poisons a real
+The stand-in also refuses to let a response go unread.
+An undrained body poisons a real
 connection for whatever asks next, and nothing else in a test would notice.
 """
 
@@ -223,8 +225,9 @@ def wire():
 
 def connecting_asks_the_bucket_whether_it_is_there(monkeypatch):
   """
-  One round trip turns a wrong endpoint, a wrong key and a bucket under another account into
-  a failure here, where the message can name it, rather than one inside the first transfer.
+  One round trip turns a wrong endpoint, a wrong key and a bucket under another account
+  into a failure here, where the message can name it,
+  rather than into one inside the first transfer.
   """
   conn = Conn()
   monkeypatch.setattr(s3mod.http.client, "HTTPSConnection", lambda *a, **kw: conn)
@@ -300,8 +303,8 @@ def a_listing_follows_the_continuation_token_to_the_end():
 
 def a_walk_leaves_out_a_key_that_would_escape_the_root():
   """
-  Object keys are literal: the store never resolves `..`, so it holds one happily and the
-  traversal only happens here, the moment the key becomes a local path.
+  Object keys are literal: the store never resolves `..`, so it holds one happily.
+  The traversal only happens here, the moment the key becomes a local path.
   """
   conn = Conn(objects={"cdn/ok.txt": b"a", "cdn/../../etc/passwd": b"bad"})
   client = S3("endpoint", "key", "secret", "bucket")
@@ -379,9 +382,10 @@ def signer(monkeypatch):
 
 def the_signature_is_the_one_the_store_was_handed_before(signer):
   """
-  SigV4 is built by hand here and nothing on the wire checks it, so a real store would be
-  the first to find a slip. A regression pin, not a proof of conformance: it says the
-  canonical request, the header set and the scope still come out exactly as they came out.
+  SigV4 is built by hand here and nothing on the wire checks it,
+  so a real store would be the first to find a slip.
+  A regression pin, not a proof of conformance:
+  it says the canonical request, the header set and the scope still come out as they came out.
   """
   headers = signer._headers("GET", "/bkt/cdn/a.txt", "list-type=2&prefix=cdn%2F", UNSIGNED, {})
   assert headers["authorization"] == SIGNED

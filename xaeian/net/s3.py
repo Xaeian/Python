@@ -240,8 +240,9 @@ class S3:
     endpoint: Host only, no scheme. R2 is `<account>.r2.cloudflarestorage.com`.
     region: Signed into every request. R2 has none and signs `auto`; AWS needs the bucket's.
     verify: Ask the bucket whether it is there while connecting.
-      Worth a round trip once per session, and worth none to a caller that opens a connection
-      per operation and would pay it on every one of them.
+      Worth a round trip once per session,
+      and worth none to a caller that opens a connection per operation
+      and would pay it on every one of them.
   """
   def __init__(
     self,
@@ -276,7 +277,9 @@ class S3:
     and turns a wrong endpoint, a wrong key and a bucket under another account into a failure
     here, where the message can say so, instead of into a failure inside the first transfer.
 
-    `verify=False` drops it, and the same faults then arrive one call later.
+    `verify=False` drops it.
+    The faults then arrive one call later and wearing another type:
+    a wrong bucket answers 404, which `stat` reads as an object that is simply not there.
 
     A failure here is raised and never also logged: the message carries the whole story,
     so a caller that prints what it catches would otherwise print it twice.
