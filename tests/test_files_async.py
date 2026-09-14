@@ -20,7 +20,7 @@ from files_contract import SCENARIOS
 
 # Called without `await`: a generator is driven by the caller, a pure helper has no IO to wait
 # for. Both are still present, so one surface answers for both layers.
-STAYS_SYNC = {"iter_files", "iter_lines", "format", "parse", "smart"}
+STAYS_SYNC = {"iter_files", "iter_lines", "format", "parse", "smart", "atomic"}
 
 NAMESPACES = ["DIR", "FILE", "INI", "CSV", "JSON", "YAML"]
 

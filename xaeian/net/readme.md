@@ -25,8 +25,9 @@ with S3("<account>.r2.cloudflarestorage.com", key_id, secret, "assets") as s3:
 
 ## `Remote(type, host, user, ...)`
 
-Factory - returns `SFTP` or `FTP` instance. S3 is not a backend here: its credentials are a
-different shape, so it is built directly. `Remote("s3", ...)` raises and says so.
+Factory, returns an `SFTP` or `FTP` instance.
+S3 is not a backend here: its credentials are another shape, so it is built directly.
+`Remote("s3", ...)` raises and says so.
 
 | Param        | Default     | Notes                          |
 | ------------ | ----------- | ------------------------------ |
@@ -77,9 +78,10 @@ it holds back prunes everything below it. The same on either side of a sync, so 
 sends is what a pull brings back. Write one as a denylist: an allowlist that only ever matches
 file names rejects every folder and so prunes the whole tree.
 
-Failures read alike from either client: `FileNotFoundError` for a path that is not there,
-`PermissionError` for one this login may not have, `ConnectionError` for a session that
-cannot be opened.
+Failures read alike from either client:
+`FileNotFoundError` for a path that is not there,
+`PermissionError` for one this login may not have,
+`ConnectionError` for a session that cannot be opened.
 FTP answers the first two with one code, so it asks the server which it was before raising.
 
 ## SFTP extras
@@ -113,8 +115,9 @@ FTP is cleartext: prefer SFTP when confidentiality matters.
 
 ## `S3(endpoint, key_id, secret, bucket, ...)`
 
-Its own class, not a `Remote` backend. An access key is not a user and a secret is not a
-password, so a factory taking `host, user, password` would be lying in its own signature.
+Its own class, not a `Remote` backend.
+An access key is not a user and a secret is not a password,
+so a factory taking `host, user, password` would be lying in its own signature.
 
 | Param      | Default  | Notes                                  |
 | ---------- | -------- | -------------------------------------- |
@@ -165,18 +168,32 @@ coming back short, and one short of a page carries the token to the next.
 ### What an object store does differently
 
 - `mkdir` does nothing. A prefix is there from the moment the first object is written under it
-- `ls` of a prefix holding nothing answers `[]`, where the file clients raise
-  `FileNotFoundError`. Nothing records a prefix anywhere, only the keys under it, so empty and
-  missing are one state
+- `ls` of a prefix holding nothing answers `[]`, where the file clients raise `FileNotFoundError`.
+  Nothing records a prefix anywhere, only the keys under it, so empty and missing are one state
 - `exists` answers `False` for a folder, where `FTP` and `SFTP` answer `True`
-- `rename` is a server-side copy followed by a delete. `copy` reads the response body rather
-  than its status line, because S3 answers `200` before it knows how the copy went and reports
-  the failure inside it
+- `rename` is a server-side copy followed by a delete.
+  `copy` reads the response body, not the status line:
+  S3 answers `200` before it knows how the copy went, and reports the failure inside
 - `put` over 5 GiB goes up in parts, and takes the upload back down if a part fails
-- `atomic` and `preserve_mtime` on `put` are accepted and ignored: one request lands the whole
-  object, and `LastModified` is when it landed, which no client sets
-- `walk` is S3 only. A file protocol needs one listing per folder, which is what `sync_push`
-  already does for it; the store answers the whole subtree in one request
+- `atomic` and `preserve_mtime` on `put` are accepted and ignored:
+  one request lands the whole object, and `LastModified` is when it landed, which no client sets
+- `walk` is S3 only.
+  A file protocol needs one listing per folder, which `sync_push` already does for it;
+  the store answers the whole subtree in one request
 
-A key holding `..` is stored happily, because keys are literal and nothing resolves them. It is
-left out of `walk`, where it would otherwise become a local path and escape the root.
+A key holding `..` is stored happily, because keys are literal and nothing resolves them.
+It is left out of `walk`, where it would otherwise become a local path and escape the root.
+
+## `download(url, local, ...)`
+
+Plain HTTP(S) into a file, no client, no login: a release, a package, a public asset.
+Same shape as `S3.get`: the bytes land beside the target and are swapped in on completion.
+`callback` gets `(url, bytes_done, bytes_total)` per chunk,
+total `0` when the server does not say.
+Errors are the stdlib ones, `urllib.error.HTTPError` and `URLError`.
+
+```py
+from xaeian.net import download
+
+download("https://example.com/tool.zip", "tool.zip")
+```

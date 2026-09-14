@@ -62,6 +62,24 @@ def _spell(full:str, root:str, shape:Shape) -> str:
   if shape == "rel": return PATH.normalize(os.path.relpath(full, root))
   raise ValueError(f"Unknown shape: {shape!r}")
 
+Walked = tuple[str, str, list[str], list[str]]
+"""One step of a pruned walk: root, its prefix relative to the listed path, dirs, files."""
+
+def _walk(path:str, skip:_Blacklist, deep:bool=True) -> Iterator[Walked]:
+  """
+  `os.walk` under `path`, pruned by `skip` and `_linked`.
+
+  Prefix carries a trailing slash, `""` at the top.
+  Dirs are pruned in place, so a skipped or linked folder is neither listed nor entered.
+  """
+  for root, dirs, files in os.walk(path):
+    root_rel = PATH.normalize(os.path.relpath(root, path))
+    prefix = "" if root_rel == "." else root_rel + "/"
+    dirs[:] = [d for d in dirs if not skip.skips(d, prefix + d) and not _linked(root, d)]
+    files = [f for f in files if not skip.skips(f, prefix + f)]
+    yield root, prefix, dirs, files
+    if not deep: return # the top level is the first step, so stop before the walk descends
+
 #------------------------------------------------------------------------------------ DIR namespace
 
 class DIR:
@@ -145,16 +163,10 @@ class DIR:
     """
     path = PATH.resolve(path, read=True)
     if not os.path.isdir(path): return []
-    skip = _Blacklist.of(blacklist)
-    folders: list[str] = []
-    walker = os.walk(path) if deep else [(path, next(os.walk(path))[1], [])]
-    for root, dirs, _ in walker:
-      root_rel = PATH.normalize(os.path.relpath(root, path))
-      prefix = "" if root_rel == "." else root_rel + "/"
-      dirs[:] = [d for d in dirs if not skip.skips(d, prefix + d) and not _linked(root, d)]
-      for d in dirs:
-        folders.append(_spell(PATH.normalize(os.path.join(root, d)), path, shape))
-    return folders
+    return [
+      _spell(PATH.normalize(os.path.join(root, d)), path, shape)
+      for root, _, dirs, _ in _walk(path, _Blacklist.of(blacklist), deep) for d in dirs
+    ]
 
   @staticmethod
   def iter_files(
@@ -173,23 +185,12 @@ class DIR:
     """
     path = PATH.resolve(path, read=True)
     if not os.path.isdir(path): return
-    skip = _Blacklist.of(blacklist)
     ext_tuple = tuple(ext.lower() for ext in (exts or []))
-    if deep:
-      walker = os.walk(path)
-    else:
-      names = [n for n in os.listdir(path) if os.path.isfile(os.path.join(path, n))]
-      walker = [(path, [], names)]
-    for root, dirs, files in walker:
-      root_norm = PATH.normalize(root)
-      root_rel = PATH.normalize(os.path.relpath(root_norm, path))
-      prefix = "" if root_rel == "." else root_rel + "/"
-      dirs[:] = [d for d in dirs if not skip.skips(d, prefix + d) and not _linked(root, d)]
+    for root, _, _, files in _walk(path, _Blacklist.of(blacklist), deep):
       for name in files:
-        if skip.skips(name, prefix + name): continue
         if ext_tuple and not name.lower().endswith(ext_tuple): continue
         if match and not PATH.match(name, match): continue
-        yield root_norm + "/" + name
+        yield PATH.normalize(root) + "/" + name
 
   @staticmethod
   def file_list(
@@ -208,11 +209,35 @@ class DIR:
     ]
 
   @staticmethod
-  def zip(path:str, zip_output:str|None=None, blacklist:list[str]|None=None) -> str:
+  def mtime(path:str, blacklist:list[str]|None=None) -> float:
+    """
+    Latest modification time under a directory as Unix timestamp, the directory itself included.
+
+    Folders count as well as files: a deleted entry leaves nothing behind with a new date,
+    only its parent moves. `blacklist` filters as described on `_Blacklist`.
+    """
+    path = PATH.resolve(path, read=True)
+    if not os.path.isdir(path):
+      raise NotADirectoryError(f"Directory not found: {path}")
+    latest = os.path.getmtime(path)
+    for root, _, dirs, files in _walk(path, _Blacklist.of(blacklist)):
+      for name in dirs + files:
+        latest = max(latest, os.path.getmtime(os.path.join(root, name)))
+    return latest
+
+  @staticmethod
+  def zip(
+    path:str,
+    zip_output:str|None = None,
+    blacklist:list[str]|None = None,
+    keep_fresh:bool = False,
+  ) -> str:
     """
     Create ZIP archive from a directory, entries stored relative to it.
 
     `zip_output` defaults to `"<folder>.zip"`, `blacklist` filters as in `iter_files`.
+    With `keep_fresh` an archive at least as new as the tree stays, see `mtime`:
+    one walk instead of one deflate.
     """
     src = PATH.resolve(path, read=True)
     if not os.path.isdir(src):
@@ -222,6 +247,9 @@ class DIR:
       zip_output = folder_name + ".zip"
     zip_output = PATH.ensure_suffix(zip_output, ".zip")
     zip_output = PATH.resolve(zip_output, read=False)
+    if keep_fresh and os.path.isfile(zip_output):
+      if os.path.getmtime(zip_output) >= DIR.mtime(src, blacklist):
+        return PATH.normalize(zip_output)
     DIR.ensure(zip_output, is_file=True)
     out_abs = os.path.abspath(zip_output)
     with zipfile.ZipFile(zip_output, "w", zipfile.ZIP_DEFLATED) as zipf:

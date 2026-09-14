@@ -14,6 +14,7 @@ import pytest
 
 import test_ftp
 import test_sftp
+from xaeian import file_context
 from xaeian.net.ftp import FTP
 from xaeian.net.sftp import SFTP, _is_dir as sftp_is_dir
 
@@ -69,16 +70,19 @@ def denied(request):
 
 @pytest.fixture(params=["ftp", "sftp"])
 def empty(request):
-  """A connected client over a bare `root`, and a lens answering what has landed in it."""
+  """
+  A connected client over a bare `root`, and two lenses on the fake behind it:
+  what has landed in it, and every directory it was asked to make.
+  """
   if request.param == "ftp":
     session = FTP("host", "user")
-    session._ftp = test_ftp.Server(dirs={"root"})
+    fake = session._ftp = test_ftp.Server(dirs={"root"})
     session._has_mlsd, session._has_mfmt = True, True
-    return session, lambda: set(session._ftp.files)
-  session = SFTP("host", "user")
-  session._sftp = test_sftp.Client(tree={"root": []})
-  session._ssh = test_sftp.Ssh()
-  return session, lambda: set(session._sftp.files)
+  else:
+    session = SFTP("host", "user")
+    fake = session._sftp = test_sftp.Client(tree={"root": []})
+    session._ssh = test_sftp.Ssh()
+  return session, lambda: set(fake.files), lambda: list(fake.made)
 
 #------------------------------------------------------------------------------------- the contract
 
@@ -108,7 +112,7 @@ def ls_of_an_empty_directory_is_empty(remote):
 def a_missing_directory_is_not_an_empty_one(remote):
   """
   FTP answers both with 550, and answering `[]` to either made a directory that vanished
-  read as one that was simply empty. Code handed a client by `Remote` cannot tell them apart
+  read as one that was empty. Code handed a client by `Remote` cannot tell them apart
   unless both raise.
   """
   client, _ = remote
@@ -135,12 +139,34 @@ def a_refused_delete_is_not_a_silent_one(denied):
 
 def a_refused_directory_is_not_a_missing_one(denied):
   """
-  Both clients swallow the reply to a create and read the answer from the tree instead, and
-  both used to read a refusal as "not there". `FileNotFoundError` promises a path nobody
-  has; a path this login may not have is a different answer.
+  Both clients swallow the reply to a create and read the answer from the tree instead,
+  and both used to read a refusal as "not there".
+  `FileNotFoundError` promises a path nobody has; a path this login may not have is another answer.
   """
   with pytest.raises(PermissionError):
     denied.mkdir("root/denied")
+
+def a_pull_lands_where_the_file_context_points(remote, tmp_path):
+  """
+  Every local path in `net` resolves through `PATH`, as `FILE.atomic` does.
+  Resolved on one side only, the bytes landed under the root and the timestamp went to CWD.
+  """
+  client, _ = remote
+  with file_context(root_path=str(tmp_path)):
+    assert client.sync_pull("root", "backup") == [("get", "a.txt")]
+    assert (tmp_path / "backup" / "a.txt").exists()
+    assert client.sync_pull("root", "backup") == [("skip", "a.txt")]
+
+def put_makes_a_missing_parent_once_not_per_file(empty, tmp_path):
+  """
+  `put` sends first and makes the parent on the refusal.
+  A tree of files pays for its folders once; a `mkdir` per file paid on every one of them.
+  """
+  client, landed, made = empty
+  for name in ("a", "b", "c"): (tmp_path / name).write_bytes(b"x")
+  for name in ("a", "b", "c"): client.put(str(tmp_path / name), f"root/new/{name}")
+  assert made().count("root/new") == 1
+  assert {"root/new/a", "root/new/b", "root/new/c"} <= landed()
 
 def a_filter_prunes_the_local_side_as_it_prunes_the_remote(empty, tmp_path):
   """
@@ -150,7 +176,7 @@ def a_filter_prunes_the_local_side_as_it_prunes_the_remote(empty, tmp_path):
   The filter names the folder only. A flat check would be asked about `vendor/x.txt`, which
   it has no opinion on, and would let it through.
   """
-  client, landed = empty
+  client, landed, _ = empty
   (tmp_path / "keep.txt").write_bytes(b"hello")
   (tmp_path / "vendor").mkdir()
   (tmp_path / "vendor" / "x.txt").write_bytes(b"hello")

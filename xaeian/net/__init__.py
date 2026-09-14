@@ -1,9 +1,9 @@
 # xaeian/net/__init__.py
 
 """
-Network clients: SFTP, FTP and S3 over one vocabulary.
+Network clients: SFTP, FTP and S3 over one vocabulary, plus a plain HTTP `download`.
 
-`xaeian.net.ftp` and `xaeian.net.s3` run on the stdlib.
+`xaeian.net.ftp`, `xaeian.net.s3` and `xaeian.net.http` run on the stdlib.
 `xaeian.net.sftp` needs `paramiko`, so `SFTP` is exported only where that extra is installed.
 
 `Remote` builds the two that address a box by host and login. `S3` is constructed on its own,
@@ -23,8 +23,9 @@ Example:
 from ..extras import MissingExtra
 from .ftp import FTP
 from .s3 import S3
+from .http import download
 
-__all__ = ["Remote", "FTP", "S3"]
+__all__ = ["Remote", "FTP", "S3", "download"]
 
 try:
   from .sftp import SFTP

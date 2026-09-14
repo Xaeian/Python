@@ -34,7 +34,7 @@ class Client:
     self.unwritable = set(unwritable)
     self.missing, self.nostat = set(missing), set(nostat)
     self.put_fails, self.close_fails, self.utime_fails = put_fails, close_fails, utime_fails
-    self.files, self.removed = {}, []
+    self.files, self.removed, self.made = {}, [], []
 
   def listdir_attr(self, remote):
     if remote in self.missing or remote not in self.tree: raise FileNotFoundError(remote)
@@ -53,6 +53,9 @@ class Client:
     with open(local, "wb") as handle: handle.write(b"xxx")
 
   def put(self, local, remote, callback=None):
+    parent = remote.rsplit("/", 1)[0] if "/" in remote else ""
+    if parent and parent not in self.tree and parent not in self.made:
+      raise FileNotFoundError(remote)
     self.files[remote] = True # bytes already landed on the wire
     if self.put_fails: raise OSError("link dropped mid-transfer")
 
@@ -68,6 +71,7 @@ class Client:
   def rmdir(self, path): pass
 
   def mkdir(self, path):
+    self.made.append(path)
     if path in self.unwritable: raise PermissionError(errno.EACCES, "Permission denied", path)
 
   def utime(self, path, times):

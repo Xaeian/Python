@@ -6,9 +6,10 @@ import os, ftplib, datetime
 from pathlib import Path
 from ..log import Logger, Print
 from ..colors import Color as c
+from ..files import FILE, PATH
 from .common import (
-  local_index, _tmp_seq, Filter, Progress, Action, Attrs, atomic_local, log_sync,
-  pruned, safe_name, unchanged, _gone, _refused,
+  TIMEOUT_S, local_index, _tmp_seq, Filter, Progress, Action, Attrs, log_sync, pruned,
+  safe_name, unchanged, _gone, _refused,
 )
 
 def _parse_mtime(s:str) -> float|None:
@@ -63,7 +64,7 @@ class FTP:
     """
     self._ftp = ftplib.FTP()
     try:
-      self._ftp.connect(self.host, self.port, timeout=30)
+      self._ftp.connect(self.host, self.port, timeout=TIMEOUT_S)
       self._ftp.login(self.user, self._password or "")
       self._ftp.set_pasv(True)
     except Exception as e:
@@ -73,7 +74,8 @@ class FTP:
       self.log.wrn(f"binary mode rejected by {c.TURQUS}{self.host}{c.END}: stat may fail")
     try:
       feat = self._ftp.sendcmd("FEAT").upper() # FEAT casing is not guaranteed
-      self._has_mlsd = "MLST" in feat # RFC 3659: FEAT advertises MLST, MLSD comes with it
+      # RFC 3659: FEAT advertises MLST, MLSD comes with it
+      self._has_mlsd = "MLST" in feat
       self._has_mfmt = "MFMT" in feat
       if "UTF8" in feat:
         try: self._ftp.sendcmd("OPTS UTF8 ON")
@@ -125,8 +127,9 @@ class FTP:
     """
     Attributes via SIZE + MDTM: `None` when absent, and also for a directory.
 
-    Only 550 answers `None`. A 530 is the session saying nobody is logged in any more, and
-    reading that as a missing file turns every path on the box into one that is not there.
+    Only 550 answers `None`.
+    A 530 is the session saying nobody is logged in any more,
+    and reading that as a missing file turns every path on the box into one that is not there.
     """
     self._require_connected()
     self._binary()
@@ -149,7 +152,7 @@ class FTP:
     """Check if a remote path exists, directories included, as `SFTP.exists` answers."""
     return self.stat(remote) is not None or self._is_dir(remote)
 
-  def _fault(self, remote:str, probe:str|None = None) -> OSError:
+  def _fault(self, remote:str, probe:str|None=None) -> OSError:
     """
     Which of the two a refusal was. FTP answers "not there" and "not for you" alike, so the
     tree decides: `probe` is what must exist for a refusal, `remote` when unset.
@@ -178,26 +181,22 @@ class FTP:
       preserve_mtime: Set remote mtime via MFMT, a no-op when the server lacks it.
     """
     self._require_connected()
-    # No verify: put_dir and sync_push land thousands of files,
-    # and STOR reports a refused directory anyway.
-    # `_stor` probes only once the upload has already failed.
-    self.mkdir(os.path.dirname(remote), verify=False)
+    local = PATH.resolve(local, read=True)
+    os.stat(local) # a missing local file fails here, before a round trip
     label = _label or remote
     dst = f"{remote}.{os.getpid()}.{next(_tmp_seq)}.tmp" if atomic else remote
-    try:
-      with open(local, "rb") as f:
-        if callback:
-          total = os.path.getsize(local)
-          sent = [0]
-          def _cb(block): sent[0] += len(block); callback(label, sent[0], total)
-          self._stor(dst, f, remote, _cb)
-        else:
-          self._stor(dst, f, remote)
-    except Exception:
-      if atomic:
-        try: self._ftp.delete(dst) # drop the partial .tmp
-        except Exception: pass
-      raise
+    for attempt in (1, 2):
+      try:
+        self._stor(local, dst, remote, label, callback)
+        break
+      except FileNotFoundError: # the parent is not there: made once, the next files find it
+        if attempt == 2: raise
+        self.mkdir(os.path.dirname(remote))
+      except Exception:
+        if atomic:
+          try: self._ftp.delete(dst) # drop the partial .tmp
+          except Exception: pass
+        raise
     if atomic: self._rename_overwrite(dst, remote)
     if preserve_mtime and self._has_mfmt:
       ts = datetime.datetime.fromtimestamp(
@@ -208,10 +207,16 @@ class FTP:
         if self.log: self.log.wrn(f"MFMT failed {c.GREY}{remote}{c.END}: mtime not preserved")
     if self.log: self.log.dot(f"{c.GREY}{local}{c.END} → {c.GREY}{remote}{c.END}")
 
-  def _stor(self, dst:str, f, remote:str, callback=None):
-    """Upload, reading a refusal against the parent directory `put` did not verify."""
-    try: self._ftp.storbinary(f"STOR {dst}", f, callback=callback)
-    except ftplib.error_perm as e: raise self._fault(remote, os.path.dirname(remote)) from e
+  def _stor(self, local:str, dst:str, remote:str, label:str, callback:Progress|None) -> None:
+    """Upload one file, reading a refusal against the parent directory."""
+    total, sent = os.path.getsize(local), 0
+    def _cb(block):
+      nonlocal sent
+      sent += len(block)
+      callback(label, sent, total)
+    with open(local, "rb") as f:
+      try: self._ftp.storbinary(f"STOR {dst}", f, callback=_cb if callback else None)
+      except ftplib.error_perm as e: raise self._fault(remote, os.path.dirname(remote)) from e
 
   def get(
     self,
@@ -232,8 +237,9 @@ class FTP:
       preserve_mtime: Set local mtime from the remote MDTM, a no-op when the server lacks it.
     """
     self._require_connected()
+    local = PATH.resolve(local, read=False)
     label = _label or remote
-    with atomic_local(local) as tmp, open(tmp, "wb") as f:
+    with FILE.atomic(local) as tmp, open(tmp, "wb") as f:
       if callback:
         self._binary()
         try: total = self._ftp.size(remote) or 0
@@ -269,17 +275,13 @@ class FTP:
 
   #------------------------------------------------------------------------------------ Directories
 
-  def mkdir(self, remote:str, *, verify:bool = True) -> None:
+  def mkdir(self, remote:str) -> None:
     """
     Create remote directory recursively, idempotent.
 
-    MKD answers "it is already there" and "you may not" with the same 550, so each reply is
-    swallowed and the result is read from the tree instead: one probe at the end, not one
-    per component.
-
-    Args:
-      verify: Raise when the directory is not there afterwards. Off for callers that write
-        into it next, where the write reports the refusal at no extra round trip.
+    MKD answers "it is already there" and "you may not" with the same 550,
+    so each reply is swallowed and the result is read from the tree instead:
+    one probe at the end, not one per component.
     """
     self._require_connected()
     if not remote or remote == "/": return
@@ -290,15 +292,16 @@ class FTP:
       cur = f"{prefix}{p}" if not cur else f"{cur}/{p}"
       try: self._ftp.mkd(cur)
       except ftplib.error_perm: pass
-    if verify and not self._is_dir(remote): raise _refused(remote)
+    if not self._is_dir(remote): raise _refused(remote)
 
   def ls(self, remote:str) -> list[Attrs]:
     """
     List remote directory with attributes.
 
-    A missing directory raises `FileNotFoundError`, as `SFTP.ls` does. Empty means empty or
-    unlistable, which 550 does not tell apart: on NLST it is also how servers answer an
-    empty directory, so the tree is probed before the answer is chosen.
+    A missing directory raises `FileNotFoundError`, as `SFTP.ls` does.
+    Empty means empty or unlistable, which 550 does not tell apart:
+    on NLST it is also how servers answer an empty directory,
+    so the tree is probed before the answer is chosen.
 
     Without MLSD `st_mtime` stays `None`: entries carry size and kind only.
     """
@@ -380,7 +383,7 @@ class FTP:
   ) -> None:
     """Download every file recursively. No skip check: `sync_pull` transfers only what changed."""
     self._require_connected()
-    self._get_dir_rec(remote, remote, Path(local), filter, callback)
+    self._get_dir_rec(remote, remote, Path(PATH.resolve(local, read=False)), filter, callback)
 
   #------------------------------------------------------------------------------------------- Sync
 
@@ -411,7 +414,7 @@ class FTP:
       `("put"|"skip"|"delete", rel_path)` per file.
     """
     self._require_connected()
-    root = Path(local)
+    root = Path(PATH.resolve(local, read=True))
     local_files = local_index(local)
     remote_idx = self._index_remote(remote, filter=filter)
     actions: list[Action] = []
@@ -463,7 +466,7 @@ class FTP:
       `("get"|"skip"|"delete", rel_path)` per file.
     """
     self._require_connected()
-    root = Path(local)
+    root = Path(PATH.resolve(local, read=False))
     local_idx = local_index(local) if root.exists() else {}
     remote_idx = self._index_remote(remote, filter=filter)
     actions: list[Action] = []

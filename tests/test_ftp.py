@@ -31,6 +31,7 @@ class Server:
     self.binary = False
     self.closed = False
     self.cwd_path = "/"
+    self.made = [] # every MKD, refused or not
 
   @staticmethod
   def stamp(epoch: float) -> str:
@@ -122,6 +123,7 @@ class Server:
     del self.files[path]
 
   def mkd(self, path):
+    self.made.append(path)
     if path in self.dirs: raise PERM("550 exists")
     if path in self.unwritable: raise PERM("550 permission denied")
     self.dirs.add(path)
@@ -214,15 +216,14 @@ def a_failed_upload_removes_the_partial_tmp_file(client, tmp_path):
     session.put(str(tmp_path / "a.txt"), "/r/a.txt")
   assert not [p for p in session._ftp.files if p.endswith(".tmp")]
 
-def an_upload_into_a_directory_that_is_not_there_is_a_missing_path(client, tmp_path):
+def an_upload_into_a_directory_that_cannot_be_made_is_a_refusal(client, tmp_path):
   """
-  `put` skips the verify on its `mkdir`, so a refused parent surfaces from STOR instead.
-  Not as `ftplib.error_perm` though: `SFTP` raises `FileNotFoundError` here, and code
-  holding a `Remote` client catches one of the two.
+  `put` sends first and makes the parent on the refusal, so a parent that cannot be made
+  surfaces from `mkdir`, as the `PermissionError` `SFTP` raises there.
   """
   (tmp_path / "a.txt").write_bytes(b"hello")
   session = client(dirs=["/r"], unwritable={"/r/denied"})
-  with pytest.raises(FileNotFoundError):
+  with pytest.raises(PermissionError):
     session.put(str(tmp_path / "a.txt"), "/r/denied/a.txt")
 
 def a_file_the_server_will_not_write_is_a_refusal_not_a_missing_path(client, tmp_path):
@@ -255,12 +256,6 @@ def mkdir_reports_a_refusal_the_server_answered_with_a_bare_550(client):
   session = client(dirs=["/r"], unwritable={"/r/denied"})
   with pytest.raises(PermissionError):
     session.mkdir("/r/denied")
-
-def mkdir_asks_nothing_extra_when_the_caller_writes_next(client):
-  """`put` lands thousands of files through `put_dir`; the STOR that follows says whether the
-  directory was there, so the probe would be a round trip per file for nothing."""
-  session = client(dirs=["/r"], unwritable={"/r/denied"})
-  session.mkdir("/r/denied", verify=False) # no raise: the write is what reports
 
 def mkdir_is_idempotent_on_a_directory_that_is_already_there(client):
   session = client(dirs=["/r", "/r/sub"])

@@ -18,9 +18,9 @@ from pathlib import Path
 from typing import Callable
 from ..log import Logger, Print
 from ..colors import Color as c
-from ..files import FILE
+from ..files import FILE, PATH
 from .common import (
-  local_index, _tmp_seq, Filter, Progress, Action, atomic_local, log_sync, pruned, safe_name,
+  TIMEOUT_S, local_index, _tmp_seq, Filter, Progress, Action, log_sync, pruned, safe_name,
   unchanged,
 )
 
@@ -128,8 +128,8 @@ class SFTP:
     self.log: Logger|Print|None = log
     self._ssh: paramiko.SSHClient|None = None
     self._sftp: paramiko.SFTPClient|None = None
-    self._index_partial = False # a listing failed: delete must stand down
-    self._can_utime = True # cleared when the server refuses SETSTAT
+    self._index_partial = False  # a listing failed: delete must stand down
+    self._can_utime = True       # cleared when the server refuses SETSTAT
 
   def __enter__(self) -> "SFTP": self.connect(); return self
   def __exit__(self, *_) -> None: self.disconnect()
@@ -193,7 +193,7 @@ class SFTP:
     )
     kw: dict = {
       "hostname": self.host, "port": self.port, "username": self.user,
-      "allow_agent": False, "look_for_keys": False,
+      "allow_agent": False, "look_for_keys": False, "timeout": TIMEOUT_S,
     }
     if self._key:
       kw["key_filename"] = str(Path(self._key).expanduser())
@@ -256,16 +256,23 @@ class SFTP:
       preserve_mtime: Set remote mtime to match local, which `sync_push` relies on to skip.
     """
     self._require_connected()
-    self.mkdir(os.path.dirname(remote))
+    local = PATH.resolve(local, read=True)
+    os.stat(local) # a missing local file fails here, before a round trip
     label = _label or remote
     cb = (lambda done, total: callback(label, done, total)) if callback else None
     dst = f"{remote}.{os.getpid()}.{next(_tmp_seq)}.tmp" if atomic else remote
-    try: self._sftp.put(local, dst, callback=cb)
-    except Exception:
-      if atomic:
-        try: self._sftp.remove(dst) # drop the partial .tmp
-        except Exception: pass
-      raise
+    for attempt in (1, 2):
+      try:
+        self._sftp.put(local, dst, callback=cb)
+        break
+      except FileNotFoundError: # the parent is not there: made once, the next files find it
+        if attempt == 2: raise
+        self.mkdir(os.path.dirname(remote))
+      except Exception:
+        if atomic:
+          try: self._sftp.remove(dst) # drop the partial .tmp
+          except Exception: pass
+        raise
     if atomic: self._posix_rename(dst, remote)
     if preserve_mtime:
       mtime = Path(local).stat().st_mtime
@@ -294,9 +301,10 @@ class SFTP:
       preserve_mtime: Set local mtime to match remote, which `sync_pull` relies on to skip.
     """
     self._require_connected()
+    local = PATH.resolve(local, read=False)
     label = _label or remote
     cb = (lambda done, total: callback(label, done, total)) if callback else None
-    with atomic_local(local) as tmp:
+    with FILE.atomic(local) as tmp:
       self._sftp.get(remote, tmp, callback=cb)
     if preserve_mtime:
       rstat = self._sftp.stat(remote)
@@ -319,14 +327,8 @@ class SFTP:
 
   #------------------------------------------------------------------------------------ Directories
 
-  def mkdir(self, remote:str, *, verify:bool = True) -> None:
-    """
-    Create remote directory recursively, idempotent.
-
-    Args:
-      verify: Raise when the directory is not there afterwards. Off for callers that write
-        into it next, where the write reports the refusal at no extra round trip.
-    """
+  def mkdir(self, remote:str) -> None:
+    """Create remote directory recursively, idempotent."""
     self._require_connected()
     if not remote or remote == "/": return
     parts = [p for p in remote.replace("\\", "/").split("/") if p]
@@ -338,9 +340,8 @@ class SFTP:
       except FileNotFoundError:
         try: self._sftp.mkdir(current)
         except OSError as e:
-          if verify:
-            try: self._sftp.stat(current) # a lost race leaves it there, a refusal does not
-            except FileNotFoundError: raise e from None
+          try: self._sftp.stat(current) # a lost race leaves it there, a refusal does not
+          except FileNotFoundError: raise e from None
 
   def ls(self, remote:str) -> list["paramiko.SFTPAttributes"]:
     """List remote directory with attributes. Symlinks are reported as links, not resolved."""
@@ -390,7 +391,7 @@ class SFTP:
   ) -> None:
     """Download every file recursively. No skip check: `sync_pull` transfers only what changed."""
     self._require_connected()
-    self._get_dir_rec(remote, remote, Path(local), filter, callback)
+    self._get_dir_rec(remote, remote, Path(PATH.resolve(local, read=False)), filter, callback)
 
   #------------------------------------------------------------------------------------------- Sync
 
@@ -421,7 +422,7 @@ class SFTP:
       `("put"|"skip"|"delete", rel_path)` per file.
     """
     self._require_connected()
-    root = Path(local)
+    root = Path(PATH.resolve(local, read=True))
     local_files = local_index(local)
     remote_idx = self._index_remote(remote, filter=filter)
     actions: list[Action] = []
@@ -470,7 +471,7 @@ class SFTP:
       `("get"|"skip"|"delete", rel_path)` per file.
     """
     self._require_connected()
-    root = Path(local)
+    root = Path(PATH.resolve(local, read=False))
     local_idx = local_index(local) if root.exists() else {}
     remote_idx = self._index_remote(remote, filter=filter)
     actions: list[Action] = []

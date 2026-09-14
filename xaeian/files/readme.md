@@ -1,6 +1,8 @@
 # `xaeian.files`
 
-File and directory operations with format helpers (JSON, CSV, INI, YAML), path manipulation, context-based root scoping, async variants. Zero dependencies for core; YAML requires `pip install xaeian[yaml]`.
+File and directory operations: `JSON`, `CSV`, `INI`, `YAML`, paths, async twins.
+Every path resolves against one root, set once.
+Zero dependencies for core; YAML needs `pip install xaeian[yaml]`.
 
 ## `FILE`
 
@@ -15,11 +17,15 @@ FILE.append("data.txt", "\nmore")
 FILE.load("data.bin", binary=True)  # → bytes
 FILE.hash("data.bin", algo="md5")   # → "5d41402abc..."
 FILE.exists("data.txt")             # → True
+
+with FILE.atomic("big.bin") as tmp: # stream into `tmp`, swapped in once the block completes
+  ...
 ```
 
 ## `JSON`
 
-Auto `.json` extension. Three save modes: compact, pretty (human-edited), smart (numeric arrays inline).
+Auto `.json` extension.
+Three save modes: compact, pretty for a person to edit, smart with numeric arrays inline.
 
 ```py
 from xaeian import JSON
@@ -79,6 +85,8 @@ from xaeian import DIR
 DIR.ensure("data/subdir/")
 DIR.file_list("src", exts=[".py"], blacklist=["__pycache__"])
 DIR.zip("folder", "archive.zip")
+DIR.zip("folder", "archive.zip", keep_fresh=True)  # archive newer than the tree stays as it is
+DIR.mtime("folder")                                # latest change under it, a deletion included
 ```
 
 ## `PATH`

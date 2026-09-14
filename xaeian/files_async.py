@@ -68,6 +68,7 @@ class DIR:
   copy = _offload(_DIR.copy)
   folder_list = _offload(_DIR.folder_list)
   file_list = _offload(_DIR.file_list)
+  mtime = _offload(_DIR.mtime)
   zip = _offload(_DIR.zip)
   unzip = _offload(_DIR.unzip)
   unzip_bytes = _offload(_DIR.unzip_bytes)
@@ -87,6 +88,7 @@ class FILE:
   mtime = _offload(_FILE.mtime)
   hash = _offload(_FILE.hash)
   iter_lines = _FILE.iter_lines # generator: the caller drives it
+  atomic = _FILE.atomic # context manager: the caller drives it
 
 class INI:
   """Async INI operations."""

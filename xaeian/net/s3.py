@@ -26,15 +26,16 @@ import os, base64, hashlib, hmac, http.client
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import Callable
+from typing import BinaryIO, Callable, Iterator
 from urllib.parse import quote
 from xml.etree import ElementTree
 from xml.sax.saxutils import escape
 from ..log import Logger, Print
 from ..colors import Color as c
+from ..files import FILE, PATH
 from .common import (
-  local_index, Filter, Progress, Action, Attrs, atomic_local, log_sync, pruned, safe_name,
-  _gone, _refused,
+  CHUNK, TIMEOUT_S, local_index, Filter, Progress, Action, Attrs, log_sync, pruned,
+  safe_name, _gone, _refused,
 )
 
 #---------------------------------------------------------------------------------------- Constants
@@ -45,8 +46,6 @@ SERVICE = "s3"
 # hashing it would mean reading the file twice, once to sign and once to send.
 UNSIGNED = "UNSIGNED-PAYLOAD"
 
-TIMEOUT_S = 30
-CHUNK = 2**20 # download and digest read size
 NS = "{http://s3.amazonaws.com/doc/2006-03-01/}"
 
 # ListObjectsV2 page size, and the cap on one DeleteObjects batch
@@ -213,13 +212,13 @@ class _Body:
   so a part handed the bare file would send the whole remainder.
   The count rides along because the only place an upload's progress is visible is right here.
   """
-  def __init__(self, file, size:int, report:Callable[[int], None]|None = None) -> None:
+  def __init__(self, file:BinaryIO, size:int, report:Callable[[int], None]|None=None) -> None:
     self._file = file
     self._left = size
     self._done = 0
     self._report = report
 
-  def read(self, want:int = -1) -> bytes:
+  def read(self, want:int=-1) -> bytes:
     if self._left <= 0: return b""
     if want is None or want < 0: want = self._left
     data = self._file.read(min(want, self._left))
@@ -279,7 +278,7 @@ class S3:
 
     `verify=False` drops it.
     The faults then arrive one call later and wearing another type:
-    a wrong bucket answers 404, which `stat` reads as an object that is simply not there.
+    a wrong bucket answers 404, which `stat` reads as an object that is not there.
 
     A failure here is raised and never also logged: the message carries the whole story,
     so a caller that prints what it catches would otherwise print it twice.
@@ -426,6 +425,7 @@ class S3:
     """
     self._require_connected()
     key = _key(remote)
+    local = PATH.resolve(local, read=True)
     size = os.path.getsize(local)
     label = _label or remote
     if size > PUT_MAX:
@@ -456,13 +456,14 @@ class S3:
     """
     self._require_connected()
     key = _key(remote)
+    local = PATH.resolve(local, read=False)
     label = _label or remote
     resp = self._send("GET", key)
     total = int(resp.getheader("content-length") or 0)
     mtime = _http_time(resp.getheader("last-modified"))
     done = 0
     try:
-      with atomic_local(local) as tmp, open(tmp, "wb") as f:
+      with FILE.atomic(local) as tmp, open(tmp, "wb") as f:
         while chunk := resp.read(CHUNK):
           f.write(chunk)
           done += len(chunk)
@@ -560,7 +561,7 @@ class S3:
 
   #------------------------------------------------------------------------------------ Directories
 
-  def mkdir(self, remote:str, *, verify:bool = True) -> None:
+  def mkdir(self, remote:str) -> None:
     """
     Nothing to do: a prefix is there from the moment the first object is written under it.
 
@@ -666,7 +667,7 @@ class S3:
   ) -> None:
     """Download every object recursively. No skip check: `sync_pull` transfers what changed."""
     self._require_connected()
-    root = Path(local)
+    root = Path(PATH.resolve(local, read=False))
     for attr in self.walk(remote):
       rel = attr.filename
       if pruned(rel, filter): continue
@@ -704,7 +705,7 @@ class S3:
       `("put"|"skip"|"delete", rel_path)` per file.
     """
     self._require_connected()
-    root = Path(local)
+    root = Path(PATH.resolve(local, read=True))
     local_files = local_index(local)
     remote_idx = self._index_remote(remote, filter=filter)
     actions: list[Action] = []
@@ -754,7 +755,7 @@ class S3:
       `("get"|"skip"|"delete", rel_path)` per file.
     """
     self._require_connected()
-    root = Path(local)
+    root = Path(PATH.resolve(local, read=False))
     local_idx = local_index(local) if root.exists() else {}
     remote_idx = self._index_remote(remote, filter=filter)
     actions: list[Action] = []
@@ -776,7 +777,7 @@ class S3:
 
   #---------------------------------------------------------------------------------------- Helpers
 
-  def _index_remote(self, remote:str, filter:Filter|None = None) -> dict[str, Attrs]:
+  def _index_remote(self, remote:str, filter:Filter|None=None) -> dict[str, Attrs]:
     """
     `{rel_path: Attrs}` for everything under a prefix, in one listing.
 
@@ -786,7 +787,7 @@ class S3:
     """
     return {a.filename: a for a in self.walk(remote) if not pruned(a.filename, filter)}
 
-  def _pages(self, prefix:str, delimiter:str = ""):
+  def _pages(self, prefix:str, delimiter:str="") -> Iterator[ElementTree.Element]:
     """ListObjectsV2 pages for a prefix, following the continuation token to the end."""
     token = ""
     while True:

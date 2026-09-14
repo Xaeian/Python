@@ -3,6 +3,7 @@
 """File read/write operations."""
 
 import os, hashlib, itertools
+from contextlib import contextmanager
 from typing import Iterator, Sequence
 from .config import get_context
 from .path import PATH
@@ -66,6 +67,27 @@ class FILE:
         yield line.strip() if strip else line
 
   @staticmethod
+  @contextmanager
+  def atomic(path:str) -> Iterator[str]:
+    """
+    Yield a temporary path beside `path`, swapped in once the block completes.
+
+    Missing parent directories are created.
+    A block that fails or is interrupted leaves the previous file untouched,
+    and a reader sees the old content or the new, never a partial mix.
+    Two blocks on one path get their own temporary file, so the target is never a blend.
+    """
+    path = PATH.resolve(path, read=False)
+    DIR.ensure(path, is_file=True)
+    tmp = f"{path}.{os.getpid()}.{next(_tmp_seq)}.tmp"
+    try:
+      yield tmp
+      os.replace(tmp, path)
+    except BaseException: # so Ctrl+C leaves no stray temporary behind
+      if os.path.exists(tmp): os.remove(tmp)
+      raise
+
+  @staticmethod
   def save(path:str, content:str|bytes, chmod:int|None=None) -> None:
     """
     Save whole content to file, atomically replacing any previous version.
@@ -80,20 +102,15 @@ class FILE:
     The temporary file is created with it, so the content is never briefly readable by others.
     On Windows only the read-only bit carries over.
 
-    Two threads saving one path each get their own temporary file,
-    so the target holds one writer's complete content, never a blend.
-    They do not both succeed: on Windows the losing `os.replace` raises `PermissionError`,
+    Two threads saving one path do not both succeed:
+    on Windows the losing `os.replace` raises `PermissionError`,
     so serialize the writers if every save matters.
     """
-    cfg = get_context()
-    path = PATH.resolve(path, read=False)
-    DIR.ensure(path, is_file=True)
     binary = isinstance(content, bytes)
     mode = "wb" if binary else "w"
-    encoding = None if binary else cfg.encoding
+    encoding = None if binary else get_context().encoding
     newline = None if binary else ""
-    tmp = f"{path}.{os.getpid()}.{next(_tmp_seq)}.tmp"
-    try:
+    with FILE.atomic(path) as tmp:
       if chmod is None:
         with open(tmp, mode, encoding=encoding, newline=newline) as file:
           file.write(content)
@@ -101,10 +118,6 @@ class FILE:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, chmod)
         with os.fdopen(fd, mode, encoding=encoding, newline=newline) as file:
           file.write(content)
-      os.replace(tmp, path)
-    except BaseException: # so Ctrl+C leaves no stray temporary behind
-      if os.path.exists(tmp): os.remove(tmp)
-      raise
 
   @staticmethod
   def save_lines(path:str, lines:list[str]) -> None:

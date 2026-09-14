@@ -5,6 +5,7 @@
 
 import os
 import json
+import zipfile
 import pytest
 from xaeian import file_context, Files, PATH, DIR, FILE, INI, CSV, JSON, YAML
 
@@ -155,6 +156,34 @@ def dir_zip_unzip_roundtrip():
   DIR.zip("z")
   DIR.unzip("z.zip", "out")
   assert sorted(DIR.file_list("out", shape="rel")) == ["a.txt", "inner/b.txt"]
+
+def dir_mtime_moves_with_a_deletion(tmp_path):
+  FILE.save("m/a.txt", "1"); FILE.save("m/inner/b.txt", "2")
+  old = DIR.mtime("m") - 10
+  for f in ("m", "m/a.txt", "m/inner", "m/inner/b.txt"): os.utime(tmp_path / f, (old, old))
+  assert DIR.mtime("m") == old
+  FILE.remove("m/inner/b.txt") # nothing new is written, only the parent folder moves
+  assert DIR.mtime("m") > old
+  assert DIR.mtime("m", blacklist=["inner"]) == old
+
+def dir_zip_keep_fresh_skips_a_rebuild(tmp_path):
+  """
+  Every timestamp is pinned, the folder's included.
+  `FILE.save` swaps a file in with `os.replace`, which stamps the folder "now",
+  and two "now"s inside one clock tick are equal.
+  """
+  def archived(): return zipfile.ZipFile(tmp_path / "k.zip").read("a.txt")
+  def pin(name, at): os.utime(tmp_path / name, (at, at))
+  T = 1_000_000_000 # a zip entry cannot carry a date before 1980
+  FILE.save("k/a.txt", "1")
+  DIR.zip("k", "k.zip")
+  FILE.save("k/a.txt", "2")
+  pin("k", T); pin("k/a.txt", T); pin("k.zip", T + 10)
+  DIR.zip("k", "k.zip", keep_fresh=True)
+  assert archived() == b"1" # the tree stops before the archive: kept
+  pin("k/a.txt", T + 20)
+  DIR.zip("k", "k.zip", keep_fresh=True)
+  assert archived() == b"2" # one file outruns the archive: rebuilt
 
 #------------------------------------------------------------------------------------- INI/CSV/JSON
 

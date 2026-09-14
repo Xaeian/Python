@@ -1,5 +1,10 @@
 # Changes `xaeian`
 
+## `0.9.3` Download
+
+- `net`: `download(url, local)`, plain HTTP into a file
+- `files`: `DIR.zip(keep_fresh=True)` skips an archive newer than its tree
+
 ## `0.9.2` S3
 
 - `net`: `S3` joins `FTP` and `SFTP`, stdlib only: SigV4 by hand, sync exact on the ETag
@@ -13,8 +18,9 @@
 
 ## `0.9.0` Correctness & layers
 
-Breaking: `?` in raw SQL, `shape=` in `DIR` listings, `FILE.exists`/`DIR.exists`, one dict per file from `compress`,
-short names on `Print`, `Time` vs `Time`/`datetime`, no walk into a link, optional exports on first use.
+Breaking: `?` in raw SQL, `shape=` in `DIR` listings, `FILE.exists`/`DIR.exists`,
+one dict per file from `compress`, short names on `Print`, `Time` vs `Time`/`datetime`,
+no walk into a link, optional exports on first use.
 
 - Silent data faults fixed across `db`, `media`, `files`, `cstruct` and `eda`
 - One seam for sync and async in `db`, `files` and `net`
@@ -38,7 +44,8 @@ and `pdf_compress` verifies its output.
 
 ## `0.7.5` FTP & SFTP, SQLite fix
 
-- `db`: async `get_rows`/`get_dicts` commit `RETURNING` writes _(left the WAL lock held, or silently rolled back)_
+- `db`: async `get_rows`/`get_dicts` commit `RETURNING` writes
+  _(left the WAL lock held, or silently rolled back)_
 - `net`: hardened `FTP` and `SFTP`, fixed data loss in `sync_pull(delete=True)`
 - `eda`: footprint generator updates
 - Added `net` and async SQLite test suites
@@ -126,7 +133,8 @@ and `pdf_compress` verifies its output.
 
 - `elc`: E-series, VConv divider finder, KiCad production export
 - `mf/ico.py`: multi-size `.ico` generator
-- Fixes: `crc` pretabulated reflectIn, `table.aggregate` type guard, `img_compress` inplace ext change
+- Fixes: `crc` pretabulated reflectIn, `table.aggregate` type guard,
+  `img_compress` inplace ext change
 
 ## `0.2.0` New features
 
@@ -147,3 +155,4 @@ and `pdf_compress` verifies its output.
 - `cstruct`: binary struct serialization
 - `serial_port`, `cbash`: serial communication
 - `db`: database abstraction _(SQLite, MySQL, PostgreSQL)_
+- 
