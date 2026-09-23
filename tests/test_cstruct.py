@@ -1,9 +1,11 @@
 # tests/test_cstruct.py
 
-"""Binary (de)serialization: round-trips, transforms, framing, regressions."""
+"""Binary (de)serialization: round-trips, transforms, messages, frames, regressions."""
+
+import random
 
 import pytest
-from xaeian.cstruct import Struct, Field, Type, Bitfield, Variant, Endian, Frame
+from xaeian.cstruct import Struct, Field, Type, Bitfield, Variant, Endian, Message, Frame
 from xaeian.crc import crc32_iso
 
 def scalars():
@@ -43,17 +45,11 @@ def string_utf8_roundtrip():
   data = {"t": "żółw → OK"}
   assert s.decode(s.encode(data)) == data
 
-def crc_frame_roundtrip_single_and_multi():
-  s = Struct(name="cf", crc_frame=crc32_iso).add(Field(Type.uint16, "x"))
+def crc_travels_with_every_record():
+  s = Struct(name="cf", crc=crc32_iso).add(Field(Type.uint16, "x"))
   assert s.decode(s.encode({"x": 7})) == {"x": 7}
   assert s.decode(s.encode([{"x": 1}, {"x": 2}])) == [{"x": 1}, {"x": 2}]
-
-def crc_frame_rejects_corruption():
-  s = Struct(name="cfbad", crc_frame=crc32_iso).add(Field(Type.uint16, "x"))
-  bad = bytearray(s.encode({"x": 7}))
-  bad[-1] ^= 0xFF
-  with pytest.raises(ValueError):
-    s.decode(bytes(bad))
+  assert len(s.encode([{"x": 1}, {"x": 2}])) == 2 * (2 + 4) # a crc behind each, not one at the end
 
 def bitfield():
   s = Struct(name="flags").add(Bitfield("st", [("on", 1), ("err", 1), ("mode", 6)]))
@@ -85,12 +81,75 @@ def variant_selects_layout(kind, body):
   assert s.decode(s.encode(msg)) == msg
 
 @pytest.mark.usefixtures("registry")
-def frame_routes_by_code():
+def message_routes_by_code():
   pos = Struct(code=1, name="pos").add(Field(Type.int16, "x"), Field(Type.int16, "y"))
   temp = Struct(code=2, name="temp").add(Field(Type.float, "t"))
-  frame = Frame(pos, temp)
-  data = {"pos": {"x": -3, "y": 7}, "temp": {"t": 21.5}}
-  assert frame.decode(frame.encode(data)) == data
+  message = Message(pos, temp)
+  body = message.encode({"pos": {"x": -3, "y": 7}, "temp": [{"t": 21.5}]}) # one record either way
+  assert message.decode(body) == {"pos": [{"x": -3, "y": 7}], "temp": [{"t": 21.5}]}
+
+@pytest.mark.usefixtures("registry")
+def frame_carries_a_message_end_to_end():
+  """The envelope around the blocks: dicts in, dicts out, the wire cut anywhere between."""
+  pos = Struct(code=1, name="pos").add(Field(Type.int16, "x"), Field(Type.int16, "y"))
+  temp = Struct(code=2, name="temp").add(Field(Type.float, "t"))
+  link = Frame(Message(pos, temp), limit=64)
+  data = {"pos": [{"x": 1, "y": 2}, {"x": 3, "y": 4}], "temp": [{"t": 21.5}]}
+  wire = link.encode(data) * 2
+  assert list(link.feed(wire[:7])) + list(link.feed(wire[7:])) == [data, data]
+  assert link.errors == 0
+
+def an_empty_body_is_a_frame():
+  """A ping carries nothing; what `encode` makes, `feed` must take."""
+  link = Frame(limit=8)
+  assert list(link.feed(link.encode(b""))) == [b""]
+  assert link.errors == 0
+
+def the_header_mirrors_the_wire():
+  """Padding and the crc tail are bytes on the wire, so they are members in C."""
+  s = Struct(name="hdr", crc=crc32_iso, align=4).add(
+    Field(Type.uint16, "a"), Field(Type.uint8, "b"))
+  assert len(s.encode({"a": 1, "b": 2})) == 8
+  header = s.export_c_header()
+  assert "uint8_t _align[1];" in header and "uint8_t crc[4];" in header
+  loose = Struct(name="txt", crc=crc32_iso).add(Field(Type.string, "t"))
+  assert "_align" not in loose.export_c_header() and "variable size" in loose.export_c_header()
+
+@pytest.mark.usefixtures("registry")
+def block_header_is_code_then_size():
+  pair = Struct(code=1, name="pair").add(Field(Type.uint16, "a"), Field(Type.uint16, "b"))
+  block = pair.block({"a": 0x1234, "b": 0x5678})
+  assert block == bytes.fromhex("0100 0400 3412 7856")
+  assert pair.records(block[4:]) == [{"a": 0x1234, "b": 0x5678}]
+
+def frame_matches_the_c_layer():
+  # Captured from `FRAME_Send` of `demo/com/frame` built on the host,
+  # the block above as payload and `crc32_iso`;
+  # `zlib.crc32` of that payload gives the same four bytes
+  wire = bytes.fromhex("aa55 0c00 0100 0400 3412 7856 371c8236")
+  body = bytes.fromhex("0100 0400 3412 7856")
+  frame = Frame()
+  assert frame.encode(body) == wire
+  assert list(frame.feed(wire)) == [body]
+  assert frame.errors == 0
+
+def frame_feed_survives_cuts_junk_and_a_false_sync():
+  frame = Frame(limit=64)
+  bodies = [bytes([i] * (5 + i)) for i in range(12)]
+  wire = b"\x00\xAA" + frame.encode(bodies[0])
+  # a sync pair in noise between frames, with a plausible length behind it
+  wire += b"\xAA\x55\x10\x00junk" + b"".join(frame.encode(b) for b in bodies[1:6])
+  broken = bytearray(frame.encode(bodies[6])); broken[7] ^= 0xFF
+  wire += bytes(broken) + b"".join(frame.encode(b) for b in bodies[7:])
+  got = []
+  rng = random.Random(7)
+  pos = 0
+  while pos < len(wire):
+    cut = min(len(wire), pos + rng.randint(1, 9))
+    got += list(frame.feed(wire[pos:cut]))
+    pos = cut
+  assert got == bodies[:6] + bodies[7:]
+  assert frame.errors == 2 # the false sync and the broken frame
 
 def alignment_padding_roundtrips_each_record():
   # regression: decode must consume the padding encode appends after each record
@@ -102,9 +161,10 @@ def crc_detects_corruption():
   s = Struct(name="guarded", crc=crc32_iso).add(Field(Type.uint16, "n"))
   frame = s.encode({"n": 0xBEEF})
   assert s.decode(frame) == {"n": 0xBEEF}
-  corrupt = bytes([frame[0] ^ 0xFF]) + frame[1:]
-  with pytest.raises(ValueError):
-    s.decode(corrupt)
+  for at in (0, -1): # a flipped payload byte, a flipped crc byte
+    corrupt = bytearray(frame); corrupt[at] ^= 0xFF
+    with pytest.raises(ValueError):
+      s.decode(bytes(corrupt))
 
 def missing_required_field_raises():
   s = Struct(name="req").add(Field(Type.uint8, "a"))

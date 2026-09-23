@@ -1,5 +1,13 @@
 # Changes `xaeian`
 
+## `0.9.4` Embedded
+
+- `eda`: inner copper layers in gerbers and the layout PDF
+- `cstruct`: `Frame` cuts a stream into messages
+- `cstruct`: `crc_frame` and `crc_auth` fold into `crc`
+
+Breaking: `Struct(crc=)` guards every record; a list used to get one tail
+
 ## `0.9.3` Download
 
 - `net`: `download(url, local)`, plain HTTP into a file

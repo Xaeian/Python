@@ -324,15 +324,18 @@ class SerialPort:
   #------------------------------------------------------------------------------------------- Send
 
   def send(self, message:str|bytes, str_color=c.GREY, bytes_color=c.SALMON) -> None:
-    """Write to port. `str` is utf-8 encoded, `bytes` sent raw. Address + CRC applied."""
+    """Write to port and show it. `str` is utf-8 encoded, `bytes` sent raw."""
     if isinstance(message, str):
       self.print(f"{str_color}{message.strip()}{c.END}")
-      data = message.encode("utf-8")
+      self._write(message.encode("utf-8"))
     else:
-      data = message
-      self.print(f"{bytes_color}{data}{c.END}")
+      self.print(f"{bytes_color}{message}{c.END}")
+      self._write(message)
+
+  def _write(self, data:bytes) -> None:
+    """Frame and write: address before CRC, CRC before the wire."""
     self._require_connected()
-    if self.address is not None: data = bytes([self.address]) + data # addr before CRC
+    if self.address is not None: data = bytes([self.address]) + data
     data = self._crc_encode(data)
     try: self.serial.write(data)
     except Exception as e:

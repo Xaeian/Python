@@ -186,7 +186,16 @@ def _expand(src:dict) -> dict[str, float]:
       out[str(k).strip()] = float(deg)
   return out
 
-def _patch_pcb_color(pcb:str, mask:str, silk:str, finish:str="ENIG") -> str:
+def _inner_layers(pcb:str) -> list[str]:
+  """`In1.Cu`, `In2.Cu`, ... declared in the board's `(layers ...)` block, in stack order."""
+  with open(pcb, "r", encoding="utf-8") as f: src = f.read()
+  head = src.split("(layers", 1)[-1].split("(setup", 1)[0]
+  nums = sorted(int(n) for n in re.findall(r'\(\d+ "In(\d+)\.Cu"', head))
+  return [f"In{n}.Cu" for n in nums]
+
+def _patch_pcb_color(
+  pcb:str, mask:str, silk:str, finish:str = "ENIG", inner:list[str]|None = None,
+) -> str:
   """
   Write temp `.kicad_pcb` with stackup colors + full plot layers, caller removes it.
 
@@ -219,23 +228,28 @@ def _patch_pcb_color(pcb:str, mask:str, silk:str, finish:str="ENIG") -> str:
       src, count=1,
     )
   else:
-    block = (
-      '\t\t(stackup\n'
-      f'\t\t\t(layer "F.SilkS" (type "Top Silk Screen") (color "{silk}"))\n'
-      '\t\t\t(layer "F.Paste" (type "Top Solder Paste"))\n'
-      f'\t\t\t(layer "F.Mask" (type "Top Solder Mask")'
-      f' (color "{mask}") (thickness 0.01))\n'
-      '\t\t\t(layer "F.Cu" (type "copper") (thickness 0.035))\n'
-      '\t\t\t(layer "dielectric 1" (type "core") (thickness 1.51)'
-      ' (material "FR4") (epsilon_r 4.5) (loss_tangent 0.02))\n'
-      '\t\t\t(layer "B.Cu" (type "copper") (thickness 0.035))\n'
-      f'\t\t\t(layer "B.Mask" (type "Bottom Solder Mask")'
-      f' (color "{mask}") (thickness 0.01))\n'
-      '\t\t\t(layer "B.Paste" (type "Bottom Solder Paste"))\n'
-      f'\t\t\t(layer "B.SilkS" (type "Bottom Silk Screen") (color "{silk}"))\n'
-      f'\t\t\t(copper_finish "{finish}")\n'
-      '\t\t\t(dielectric_constraints no)\n\t\t)\n'
-    )
+    copper = ["F.Cu", *(inner or []), "B.Cu"]
+    core = round(1.51 / (len(copper) - 1), 3) # dielectric split evenly, the board stays 1.6 mm
+    lines = [
+      '(stackup',
+      f'\t(layer "F.SilkS" (type "Top Silk Screen") (color "{silk}"))',
+      '\t(layer "F.Paste" (type "Top Solder Paste"))',
+      f'\t(layer "F.Mask" (type "Top Solder Mask") (color "{mask}") (thickness 0.01))',
+    ]
+    for i, cu in enumerate(copper):
+      if i:
+        lines.append(f'\t(layer "dielectric {i}" (type "core") (thickness {core})'
+          ' (material "FR4") (epsilon_r 4.5) (loss_tangent 0.02))')
+      lines.append(f'\t(layer "{cu}" (type "copper") (thickness 0.035))')
+    lines += [
+      f'\t(layer "B.Mask" (type "Bottom Solder Mask") (color "{mask}") (thickness 0.01))',
+      '\t(layer "B.Paste" (type "Bottom Solder Paste"))',
+      f'\t(layer "B.SilkS" (type "Bottom Silk Screen") (color "{silk}"))',
+      f'\t(copper_finish "{finish}")',
+      '\t(dielectric_constraints no)',
+      ')',
+    ]
+    block = "".join(f"\t\t{line}\n" for line in lines)
     src = re.sub(r'(\(setup\s*\n)', rf'\1{block}', src, count=1)
   tmp = pcb.removesuffix(".kicad_pcb") + ".color.kicad_pcb"
   with open(tmp, "w", encoding="utf-8") as f: f.write(src)
@@ -258,11 +272,18 @@ PDF_PAGES = { # (kind, side): layers, title, color, drill
   ("desc", "bot"): (["User.Drawings", "B.SilkS", "Edge.Cuts"],
     "BOT Descriptions", (0.91, 0.69, 0.65), False),
 }
+INNER_COLORS = [ # KiCad default theme for In1.Cu, In2.Cu, ... as RGB 0-1
+  (0.50, 0.78, 0.50),
+  (0.81, 0.49, 0.17),
+  (0.31, 0.80, 0.80),
+  (0.86, 0.38, 0.55),
+]
+INNER_GRAY = (0.69, 0.69, 0.69) # past the table
 
 #-------------------------------------------------------------------------------------- KiCad class
 
 class KiCad:
-  """Handle for one KiCad project; every export, PDFs included, lands in `produce_path`."""
+  """Handle for one KiCad project; exports go to `produce_path`, PDFs to the working directory."""
 
   def _execute(self, args:list[str]):
     """Run a `kicad-cli` command; a non-zero exit logs stderr and raises `RuntimeError`."""
@@ -358,6 +379,8 @@ class KiCad:
     self.sch = self.project_path + self.name + ".kicad_sch"
     self.has_pcb = bool(pcb_files)
     self.has_sch = bool(sch_files)
+    self.inner_cu:list[str] = _inner_layers(self.pcb) if self.has_pcb else []
+    if self.inner_cu: self.log.inf(f"Board: {len(self.inner_cu) + 2} copper layers")
     self.components:list[dict] = [] # raw netlist, one entry per ref
     self.rows:list[dict] = [] # BOM, aggregated by `Manufacturer`+`Code`
     self.pdf_pages:list[str] = []
@@ -537,11 +560,12 @@ class KiCad:
       self.log.wrn("Gerber skipped: no PCB in the project")
       return
     gerbers_path = self.produce_path + "gerber"
+    layers = ["F.Cu", *self.inner_cu, "B.Cu",
+      "F.Paste", "B.Paste", "F.SilkS", "B.SilkS", "F.Mask", "B.Mask", "Edge.Cuts"]
     self._execute([
       "kicad-cli", "pcb", "export", "gerbers", self.pcb,
       "--output", gerbers_path,
-      "--layers",
-      "F.Cu,B.Cu,F.Paste,B.Paste,F.SilkS,B.SilkS,F.Mask,B.Mask,Edge.Cuts",
+      "--layers", ",".join(layers),
       "--sdnp", "--subtract-soldermask",
       "--use-drill-file-origin", "--precision", "6",
     ])
@@ -673,7 +697,7 @@ class KiCad:
     `pdf_layout()` merges the queue then deletes the parts. `desc` is stamped onto the page,
     `desc_color` is RGB 0-1.
     """
-    pdf_name = f"{self.produce_path}{self.name}-{name}.pdf"
+    pdf_name = f"./{self.name}-{name}.pdf"
     self._execute([
       "kicad-cli", "pcb", "export", "pdf", self.pcb,
       "--output", pdf_name,
@@ -696,7 +720,8 @@ class KiCad:
 
     Each argument selects the sides to emit, `False` skips the kind entirely.
     `el`: fabrication outlines with component refs
-    `cu`: copper with paste and mask
+    `cu`: copper with paste and mask; `"both"` on a multilayer board adds
+    one page per inner copper layer between top and bot
     `desc`: silkscreen only, no drill marks
     """
     if not self.has_pcb:
@@ -709,20 +734,29 @@ class KiCad:
       for side in sides(value):
         layers, title, col, drill = PDF_PAGES[(kind, side)]
         self.pdf_page(f"{kind}-{side}", layers, title, col, drill)
+        if kind == "cu" and side == "top" and value == "both": self._pdf_inner_pages()
     if not self.pdf_pages:
       self.log.wrn("Layout PDF skipped: no pages selected")
       return
-    pdf_name = self.produce_path + self.name + "-layout.pdf"
+    pdf_name = f"./{self.name}-layout.pdf"
     from ..media.pdf import pdf_merge # raises MissingExtra naming its own extra
     pdf_merge(self.pdf_pages, pdf_name)
     FILE.remove(self.pdf_pages)
+
+  def _pdf_inner_pages(self) -> None:
+    """One copper page per inner layer, between the top and bottom copper pages."""
+    for i, cu in enumerate(self.inner_cu):
+      name = cu.removesuffix(".Cu")
+      col = INNER_COLORS[i] if i < len(INNER_COLORS) else INNER_GRAY
+      self.pdf_page(f"cu-{name.lower()}", ["User.Drawings", cu, "Edge.Cuts"],
+        f"{name.upper()} Copper", col, True)
 
   def pdf_schema(self) -> None:
     """Export schematic as PDF."""
     if not self.has_sch:
       self.log.wrn("Schema PDF skipped: no schematic in the project")
       return
-    pdf_name = self.produce_path + self.name + "-schema.pdf"
+    pdf_name = f"./{self.name}-schema.pdf"
     self._execute([
       "kicad-cli", "sch", "export", "pdf",
       self.sch, "--output", pdf_name,
@@ -754,7 +788,7 @@ class KiCad:
     tmp = None
     if color:
       mask, silk, finish = RENDER_COLORS[color]
-      pcb = tmp = _patch_pcb_color(self.pcb, mask, silk, finish)
+      pcb = tmp = _patch_pcb_color(self.pcb, mask, silk, finish, self.inner_cu)
     path = self.produce_path + self.name + f"-{side}.png"
     args = [
       "kicad-cli", "pcb", "render", pcb,

@@ -21,7 +21,7 @@ from datetime import timedelta
 from typing import Any, Iterator, assert_type
 from xaeian import CRC, CSV, DIR, FILE, INI, JSON, PATH, Files, Logger, Print, Time
 from xaeian import generate_token, logger, replace_map, split_sql
-from xaeian.cstruct import Field, Frame, Struct, Type
+from xaeian.cstruct import Field, Frame, Message, Struct, Type
 from xaeian.db import AbstractAsyncDatabase, AbstractDatabase, AsyncDatabase, Database, KeyValue
 import xaeian.table as tbl
 
@@ -52,7 +52,11 @@ assert_type(st, Struct)
 assert_type(st["mv"], Field)
 assert_type(st.encode({"mv": 3.3}), bytes)
 assert_type(st.decode(b""), list[dict[str, Any]]|dict[str, Any])
-assert_type(Frame(st).decode(b""), dict[str, dict[Any, Any]|list[dict[Any, Any]]])
+assert_type(Message(st).decode(b""), dict[str, list[dict[Any, Any]]])
+assert_type(Frame().encode(b""), bytes)
+assert_type(next(Frame().feed(Frame().encode(b"x"))), bytes)
+assert_type(Frame(Message(st)).encode({}), bytes)
+assert_type(next(Frame(Message(st)).feed(b"")), dict[Any, Any])
 
 #------------------------------------------------------------------------------------ Log and table
 

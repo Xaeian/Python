@@ -345,8 +345,10 @@ class Shell(SerialPort):
     """
     Lines up to the `BOOT <verb>` reply, its `key:value` fields as numbers.
 
-    The echo of the command and any log line in between are printed and skipped.
-    `None` on a refusal (`ERR`/`WRN` naming `boot`) or silence past `timeout_s`.
+    The echo of the command and any log line in between are skipped in silence:
+    a data line is 2kB of hex, worth nothing on screen.
+    A refusal (`ERR`/`WRN` naming `boot`) is printed and gives `None`;
+    so does silence past `timeout_s`.
     """
     deadline = time.monotonic() + timeout_s
     pending = b""
@@ -355,7 +357,6 @@ class Shell(SerialPort):
       if not pending.endswith(b"\n"): continue
       line = _remove_ansi(pending.decode("utf-8", errors="ignore")).strip()
       pending = b""
-      self.print(f"{c.WHITE}{line}{c.END}")
       if line.startswith(("ERR", "WRN")) and "boot" in line.lower():
         self.print_error(line)
         return None
@@ -367,7 +368,7 @@ class Shell(SerialPort):
 
   def _boot_exec(self, command:str, verb:str, timeout_s:float=2.0) -> dict[str, int]|None:
     """One `boot` line and its reply; a data line of 2kB takes 0.4s to go and echo at 115200."""
-    self.send(command + "\n")
+    self._write(f"{command}\n".encode("utf-8")) # not shown: its echo is 2kB of hex
     return self._boot_reply(verb, timeout_s)
 
   def boot_info(self) -> dict[str, int]|None:
@@ -379,13 +380,14 @@ class Shell(SerialPort):
     """
     return self._boot_exec("boot info", "info")
 
-  def boot(self, image:bytes|str) -> bool:
+  def boot(self, image:bytes|str, progress:Callable[[int, int], None]|None=None) -> bool:
     """
     Install a `PRO_BOOT` build: the bytes or the path of its `.bin` or `.hex`.
 
     The image goes over `boot begin`/`data`/`end` and the device resets, so its bootloader
-    installs it. `False` on a file without the header, a device without a slot, an image
-    over the slot or a refused line; the old image keeps running then.
+    installs it. `progress(taken, size)` follows every line the device took.
+    `False` on a file without the header, a device without a slot,
+    an image over the slot or a refused line; the old image keeps running then.
     """
     if isinstance(image, str):
       if not FILE.exists(image):
@@ -419,6 +421,7 @@ class Shell(SerialPort):
       part = image[offset:offset + chunk]
       reply = self._boot_exec(f"boot data {offset} {part.hex()}", "data")
       if not reply or reply.get("offset") != offset + len(part): return False
+      if progress: progress(offset + len(part), size)
     return self._boot_exec("boot end", "end") is not None
 
   #-------------------------------------------------------------------------------------------- RTC

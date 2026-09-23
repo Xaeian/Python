@@ -59,8 +59,11 @@ kc.zip_prod("1.0.0")  # ZIP everything
 kc.ok()               # print success
 ```
 
-Every export, PDFs included, lands in `produce_path`. A failed `kicad-cli` call raises
+Exports land in `produce_path`, PDFs in the working directory. A failed `kicad-cli` call raises
 `RuntimeError`, so a production script stops at the first broken export.
+
+Inner copper layers (`In1.Cu`, `In2.Cu`, ...) are read from the board: they go into the gerbers,
+and `pdf_layout(cu="both")` draws one page per inner layer between top and bot.
 
 ### Typical `produce.py`
 

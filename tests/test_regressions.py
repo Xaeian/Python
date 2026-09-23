@@ -124,20 +124,20 @@ def concurrent_saves_of_one_path_never_blend(tmp_path):
 
 def a_block_is_read_out_of_its_declared_size():
   """A lying size header used to walk into the next block and desynchronise the stream."""
-  from xaeian.cstruct import Frame, Struct, Field, Type
+  from xaeian.cstruct import Message, Struct, Field, Type
   temp = Struct(code=71, name="regr_temp"); temp.add(Field(Type.uint16, "v"))
   hum = Struct(code=72, name="regr_hum"); hum.add(Field(Type.uint16, "v"))
-  frame = Frame(temp, hum, crc=None)
-  good = frame.encode({"regr_temp": [{"v": 11}, {"v": 22}], "regr_hum": {"v": 33}})
-  assert frame.decode(good) == {"regr_temp": [{"v": 11}, {"v": 22}], "regr_hum": {"v": 33}}
+  message = Message(temp, hum)
+  good = message.encode({"regr_temp": [{"v": 11}, {"v": 22}], "regr_hum": {"v": 33}})
+  assert message.decode(good) == {"regr_temp": [{"v": 11}, {"v": 22}], "regr_hum": [{"v": 33}]}
 
-  over = bytearray(good); over[0] = 200
+  over = bytearray(good); over[2] = 200
   with pytest.raises(ValueError, match="Block declares"):
-    frame.decode(bytes(over))
+    message.decode(bytes(over))
 
-  partial = bytearray(good); partial[0] = 5
+  partial = bytearray(good); partial[2] = 5
   with pytest.raises(ValueError):
-    frame.decode(bytes(partial))
+    message.decode(bytes(partial))
 
 #------------------------------------------------------------------------------- async transactions
 
@@ -261,8 +261,8 @@ def removing_a_file_the_server_refuses_to_delete_raises(monkeypatch):
   """
   550 answers both "no such file" and "permission denied"; both were reported as success.
 
-  It reads as `PermissionError` now, not `ftplib.error_perm`: that one is no `OSError`, so
-  code holding a `Remote` client caught it on SFTP and missed it here.
+  It reads as `PermissionError`, not `ftplib.error_perm`:
+  that one is no `OSError`, so code holding a `Remote` client caught it on SFTP and missed it here.
   """
   ftp = FTP.__new__(FTP)
   ftp._ftp = _Refusing()

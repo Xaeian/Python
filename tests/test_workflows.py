@@ -6,8 +6,8 @@ The GitHub Actions workflows, held against their generator.
 `workflow.py` owns `.github/workflows`, so a hand edit there is lost on the next run.
 These tests fail while the committed files and the generator disagree.
 
-This repo keeps a gate, so it regenerates with `--ci`. A repo without one writes `publish.yml`
-alone, and publishing then waits for nothing.
+This repo keeps a gate: `--ci` added it once, and every later run keeps it.
+A repo without one writes `publish.yml` alone, and publishing then waits for nothing.
 """
 
 from pathlib import Path
@@ -83,3 +83,14 @@ def the_env_names_follow_the_package(project):
   assert "XAEIAN_TEST_POSTGRES: ci" in workflow.generate_ci(project)
   named = workflow.Project("demo", ["3.12"], False, ["postgres"], "", False, True)
   assert "DEMO_TEST_POSTGRES: ci" in workflow.generate_ci(named)
+
+def a_gate_already_there_survives_a_run_without_the_flag(tmp_path):
+  """
+  `--ci` is how a gate is added; forgetting it later must not take the gate away.
+  A release that ships unchecked because someone regenerated is the failure this guards.
+  """
+  workflow.generate("xaeian", folder=str(tmp_path))
+  assert "needs: ci" not in (tmp_path / "publish.yml").read_text(encoding="utf-8")
+  workflow.generate("xaeian", folder=str(tmp_path), ci=True)
+  workflow.generate("xaeian", folder=str(tmp_path))
+  assert "needs: ci" in (tmp_path / "publish.yml").read_text(encoding="utf-8")

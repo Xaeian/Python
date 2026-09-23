@@ -76,6 +76,37 @@ def the_project_is_recognised_without_a_schematic(board):
   kc, _ = board
   assert kc.name == "board" and kc.has_pcb and not kc.has_sch
 
+def an_empty_board_has_no_inner_copper(board):
+  kc, _ = board
+  assert kc.inner_cu == []
+
+FOUR_LAYER = """(kicad_pcb
+  (layers (0 "F.Cu" signal) (6 "In2.Cu" power) (4 "In1.Cu" power) (2 "B.Cu" signal))
+  (setup (stackup (layer "In1.Cu" (type "copper"))))
+)"""
+
+def inner_copper_is_read_off_the_board_in_stack_order(tmp_path):
+  pcb = tmp_path / "four.kicad_pcb"
+  pcb.write_text(FOUR_LAYER, encoding="utf-8")
+  assert kicad._inner_layers(str(pcb)) == ["In1.Cu", "In2.Cu"]
+
+def gerbers_carry_the_inner_copper(tmp_path, monkeypatch):
+  (tmp_path / "four.kicad_pcb").write_text(FOUR_LAYER, encoding="utf-8")
+  buf = io.StringIO()
+  kc = kicad.KiCad(str(tmp_path), str(tmp_path / "produce"), log=Print(file=buf))
+  assert "4 copper layers" in buf.getvalue()
+  calls = []
+  class Done:
+    returncode = 0
+    stderr = ""
+    stdout = ""
+  monkeypatch.setattr(kicad, "cmd_run", lambda args: calls.append(args) or Done())
+  monkeypatch.setattr(kicad.DIR, "zip", lambda *a, **k: None)
+  monkeypatch.setattr(kicad.DIR, "remove", lambda *a, **k: None)
+  kc.gerber()
+  layers = calls[0][calls[0].index("--layers") + 1]
+  assert layers.startswith("F.Cu,In1.Cu,In2.Cu,B.Cu,")
+
 def a_selector_that_hits_nothing_warns_and_contributes_nothing(board):
   kc, buf = board
   assert kc._match_refs(["R*", "C9"], {"R1", "R2"}, "DNP") == ["R1", "R2"]

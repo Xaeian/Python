@@ -4,8 +4,12 @@
 Binary struct serialization for C-like structures.
 
 Numeric, string and byte fields, fixed arrays, bitfields, padding, optionals and tagged variants,
-with scale/offset transforms, layered CRC, a multi-struct framing protocol and schema export
-to C headers or Markdown.
+with scale/offset transforms, a CRC per record and schema export to C headers or Markdown.
+
+Three layers put records on a wire:
+`Struct` is one record, `Message` multiplexes blocks of several structs into one body,
+`Frame` is the envelope that gives a raw byte stream its boundaries and integrity.
+The mirror of `FRAME_t` in C.
 
 Example:
   >>> from xaeian.cstruct import Struct, Field, Type, Endian
@@ -24,7 +28,7 @@ Example:
 
 from struct import pack, unpack_from, calcsize
 from enum import Enum
-from typing import Callable, Any, Iterator
+from typing import Callable, Any, Generic, Iterator, TypeVar, overload
 from numbers import Real
 
 from .crc import CRC, crc32_iso
@@ -287,10 +291,11 @@ class Variant:
 
 class Struct:
   """
-  Binary struct composed of Fields, usable standalone or inside a Frame.
+  Binary struct composed of Fields, usable standalone or as a block of a Message.
 
-  CRC layers wrap in this order on encode and unwrap in reverse on decode:
-  crc_frame (per record) → crc_auth (non-standard polynomial as shared secret) → crc (outer).
+  `crc` is the record's own tail, a `crc` member at the end of the C struct:
+  it travels with the record everywhere, a block of a `Message` included.
+  Integrity of a whole message is the envelope's job, see `Frame`.
   """
   _auto_id = 0
   _codes: dict[int, str] = {}
@@ -301,15 +306,14 @@ class Struct:
     name:str|None = None,
     endian:Endian|None = None,
     crc:CRC|None = None,
-    crc_frame:CRC|None = None,
-    crc_auth:CRC|None = None,
     align:int = 1,
   ) -> None:
     """
     Args:
-      code: Unique across all Struct instances, required for Frame multiplexing
+      code: Unique across all Struct instances, required for a Message block
       name: Auto-generated if empty
       endian: Defaults to little
+      crc: Appended to every record, behind its alignment padding
       align: Pad each record up to this byte multiple, 1 = none
     """
     if code is not None:
@@ -327,8 +331,6 @@ class Struct:
     self.name: str = name
     self.endian: Endian|None = endian
     self.crc: CRC|None = crc
-    self.crc_frame: CRC|None = crc_frame
-    self.crc_auth: CRC|None = crc_auth
     self.align: int = align
     self.fields: list[Field] = []
     self.fields_by_name: dict[str, Field] = {}
@@ -424,7 +426,7 @@ class Struct:
     return value, offset + field.type.size
 
   def _encode_single(self, data:dict, endian:Endian|None=None) -> bytes:
-    """Encode one record: members, alignment padding and crc_frame, no outer CRC layers."""
+    """Encode one record: members, alignment padding, `crc`."""
     endian = self._get_endian(endian)
     message = b""
     for member in self._members:
@@ -454,11 +456,11 @@ class Struct:
     if self.align > 1:
       remainder = len(message) % self.align
       if remainder: message += b"\x00" * (self.align - remainder)
-    if self.crc_frame: message = self.crc_frame.encode(message)
+    if self.crc: message = self.crc.encode(message)
     return message
 
   def _decode_single(self, msg:bytes, endian:Endian|None=None) -> tuple[dict, int]:
-    """Decode one record → (data, bytes_consumed), verifying crc_frame but no outer CRC."""
+    """Decode one record → (data, bytes_consumed), its `crc` verified."""
     endian = self._get_endian(endian)
     data = {}
     offset = 0
@@ -490,42 +492,67 @@ class Struct:
       if remainder: offset += self.align - remainder
     if offset > len(msg): # padding and alignment skip bytes without reading them
       raise ValueError(f"Incomplete data for struct '{self.name}': {len(msg)} of {offset} bytes")
-    if self.crc_frame:
-      n = self.crc_frame.width // 8
+    if self.crc:
+      n = self.crc.width // 8
       crc = msg[offset:offset + n]
-      if len(crc) < n or self.crc_frame.to_int(crc) != self.crc_frame.checksum(msg[:offset]):
-        raise ValueError(f"CRC frame check failed for struct '{self.name}'")
+      if len(crc) < n or self.crc.to_int(crc) != self.crc.checksum(msg[:offset]):
+        raise ValueError(f"CRC check failed for struct '{self.name}'")
       offset += n
     return data, offset
 
   def encode(self, data_list:list[dict]|dict, endian:Endian|None=None) -> bytes:
-    """Encode one record or a list of records, wrapped in every configured CRC layer."""
+    """Encode one record or a list of records, each with its `crc`."""
     if isinstance(data_list, dict): data_list = [data_list]
-    message = b""
-    for data in data_list: message += self._encode_single(data, endian)
-    if self.crc_auth: message = self.crc_auth.encode(message)
-    if self.crc: message = self.crc.encode(message)
-    return message
+    return b"".join(self._encode_single(data, endian) for data in data_list)
 
   def decode(self, message:bytes, endian:Endian|None=None) -> list[dict[str, Any]]|dict[str, Any]:
     """Decode every record in the message, a bare dict when there is exactly one."""
-    if self.crc:
-      message = self.crc.decode(message)
-      if message is None: raise ValueError(f"CRC check failed for struct '{self.name}'")
-    if self.crc_auth:
-      message = self.crc_auth.decode(message)
-      if message is None: raise ValueError(f"CRC auth check failed for struct '{self.name}'")
+    data_list = self.records(message, endian)
+    return data_list[0] if len(data_list) == 1 else data_list
+
+  def records(self, payload:bytes, endian:Endian|None=None) -> list[dict[str, Any]]:
+    """Every record of `payload`, as a list even when there is one."""
     data_list = []
-    while message:
-      data, offset = self._decode_single(message, endian)
+    while payload:
+      data, offset = self._decode_single(payload, endian)
       if offset <= 0:
         raise ValueError(f"Struct '{self.name}' consumes no bytes, cannot decode a stream")
       data_list.append(data)
-      message = message[offset:]
-    return data_list[0] if len(data_list) == 1 else data_list
+      payload = payload[offset:]
+    return data_list
+
+  def block(self, records:list[dict]|dict, endian:Endian|None=None) -> bytes:
+    """
+    Records behind their block header `| code u16 | size u16 |` for a `Message`.
+    `size` counts the record bytes only; `code` is required.
+    """
+    if self.code is None: raise ValueError(f"Struct '{self.name}' needs a code for a block")
+    if isinstance(records, dict): records = [records]
+    endian = self._get_endian(endian)
+    payload = b"".join(self._encode_single(record, endian) for record in records)
+    return pack(endian.value + "HH", self.code, len(payload)) + payload
+
+  def _fixed_size(self) -> int|None:
+    """Bytes of one record before padding and `crc`; `None` when a member has no fixed size."""
+    total = 0
+    for member in self._members:
+      if isinstance(member, Field):
+        if member.type.size == 0: return None
+        total += member.type.size * (member.length if member.is_array else 1)
+      elif isinstance(member, (Bitfield, Padding)):
+        total += member.size
+      else:
+        return None # a variant is as long as its selected branch
+    return total
 
   def export_c_header(self, guard:str|None=None) -> str:
-    """Export as a C header, `guard` defaulting to `_NAME_H_`."""
+    """
+    Export as a C header, `guard` defaulting to `_NAME_H_`.
+
+    The struct mirrors the wire: alignment padding and the `crc` tail are members too,
+    the tail as bytes because it travels big-endian whatever the struct's own order.
+    A record of variable size cannot place them, so it says so in a comment.
+    """
     if guard is None: guard = f"_{self.name.upper()}_H_"
     lines = [
       f"#ifndef {guard}",
@@ -566,6 +593,14 @@ class Struct:
             lines.append(f"      {field.type.c_type} {field.name};")
           lines.append("    };")
         lines.append(f"  }} {member.name};")
+    fixed = self._fixed_size()
+    if fixed is None:
+      if self.align > 1 or self.crc:
+        lines.append("  // variable size: alignment padding and crc follow the record on the wire")
+    else:
+      pad = -fixed % self.align
+      if pad: lines.append(f"  uint8_t _align[{pad}];")
+      if self.crc: lines.append(f"  uint8_t crc[{self.crc.width // 8}]; // big-endian")
     lines.append(f"}} {self.name}_t;")
     lines.append("")
     lines.append(f"#endif // {guard}")
@@ -617,91 +652,53 @@ class Struct:
   def __repr__(self) -> str:
     return f"Struct(code={self.code!r}, name={self.name!r}, fields={len(self.fields)})"
 
-#-------------------------------------------------------------------------------------------- Frame
+#--------------------------------------------------------------------------------------------- Wire
 
-class Frame:
+class Message:
   """
-  Multiplexes several Struct types into one message, outer CRC wrapping the whole frame.
+  Body of a frame: blocks of several structs, each one `| code u16 | size u16 | records |`.
+  A block is read out of exactly its `size` bytes, so a header that lies is refused
+  rather than left to shift everything after it. Integrity belongs to `Frame`, the envelope.
+  """
+  BLOCK_HEAD = 4 # code and size
 
-  Blocks concatenate, each one: | size-uint16 | code-uint16 | records |
-  `size` counts the payload bytes only, `code` is the Struct code.
-  Decoding reads each block out of exactly its `size` bytes, so a header that lies is refused
-  rather than left to desynchronise everything after it.
-  A struct's own `crc` and `crc_auth` are unused here, only its `crc_frame` wraps each record.
-  """
-  def __init__(
-    self,
-    *structs:Struct,
-    endian:Endian|None = Endian.little,
-    crc:CRC|None = crc32_iso,
-    crc_auth:CRC|None = None,
-  ) -> None:
+  def __init__(self, *structs:Struct, endian:Endian|None=Endian.little) -> None:
     """
     Args:
       structs: Each must have a `code` set
-      endian: Applied to frame headers and to every payload, overriding per-struct endian
+      endian: Applied to block headers and to every payload, overriding per-struct endian
     """
     self.structs: tuple[Struct, ...] = structs
     self.structs_by_code: dict[int, Struct] = {}
     self.structs_by_name: dict[str, Struct] = {}
     for struct in self.structs:
       if struct.code is None:
-        raise ValueError(f"Struct '{struct.name}' must have a code for use in Frame")
+        raise ValueError(f"Struct '{struct.name}' must have a code for use in Message")
       self.structs_by_code[struct.code] = struct
       self.structs_by_name[struct.name] = struct
     self.endian: Endian = endian or Endian.little
-    self.crc: CRC|None = crc
-    self.crc_auth: CRC|None = crc_auth
 
   def encode(self, data_dict:dict[str, dict|list[dict]]) -> bytes:
-    """Encode `{struct_name: record or records}` into one framed message."""
-    message = b""
-    for struct_name, data_list in data_dict.items():
+    """Encode `{struct_name: record or records}` into one body, a block per name."""
+    body = b""
+    for struct_name, records in data_dict.items():
       if struct_name not in self.structs_by_name: raise KeyError(f"Unknown struct: {struct_name}")
-      if not isinstance(data_list, list): data_list = [data_list]
-      struct = self.structs_by_name[struct_name]
-      payload = b"".join([struct._encode_single(data, self.endian) for data in data_list])
-      message += pack(self.endian.value + Type.uint16.value, len(payload))
-      message += pack(self.endian.value + Type.uint16.value, struct.code)
-      message += payload
-    if self.crc_auth: message = self.crc_auth.encode(message)
-    if self.crc: message = self.crc.encode(message)
-    return message
+      body += self.structs_by_name[struct_name].block(records, self.endian)
+    return body
 
-  def decode(self, frame:bytes) -> dict[str, dict|list[dict]]:
-    """Decode a frame → `{struct_name: data}`, a bare dict where a name holds one record."""
-    if self.crc:
-      frame = self.crc.decode(frame)
-      if frame is None: raise ValueError("CRC check failed in Frame.decode()")
-    if self.crc_auth:
-      frame = self.crc_auth.decode(frame)
-      if frame is None: raise ValueError("CRC auth check failed in Frame.decode()")
-    data_dict: dict[str, dict|list[dict]] = {}
-    while frame:
-      if len(frame) < 4: raise ValueError("Incomplete frame header")
-      size = unpack_from(self.endian.value + Type.uint16.value, frame, 0)[0]
-      struct_code = unpack_from(self.endian.value + Type.uint16.value, frame, 2)[0]
-      frame = frame[4:]
-      if struct_code not in self.structs_by_code:
-        raise KeyError(f"Unknown struct code: {struct_code}")
-      struct = self.structs_by_code[struct_code]
-      if size > len(frame):
-        raise ValueError(f"Block declares {size} bytes, {len(frame)} left in the frame")
-      # records are read out of the block alone, so a wrong `size` cannot walk into the next one
-      block, frame = frame[:size], frame[size:]
-      while block:
-        data, consumed = struct._decode_single(block, self.endian)
-        if consumed <= 0:
-          raise ValueError(f"Struct '{struct.name}' consumes no bytes, cannot decode a block")
-        if consumed > len(block):
-          raise ValueError(f"Record of '{struct.name}' overruns its {size}-byte block")
-        if struct.name in data_dict:
-          existing = data_dict[struct.name]
-          if not isinstance(existing, list): data_dict[struct.name] = [existing]
-          data_dict[struct.name].append(data)
-        else:
-          data_dict[struct.name] = data
-        block = block[consumed:]
+  def decode(self, body:bytes) -> dict[str, list[dict]]:
+    """Decode a body → `{struct_name: records}`, a list per name even where it holds one."""
+    data_dict: dict[str, list[dict]] = {}
+    while body:
+      if len(body) < self.BLOCK_HEAD: raise ValueError("Incomplete block header")
+      code, size = unpack_from(self.endian.value + "HH", body, 0)
+      body = body[self.BLOCK_HEAD:]
+      if code not in self.structs_by_code: raise KeyError(f"Unknown struct code: {code}")
+      if size > len(body):
+        raise ValueError(f"Block declares {size} bytes, {len(body)} left in the message")
+      struct = self.structs_by_code[code]
+      block, body = body[:size], body[size:]
+      data_dict.setdefault(struct.name, []).extend(struct.records(block, self.endian))
     return data_dict
 
   def get_struct(self, tag:int|str) -> Struct:
@@ -717,6 +714,108 @@ class Frame:
 
   def __getitem__(self, key:int|str) -> Struct:
     return self.get_struct(key)
+
+Body = TypeVar("Body", bytes, dict)
+"""What a `Frame` carries: raw bytes, or the dict of a `Message`."""
+
+class Frame(Generic[Body]):
+  """
+  Envelope of one message on a raw byte link: `| AA 55 | len u16 | body | crc |`.
+  `len` counts body and CRC, the CRC covers the body: the mirror of `FRAME_t` in C.
+
+  Given a `Message`, `encode` takes its dict and `feed` yields dicts; bare, both move bytes.
+  `Body` follows: `Frame()` is a `Frame[bytes]`, `Frame(message)` a `Frame[dict]`.
+  `feed` walks a stream and yields every frame that verifies.
+  The sync pair can occur inside data, so a frame that fails is dropped from the byte
+  behind its first sync byte and the hunt starts there, not behind the whole frame.
+  A false pair with a plausible length holds the frames behind it until its bytes are in,
+  so `limit` also bounds that delay.
+  """
+  SYNC = b"\xAA\x55"
+  FRAME_HEAD = 4 # sync pair and length
+
+  @overload
+  def __init__(
+    self:"Frame[bytes]",
+    message:None = None,
+    *,
+    crc:CRC|None = crc32_iso,
+    limit:int = 1024,
+    endian:Endian = Endian.little,
+  ) -> None: ...
+  @overload
+  def __init__(
+    self:"Frame[dict]",
+    message:Message,
+    *,
+    crc:CRC|None = crc32_iso,
+    limit:int = 1024,
+    endian:Endian = Endian.little,
+  ) -> None: ...
+  def __init__(
+    self,
+    message:Message|None = None,
+    *,
+    crc:CRC|None = crc32_iso,
+    limit:int = 1024,
+    endian:Endian = Endian.little,
+  ) -> None:
+    """
+    Args:
+      message: What a body is made of; `None` carries raw bytes
+      crc: Appended behind the body, `None` = none
+      limit: Longest body accepted [B], a longer `len` is structural nonsense
+      endian: Byte order of the length field
+    """
+    self.message: Message|None = message
+    self.crc: CRC|None = crc
+    self.limit: int = limit
+    self.endian: Endian = endian
+    self._len = endian.value + "H"
+    self.errors: int = 0 # frames dropped on length or CRC
+    self._buf = bytearray()
+
+  @property
+  def crc_size(self) -> int:
+    return self.crc.width // 8 if self.crc else 0
+
+  def encode(self, data:Body) -> bytes:
+    """Frame one message, or raw bytes, for the wire."""
+    body = self.message.encode(data) if self.message else data
+    if self.crc: body = self.crc.encode(body)
+    return self.SYNC + pack(self._len, len(body)) + body
+
+  def feed(self, data:bytes) -> Iterator[Body]:
+    """Take a stretch of the stream, yield every complete frame in it: a dict, or raw bytes."""
+    self._buf += data
+    while True:
+      start = self._buf.find(self.SYNC)
+      if start < 0:
+        # a lone first sync byte at the end may be a pair the chunk cut in half
+        keep = 1 if self._buf.endswith(self.SYNC[:1]) else 0
+        del self._buf[:len(self._buf) - keep]
+        return
+      del self._buf[:start]
+      if len(self._buf) < self.FRAME_HEAD: return
+      length = unpack_from(self._len, self._buf, 2)[0]
+      total = self.FRAME_HEAD + length
+      if self.crc_size <= length <= self.limit + self.crc_size:
+        if len(self._buf) < total: return # the rest is still on the wire
+        body = self._body(bytes(self._buf[self.FRAME_HEAD:total]))
+        if body is not None:
+          del self._buf[:total]
+          yield self.message.decode(body) if self.message else body
+          continue
+      self.errors += 1
+      del self._buf[:1] # the pair was data, so the hunt goes on from behind its first byte
+
+  def _body(self, framed:bytes) -> bytes|None:
+    """The body of one candidate frame, `None` when its CRC says the bytes are not one."""
+    return self.crc.decode(framed) if self.crc else framed
+
+  def reset(self) -> None:
+    """Drop what is under assembly, the link is gone."""
+    self._buf.clear()
 
 #-------------------------------------------------------------------------------------------- Tests
 

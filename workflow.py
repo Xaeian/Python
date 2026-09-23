@@ -42,8 +42,9 @@ def floor(root:str, pkg_dir:str) -> str:
   """
   The lowest Python the project supports.
 
-  `pyproject.toml` wins, because that is where pip reads it and where a package not built
-  by `toml.py` declares it. Falling back on `__init__.py` keeps the packages that are.
+  `pyproject.toml` wins: pip reads it there,
+  and a hand-written package declares it nowhere else.
+  `__init__.py` is the fallback, for what `toml.py` generates.
   """
   declared = _pyproject(root).get("project", {}).get("requires-python", "")
   return (declared or get_meta(pkg_dir)["python"]).replace(">=", "").replace(">", "").strip()
@@ -76,9 +77,7 @@ def scan(pkg_dir:str) -> Project:
   """
   Read the facts the workflows depend on out of the package and its `pyproject.toml`.
 
-  Nothing here is guessed: a server starts because a driver is declared, Cairo is installed
-  because `svglib` is, `mypy` runs because the package publishes its annotations, and the
-  suite runs because there is a `tests/` to run.
+  Nothing is guessed: every field below names the evidence that sets it.
   """
   root = PATH.dirname(pkg_dir)
   deps = _requires(root)
@@ -129,9 +128,9 @@ def verify_block(project:Project) -> str:
   """
   How a built wheel is proven, as far as the repo allows.
 
-  With a suite, the artifact under test is the wheel: the tests are copied away from the
-  source tree so `import` can only answer from site-packages. Without one, installing it is
-  still worth doing, because a wheel that cannot be installed is a wheel nobody can use.
+  With a suite, the artifact under test is the wheel:
+  the tests are copied away from the source tree, so `import` can only answer site-packages.
+  Without one, installing it still catches a wheel nobody could install.
   """
   if not project.tests:
     return f'      - run: pip install "$(echo dist/*.whl){project.extra}"\n'
@@ -255,8 +254,8 @@ def generate(package:str, folder:str|None=None, ci:bool=False) -> None:
   Write `publish.yml` for `package` into `folder`, default `.github/workflows`.
 
   Args:
-    package: Package directory path.
-    ci: Also write `ci.yml` and make publishing wait for it. Not every repo wants a gate.
+    ci: Add `ci.yml` and gate publishing on it.
+      A gate already there stays without the flag: forgetting it cannot ship unchecked.
   """
   pkg_dir = PATH.resolve(package)
   if not DIR.exists(pkg_dir):
@@ -274,6 +273,7 @@ def generate(package:str, folder:str|None=None, ci:bool=False) -> None:
   if project.typed:
     p.inf(f"Types: {c.VIOLET}mypy{c.GREY} (py.typed detected){c.END}")
   out = folder or PATH.join(PATH.dirname(pkg_dir), ".github", "workflows")
+  ci = ci or FILE.exists(PATH.join(out, "ci.yml")) # a gate already there stays a gate
   written = {"publish.yml": generate_publish(project, ci)}
   if ci: written["ci.yml"] = generate_ci(project)
   for file, text in written.items():
@@ -296,7 +296,7 @@ if __name__ == "__main__":
   parser.add_argument("-o", "--output", default=None, metavar="DIR",
     help="Output folder (default: .github/workflows)")
   parser.add_argument("--ci", action="store_true",
-    help="Also write ci.yml and make publishing wait for it")
+    help="Add ci.yml and gate publishing on it; a gate already there is kept without this")
   add_help(parser)
   args = parser.parse_args()
   generate(args.package, args.output, args.ci)

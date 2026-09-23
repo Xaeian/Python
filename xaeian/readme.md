@@ -132,7 +132,7 @@ Binary struct serialization _(C-like)_.
 from xaeian.cstruct import Struct, Field, Bitfield, Padding, Type, Endian
 from xaeian.crc import crc32_iso
 
-sensor = Struct(name="sensor", endian=Endian.little, crc=crc32_iso)
+sensor = Struct(name="sensor", endian=Endian.little, crc=crc32_iso) # crc: the record's tail
 sensor.add(
   Field(Type.uint32, "timestamp", "s"),
   Bitfield("flags", [("enabled", 1), ("error", 1), ("mode", 6)]),
@@ -149,6 +149,32 @@ encoded = sensor.encode(data)
 decoded = sensor.decode(encoded)
 sensor.export_c_header()
 sensor.export_doc()
+```
+
+On a wire, three layers, each with one `crc` that is its own tail:
+`Struct` is one record, `Message` puts blocks of several structs into one body
+(`| code u16 | size u16 | records |` each),
+`Frame` is the envelope (`| AA 55 | len u16 | body | crc |`) that gives a byte stream
+its boundaries and integrity.
+The mirror of `FRAME_t` on the C side.
+
+A stream, serial or TCP, takes the envelope; a transport with boundaries, UDP or MQTT,
+takes the message alone.
+
+```py
+from xaeian.cstruct import Struct, Field, Type, Message, Frame
+
+pos = Struct(code=1, name="pos").add(Field(Type.int16, "x"), Field(Type.int16, "y"))
+temp = Struct(code=2, name="temp").add(Field(Type.float, "t"))
+link = Frame(Message(pos, temp), limit=256)
+
+wire = link.encode({"pos": [{"x": 1, "y": 2}, {"x": 3, "y": 4}], "temp": {"t": 21.5}})
+for data in link.feed(wire): # any stretch of the stream, frames cut anywhere
+  data # {"pos": [...], "temp": [{"t": 21.5}]}, a list per name
+link.errors # frames dropped on length or CRC
+
+Message(pos, temp).encode({...}) # a body on its own, for a transport that keeps boundaries
+Frame().encode(b"...") # an envelope around anything
 ```
 
 ## `cmd`
@@ -204,7 +230,9 @@ p.fig   # matplotlib Figure
 p.axes  # list[Axes]
 ```
 
-Themes: `"clean"` _(default, light)_, `"dark"`. Auto datetime formatting, auto ylabel coloring for single series. Labels accept `"Name [unit]"` or `("Name", "unit")` tuples.
+Themes: `"clean"` _(default, light)_, `"dark"`.
+Auto datetime formatting, auto ylabel coloring for single series.
+Labels accept `"Name [unit]"` or `("Name", "unit")` tuples.
 
 ```sh
 py -m xaeian.plot         # sensor dashboard demo
