@@ -172,6 +172,7 @@ wire = link.encode({"pos": [{"x": 1, "y": 2}, {"x": 3, "y": 4}], "temp": {"t": 2
 for data in link.feed(wire): # any stretch of the stream, frames cut anywhere
   data # {"pos": [...], "temp": [{"t": 21.5}]}, a list per name
 link.errors # frames dropped on length or CRC
+link.pending # bytes held back, a frame still arriving
 
 Message(pos, temp).encode({...}) # a body on its own, for a transport that keeps boundaries
 Frame().encode(b"...") # an envelope around anything

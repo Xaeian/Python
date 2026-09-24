@@ -1,5 +1,9 @@
 # Changes `xaeian`
 
+## `0.9.5` Embedded
+
+- `cstruct`: `Frame.pending`, bytes of a frame still on its way
+
 ## `0.9.4` Embedded
 
 - `eda`: inner copper layers in gerbers and the layout PDF

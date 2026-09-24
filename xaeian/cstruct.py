@@ -779,6 +779,11 @@ class Frame(Generic[Body]):
   def crc_size(self) -> int:
     return self.crc.width // 8 if self.crc else 0
 
+  @property
+  def pending(self) -> int:
+    """Bytes held back: a frame still on its way, or a sync pair split by the chunk."""
+    return len(self._buf)
+
   def encode(self, data:Body) -> bytes:
     """Frame one message, or raw bytes, for the wire."""
     body = self.message.encode(data) if self.message else data

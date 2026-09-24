@@ -151,6 +151,17 @@ def frame_feed_survives_cuts_junk_and_a_false_sync():
   assert got == bodies[:6] + bodies[7:]
   assert frame.errors == 2 # the false sync and the broken frame
 
+def frame_pending_closes_the_byte_count():
+  """Every fed byte is accounted for: yielded, dropped, or still waiting."""
+  frame = Frame(limit=64)
+  good = frame.encode(b"12345678")
+  bad = bytearray(good); bad[6] ^= 0xFF
+  wire = good + bytes(bad) + good[:5]
+  assert list(frame.feed(wire)) == [b"12345678"]
+  assert frame.pending == 5 # the last frame, still on its way
+  assert len(wire) - len(good) - frame.pending == len(bad)
+  assert frame.errors == 1
+
 def alignment_padding_roundtrips_each_record():
   # regression: decode must consume the padding encode appends after each record
   s = Struct(name="aligned", align=4).add(Field(Type.uint8, "a"), Field(Type.uint16, "b"))
