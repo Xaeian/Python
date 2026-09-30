@@ -1,0 +1,324 @@
+# xaeian/eda/sym.py
+
+"""
+KiCad `.kicad_sym` symbol library generator.
+
+`Symbol` builds one symbol, `SymbolLib` collects them into a library file.
+All dimensions in mil, converted to mm on output.
+Font presets `S`, `M`, `L`, `REF["connector"]` → `"J"`.
+
+Example:
+  >>> lib = SymbolLib()
+  >>> sym = Symbol("78L05", ref=REF["ic"], style=M, pin_offset=10)
+  >>> sym.properties(ref_at=(0, 270), val_at=(0, 200), bold_val=True)
+  >>> sym.prop("Description", "Imax:150mA; Vout:5V;")
+  >>> sym.rect(-150, -100, 150, 100)
+  >>> sym.pin(1, -200, 50, name="VI", type="power_in")
+  >>> sym.pin(3, 200, 50, angle=180, name="VO", type="power_out")
+  >>> lib.add(sym)
+  >>> lib.save("./LDO.kicad_sym")
+"""
+
+from dataclasses import dataclass
+from ..files import FILE
+from .fp import fmt_number, fmt_string, GENERATOR_VERSION
+
+# Footprints have their own `Style`, tiers and `REF`, in mm.
+# These are in mil for symbols, so qualify by module when both are in play.
+__all__ = [
+  "Symbol", "SymbolLib", "Style", "S", "M", "L", "REF",
+  "MIL", "PROP_FONT", "PROP_THICK", "DETAIL_THICK",
+]
+
+#---------------------------------------------------------------------------------------------- Mil
+
+MIL = 0.0254 # 1mil in mm
+
+def _n(v:float) -> str:
+  """Convert mil to mm, format: `100` → `2.54`, `50` → `1.27`."""
+  return fmt_number(round(v * MIL, 4))
+
+def _a(v:float) -> str:
+  """Format angle in degrees, no mil→mm conversion."""
+  return fmt_number(v)
+
+#------------------------------------------------------------------------------------------ Presets
+
+@dataclass
+class Style:
+  """Font settings for a symbol size tier, in mil."""
+  font: float # Reference, Value, pin name and pin number share one size
+  thick: float
+
+# Tier is per component series, not per individual symbol
+S = Style(font=30, thick=6) # passive (R, C, L, D)
+M = Style(font=40, thick=6) # connectors, small IC
+L = Style(font=50, thick=6) # IC, complex components
+
+PROP_FONT = 30 # hidden property font (mil)
+PROP_THICK = 6 # hidden property thickness (mil)
+DETAIL_THICK = 4 # detail/decoration thickness (mil)
+
+# Reference designators (IEEE 315)
+REF = {
+  "resistor": "R",
+  "resistor_network": "RN",
+  "capacitor": "C",
+  "inductor": "L",
+  "ferrite": "FB",
+  "diode": "D",
+  "transistor": "Q",
+  "ic": "U",
+  "connector": "J",
+  "switch": "SW",
+  "fuse": "F",
+  "relay": "K",
+  "transformer": "T",
+  "crystal": "Y",
+  "motor": "M",
+  "wire": "W",
+  "jumper": "JP",
+  "test_point": "TP",
+  "hole": "H",
+  "fiducial": "FID",
+  "mechanical": "MP",
+  "battery": "BT",
+  "speaker": "SP",
+  "microphone": "MK",
+  "filter": "FL",
+  "antenna": "ANT",
+  "power_supply": "PS",
+}
+
+#------------------------------------------------------------------------------------------- Symbol
+
+class Symbol:
+  """Graphics are shared by all units, pins go to the unit selected by `unit()`."""
+  def __init__(
+    self,
+    name:str,
+    ref:str = "REF",
+    style:Style = L,
+    pin_offset:float = 0,
+    pin_names:bool = True,
+    pin_numbers:bool = True,
+  ) -> None:
+    self.name = name
+    self.ref = ref
+    self.style = style
+    self.pin_offset = pin_offset
+    self.pin_names_visible = pin_names
+    self.pin_numbers_visible = pin_numbers
+    self._props: list[str] = []
+    self._graphics: list[str] = []
+    self._units: dict[int, list[str]] = {}
+    self._unit = 1
+
+  def unit(self, n:int) -> None:
+    """Switch active unit for subsequent `pin()` calls."""
+    self._unit = n
+
+  #------------------------------------------------------------------------------------- Properties
+
+  def _font_str(self, size:float, thick:float, bold:bool=False, italic:bool=False) -> str:
+    parts = [f"(size {_n(size)} {_n(size)})"]
+    parts.append(f"(thickness {_n(thick)})")
+    if bold: parts.append("(bold yes)")
+    if italic: parts.append("(italic yes)")
+    return f"(font {' '.join(parts)})"
+
+  def properties(
+    self,
+    ref_at:tuple = (0, 0),
+    val_at:tuple = (0, 0),
+    bold_val:bool = False,
+    italic_val:bool = False,
+    hide_val:bool = False,
+  ) -> None:
+    """Add Reference and Value properties, positions `(x, y)` in mil relative to the origin."""
+    s = self.style
+    rx, ry = ref_at
+    vx, vy = val_at
+    self._props.append(
+      f'\t\t(property "Reference" {fmt_string(self.ref)}'
+      f" (at {_n(rx)} {_n(ry)} 0)"
+      f" (effects {self._font_str(s.font, s.thick)}))",
+    )
+    val_hide = " (hide yes)" if hide_val else ""
+    self._props.append(
+      f'\t\t(property "Value" {fmt_string(self.name)}'
+      f" (at {_n(vx)} {_n(vy)} 0)"
+      f" (effects {self._font_str(s.font, s.thick, bold=bold_val, italic=italic_val)}{val_hide}))",
+    )
+
+  def prop(self, name:str, value:str="", at:tuple=(0, 0), hide:bool=True) -> None:
+    """Add custom property (Manufacturer, Code, LCSC, etc.), hidden and in the fixed prop font."""
+    x, y = at
+    hfont = self._font_str(PROP_FONT, PROP_THICK)
+    hide_s = " (hide yes)" if hide else ""
+    self._props.append(
+      f"\t\t(property {fmt_string(name)} {fmt_string(value)}"
+      f" (at {_n(x)} {_n(y)} 0) (effects {hfont}{hide_s}))",
+    )
+
+  #----------------------------------------------------------------------------- Drawing primitives
+
+  def rect(
+    self, x1:float, y1:float, x2:float, y2:float,
+    fill:str = "background",
+    width:float = 0,
+  ) -> None:
+    """Add rectangle. Fill: `background`, `outline`, `none`. `width=0` = KiCad default stroke."""
+    self._graphics.append(
+      f"\t\t\t(rectangle (start {_n(x1)} {_n(y1)}) (end {_n(x2)} {_n(y2)})"
+      f" (stroke (width {_n(width)}) (type solid))"
+      f" (fill (type {fill})))",
+    )
+
+  def polyline(self, pts:list[tuple], fill:str="none", width:float=5) -> None:
+    """Add polyline through `(x, y)` points, open unless the last point repeats the first."""
+    pts_s = " ".join(f"(xy {_n(x)} {_n(y)})" for x, y in pts)
+    self._graphics.append(
+      f"\t\t\t(polyline (pts {pts_s})"
+      f" (stroke (width {_n(width)}) (type solid))"
+      f" (fill (type {fill})))",
+    )
+
+  def circle(self, cx:float, cy:float, radius:float, fill:str="outline", width:float=0) -> None:
+    """Add circle, filled solid by default (junction dot, not an outline)."""
+    self._graphics.append(
+      f"\t\t\t(circle (center {_n(cx)} {_n(cy)}) (radius {_n(radius)})"
+      f" (stroke (width {_n(width)}) (type solid))"
+      f" (fill (type {fill})))",
+    )
+
+  def arc(self, sx:float, sy:float, mx:float, my:float, ex:float, ey:float, width:float=0) -> None:
+    """Add arc through start, mid and end."""
+    self._graphics.append(
+      f"\t\t\t(arc (start {_n(sx)} {_n(sy)})"
+      f" (mid {_n(mx)} {_n(my)}) (end {_n(ex)} {_n(ey)})"
+      f" (stroke (width {_n(width)}) (type solid))"
+      " (fill (type none)))",
+    )
+
+  def text(
+    self,
+    txt:str,
+    x:float,
+    y:float,
+    size:float|None = None,
+    thick:float|None = None,
+    angle:float = 0,
+  ) -> None:
+    """Add text, style font used when `size` or `thick` is omitted."""
+    sz = size or self.style.font
+    th = thick or self.style.thick
+    self._graphics.append(
+      f"\t\t\t(text {fmt_string(txt)} (at {_n(x)} {_n(y)} {_a(angle)})"
+      f" (effects {self._font_str(sz, th)}))",
+    )
+
+  #------------------------------------------------------------------------------------------- Pins
+
+  def pin(
+    self,
+    number:int|str,
+    x:float,
+    y:float,
+    angle:float = 0,
+    length:float = 100,
+    name:str|None = None,
+    type:str = "passive",
+    graphic:str = "line",
+  ) -> None:
+    """
+    Add pin. Angle: 0=right, 90=up, 180=left, 270=down. Name defaults to the number.
+
+    `(x, y)` is the connection end, the body runs `length` from there in the `angle` direction.
+    `type` is the KiCad electrical type - `passive`, `input`, `output`, `bidirectional`,
+    `tri_state`, `power_in`, `power_out`, `open_collector`, `no_connect`, `unspecified`.
+    `graphic` is the drawn shape - `line`, `inverted`, `clock`, `inverted_clock`, `input_low`.
+    """
+    pname = name if name is not None else str(number)
+    s = self.style
+    pfont = self._font_str(s.font, s.thick)
+    self._units.setdefault(self._unit, []).append(
+      f"\t\t\t(pin {type} {graphic}"
+      f" (at {_n(x)} {_n(y)} {_a(angle)})"
+      f" (length {_n(length)})"
+      f" (name {fmt_string(pname)} (effects {pfont}))"
+      f" (number {fmt_string(number)} (effects {pfont})))",
+    )
+
+  #-------------------------------------------------------------------------------------------- Raw
+
+  def raw_gfx(self, text:str) -> None:
+    """Add raw S-expression to shared graphics."""
+    self._graphics.append(text)
+
+  def raw_unit(self, text:str) -> None:
+    """Add raw S-expression to the current unit."""
+    self._units.setdefault(self._unit, []).append(text)
+
+  #------------------------------------------------------------------------------------------ Build
+
+  def build(self) -> str:
+    """
+    Build symbol S-expression block (without library wrapper).
+
+    Sub-symbol names carry the structure KiCad expects.
+    `<name>_0_1` holds the graphics common to every unit, `<name>_N_1` holds unit N,
+    and the trailing 1 is the body style.
+    """
+    lines = []
+    lines.append(f"\t(symbol {fmt_string(self.name)}")
+    if not self.pin_numbers_visible:
+      lines.append("\t\t(pin_numbers (hide yes))")
+    pn_hide = " (hide yes)" if not self.pin_names_visible else ""
+    lines.append(
+      f"\t\t(pin_names (offset {_n(self.pin_offset)}){pn_hide})",
+    )
+    lines.append("\t\t(exclude_from_sim no)")
+    lines.append("\t\t(in_bom yes)")
+    lines.append("\t\t(on_board yes)")
+    lines.extend(self._props)
+    if self._graphics:
+      lines.append(f'\t\t(symbol {fmt_string(f"{self.name}_0_1")}')
+      lines.extend(self._graphics)
+      lines.append("\t\t)")
+    for unum in sorted(self._units.keys()):
+      lines.append(f'\t\t(symbol {fmt_string(f"{self.name}_{unum}_1")}')
+      lines.extend(self._units[unum])
+      lines.append("\t\t)")
+    lines.append("\t\t(embedded_fonts no)")
+    lines.append("\t)")
+    return "\n".join(lines)
+
+#---------------------------------------------------------------------------------------- SymbolLib
+
+class SymbolLib:
+  """Container writing a set of `Symbol` objects into one `.kicad_sym` file."""
+  def __init__(self) -> None:
+    self._symbols: list[Symbol] = []
+
+  def add(self, sym:Symbol) -> None:
+    """Add symbol, written in call order."""
+    self._symbols.append(sym)
+
+  def build(self) -> str:
+    """Build the full `.kicad_sym` text."""
+    lines = [
+      "(kicad_symbol_lib",
+      "\t(version 20241209)",
+      '\t(generator "kicad_symbol_editor")',
+      f'\t(generator_version "{GENERATOR_VERSION}")',
+    ]
+    for sym in self._symbols:
+      lines.append(sym.build())
+    lines.append(")")
+    return "\n".join(lines)
+
+  def save(self, path:str) -> str:
+    """Save the library to `path`."""
+    FILE.save(path, self.build())
+    return path

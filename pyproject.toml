@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xaeian"
+version = "1.0.0"
+description = "Simple Python utilities: files, time, serial, binary structs, databases, network, media, electronics, plotting and signals"
+readme = "readme.md"
+license = "MIT"
+license-files = ["license"]
+requires-python = ">=3.12"
+authors = [{name = "Xaeian"}]
+keywords = ["utilities", "files", "database", "serial", "crc", "struct", "media", "kicad", "plot", "matplotlib", "ngspice", "spice", "dsp", "signal", "filter", "fft", "vibration", "ftp", "sftp", "s3", "r2"]
+dependencies = []
+
+[project.optional-dependencies]
+db = ["psycopg2-binary", "pymysql"]
+db-async = ["aiomysql", "aiosqlite", "asyncpg"]
+dsp = ["numpy", "scipy"]
+eda = ["PyMuPDF", "pypdf", "sexpdata"]
+media = ["Pillow", "PyMuPDF", "pypdf"]
+plot = ["matplotlib", "numpy"]
+serial = ["pyserial"]
+sftp = ["paramiko"]
+time = ["pytz", "tzlocal"]
+yaml = ["PyYAML"]
+all = ["Pillow", "PyMuPDF", "PyYAML", "aiomysql", "aiosqlite", "asyncpg", "matplotlib", "numpy", "paramiko", "psycopg2-binary", "pymysql", "pypdf", "pyserial", "pytz", "scipy", "sexpdata", "tzlocal"]
+
+[project.scripts]
+xn = "xaeian.__main__:main"
+
+[project.urls]
+Repository = "https://github.com/Xaeian/Python"
+
+[tool.setuptools.packages.find]
+include = ["xaeian*"]
+
+[tool.setuptools.package-data]
+xaeian = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_functions = ["*"]

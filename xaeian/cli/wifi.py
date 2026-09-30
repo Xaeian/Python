@@ -1,0 +1,151 @@
+# xaeian/cli/wifi.py
+
+"""
+Extract saved Wi-Fi network names and passwords.
+
+Windows via `netsh`, Linux via `nmcli` falling back to /etc/NetworkManager/system-connections,
+which only root can read.
+"""
+
+import os, sys, re, subprocess, platform
+from typing import Any
+from ..files import JSON
+from ..log import Print
+from ..colors import Color as c
+from .args import make_parser, add_help
+
+p = Print()
+
+#---------------------------------------------------------------------------------------- Internals
+
+def _run(cmd:list[str]) -> str|None:
+  try:
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    return r.stdout if r.returncode == 0 else None
+  except Exception:
+    return None
+
+def _windows() -> list[dict[str, Any]]:
+  out = _run(["netsh", "wlan", "show", "profiles"])
+  if not out: return []
+  profiles = re.findall(r":\s*(.+)", out)
+  profiles = [p.strip() for p in profiles if p.strip()]
+  results = []
+  for ssid in profiles:
+    detail = _run(["netsh", "wlan", "show", "profile", ssid, "key=clear"])
+    password = None
+    if detail:
+      # netsh labels are localized: English, then Polish
+      m = re.search(r"Key Content\s*:\s*(.+)", detail)
+      if not m:
+        m = re.search(r"Zawarto.{1,5} klucza\s*:\s*(.+)", detail)
+      if m:
+        password = m.group(1).strip()
+    results.append({"ssid": ssid, "password": password})
+  return results
+
+def _linux() -> list[dict[str, Any]]:
+  conn_dir = "/etc/NetworkManager/system-connections"
+  results = []
+  out = _run(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"])
+  if out:
+    for line in out.strip().splitlines():
+      parts = line.split(":")
+      if len(parts) < 2: continue
+      name, ctype = parts[0], parts[1]
+      if "wireless" not in ctype and "wifi" not in ctype: continue
+      detail = _run(["nmcli", "-s", "-t", "-f", "802-11-wireless-security.psk",
+        "connection", "show", name])
+      password = None
+      if detail:
+        for dl in detail.strip().splitlines():
+          if "psk:" in dl:
+            val = dl.split(":", 1)[-1].strip()
+            if val and val != "--": password = val
+      results.append({"ssid": name, "password": password})
+    return results
+  if not os.path.isdir(conn_dir): return []
+  for fname in os.listdir(conn_dir):
+    fpath = os.path.join(conn_dir, fname)
+    if not os.path.isfile(fpath): continue
+    try:
+      with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+        content = f.read()
+    except PermissionError:
+      continue
+    if "[wifi]" not in content: continue
+    ssid_m = re.search(r"^ssid=(.+)$", content, re.MULTILINE)
+    psk_m = re.search(r"^psk=(.+)$", content, re.MULTILINE)
+    if ssid_m:
+      results.append({
+        "ssid": ssid_m.group(1).strip(),
+        "password": psk_m.group(1).strip() if psk_m else None,
+      })
+  return results
+
+#---------------------------------------------------------------------------------------------- API
+
+def wifi_passwords() -> list[dict[str, Any]]:
+  """
+  Saved Wi-Fi networks, sorted by SSID.
+
+  Raises `RuntimeError` outside Windows and Linux.
+
+  Returns:
+    Dicts with keys `ssid` and `password`, the password `None` for open or unreadable profiles.
+  """
+  system = platform.system()
+  if system == "Windows": networks = _windows()
+  elif system == "Linux": networks = _linux()
+  else: raise RuntimeError(f"Unsupported platform: {system}")
+  networks.sort(key=lambda n: n["ssid"].lower())
+  return networks
+
+#---------------------------------------------------------------------------------------------- CLI
+
+EXAMPLES = """
+examples:
+  xn wifi - list all saved networks + passwords
+  xn wifi -o wifi.json - save report to JSON file
+"""
+
+def main() -> None:
+  parser = make_parser("Extract saved Wi-Fi passwords", EXAMPLES)
+  parser.add_argument("-o", "--output", default=None, metavar="PATH",
+    help="Save JSON report to file")
+  add_help(parser)
+  args = parser.parse_args()
+  system = platform.system()
+  if system not in ("Windows", "Linux"):
+    p.err(f"Platform {c.BLUE}{system}{c.END} not supported "
+      f"{c.GREY}(Windows or Linux required){c.END}")
+    sys.exit(1)
+  p.inf(f"Scanning Wi-Fi profiles {c.GREY}({system}){c.END}...")
+  try:
+    networks = wifi_passwords()
+  except Exception as e:
+    p.err(f"Scan failed | {e}")
+    sys.exit(1)
+  if not networks:
+    p.wrn("No saved Wi-Fi networks found")
+  else:
+    has_pw = sum(1 for n in networks if n["password"])
+    no_pw = len(networks) - has_pw
+    p.ok(f"Found {c.TEAL}{len(networks)}{c.END} networks "
+      f"({c.CYAN}{has_pw}{c.END} with password"
+      f"{', ' + c.GREY + str(no_pw) + ' open' + c.END if no_pw else ''})")
+    max_ssid = max(len(n["ssid"]) for n in networks)
+    for n in networks:
+      ssid = n["ssid"].ljust(max_ssid)
+      if n["password"]:
+        p.dot(f"{c.CREAM}{ssid}{c.END}  {n['password']}")
+      else:
+        p.dot(f"{c.GREY}{ssid}  (open){c.END}")
+  if args.output:
+    JSON.save_pretty(args.output, networks)
+    os.chmod(args.output, 0o600) # POSIX only: on Windows the directory ACL is the protection
+    p.ok(f"Saved {c.TEAL}{args.output}{c.END}")
+    p.wrn("The file holds passwords in plain text")
+
+if __name__ == "__main__":
+  main()

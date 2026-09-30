@@ -1,0 +1,568 @@
+# xaeian/net/ftp.py
+
+"""FTP client on stdlib `ftplib`, mirroring the `SFTP` API so either can be dropped in."""
+
+import os, ftplib, datetime
+from pathlib import Path
+from ..log import Logger, Print
+from ..colors import Color as c
+from ..files import FILE, PATH
+from .common import (
+  TIMEOUT_S, local_index, _tmp_seq, Filter, Progress, Action, Attrs, log_sync, pruned,
+  safe_name, unchanged, _gone, _refused,
+)
+
+def _parse_mtime(s:str) -> float|None:
+  """Parse MLSD/MDTM timestamp `YYYYMMDDHHmmss` → UTC epoch."""
+  try:
+    dt = datetime.datetime.strptime(s.strip()[:14], "%Y%m%d%H%M%S")
+    return dt.replace(tzinfo=datetime.timezone.utc).timestamp()
+  except Exception: return None
+
+#---------------------------------------------------------------------------------------------- FTP
+
+class FTP:
+  """
+  FTP client: push/pull sync, atomic transfers.
+
+  Plain FTP has no encryption and no server identity: credentials and data travel in cleartext.
+  Prefer `SFTP` for anything sensitive.
+
+  Capability detection on connect: MLSD (mtime+size skip) and MFMT (preserve mtime).
+  No MLSD → per-file SIZE+MDTM, no MFMT → push falls back to size-only.
+  """
+  def __init__(
+    self,
+    host:str,
+    user:str,
+    port:int = 21,
+    *,
+    password:str|None = None,
+    log:Logger|Print|None = None,
+  ) -> None:
+    self.host = host
+    self.user = user
+    self.port = port
+    self._password = password
+    self.log = log
+    self._ftp: ftplib.FTP|None = None
+    self._has_mlsd = False
+    self._has_mfmt = False
+    self._index_partial = False # a listing failed: delete must stand down
+
+  def __enter__(self) -> "FTP": self.connect(); return self
+  def __exit__(self, *_) -> None: self.disconnect()
+
+  #------------------------------------------------------------------------------------- Connection
+
+  def connect(self) -> None:
+    """
+    Open FTP session and detect server capabilities (MLSD, MFMT).
+
+    A failure here is raised and never also logged: the message carries the whole story,
+    so a caller that prints what it catches would otherwise print it twice.
+    """
+    self._ftp = ftplib.FTP()
+    try:
+      self._ftp.connect(self.host, self.port, timeout=TIMEOUT_S)
+      self._ftp.login(self.user, self._password or "")
+      self._ftp.set_pasv(True)
+    except Exception as e:
+      raise ConnectionError(
+        f"FTP connect failed on {c.TURQUS}{self.host}{c.END} | {e}") from e
+    if not self._binary() and self.log:
+      self.log.wrn(f"binary mode rejected by {c.TURQUS}{self.host}{c.END}: stat may fail")
+    try:
+      feat = self._ftp.sendcmd("FEAT").upper() # FEAT casing is not guaranteed
+      # RFC 3659: FEAT advertises MLST, MLSD comes with it
+      self._has_mlsd = "MLST" in feat
+      self._has_mfmt = "MFMT" in feat
+      if "UTF8" in feat:
+        try: self._ftp.sendcmd("OPTS UTF8 ON")
+        except Exception: pass
+    except Exception:
+      self._has_mlsd = False
+      self._has_mfmt = False
+    if self.log:
+      caps = f"mlsd:{c.CYAN}{self._has_mlsd}{c.END} mfmt:{c.CYAN}{self._has_mfmt}{c.END}"
+      self.log.inf(
+        f"connected {c.TURQUS}{self.host}{c.END} user:{c.VIOLET}{self.user}{c.END} {caps}",
+      )
+
+  def disconnect(self) -> None:
+    """Close FTP session."""
+    if self._ftp:
+      try: self._ftp.quit()
+      except Exception:
+        try: self._ftp.close() # QUIT cannot round-trip on a dead link
+        except Exception: pass
+      self._ftp = None
+
+  def _require_connected(self):
+    if not self._ftp: raise RuntimeError("FTP not connected: call connect() first")
+
+  def _binary(self) -> bool:
+    """Force binary (TYPE I) mode: many servers reject SIZE in ASCII, breaking `stat()`."""
+    try: self._ftp.voidcmd("TYPE I"); return True
+    except Exception: return False
+
+  def _mdtm(self, remote:str) -> float|None:
+    """Remote mtime via MDTM, or `None` if the server lacks it."""
+    try: return _parse_mtime(self._ftp.sendcmd(f"MDTM {remote}")[4:])
+    except Exception: return None
+
+  def _rename_overwrite(self, src:str, dst:str):
+    """Rename, falling back to delete-then-rename: RFC 959 RNTO may refuse an existing target."""
+    try: self._ftp.rename(src, dst)
+    except ftplib.error_perm as e:
+      # src is gone: fail before dst gets destroyed
+      if not self.exists(src): raise _gone(src) from e
+      try: self._ftp.delete(dst)
+      except ftplib.error_perm: pass
+      self._ftp.rename(src, dst)
+
+  #------------------------------------------------------------------------------------ Single file
+
+  def stat(self, remote:str) -> Attrs|None:
+    """
+    Attributes via SIZE + MDTM: `None` when absent, and also for a directory.
+
+    Only 550 answers `None`.
+    A 530 is the session saying nobody is logged in any more,
+    and reading that as a missing file turns every path on the box into one that is not there.
+    """
+    self._require_connected()
+    self._binary()
+    try: size = self._ftp.size(remote)
+    except ftplib.error_perm as e:
+      if not str(e).startswith("550"): raise
+      return None # 550: absent, or a directory
+    if size is None: return None
+    return Attrs(st_size=size, st_mtime=self._mdtm(remote))
+
+  def _is_dir(self, remote:str) -> bool:
+    """Directory probe: enter it and come back. Plain FTP has no cheaper honest answer."""
+    pwd = self._ftp.pwd()
+    try: self._ftp.cwd(remote)
+    except ftplib.error_perm: return False
+    self._ftp.cwd(pwd)
+    return True
+
+  def exists(self, remote:str) -> bool:
+    """Check if a remote path exists, directories included, as `SFTP.exists` answers."""
+    return self.stat(remote) is not None or self._is_dir(remote)
+
+  def _fault(self, remote:str, probe:str|None=None) -> OSError:
+    """
+    Which of the two a refusal was.
+    FTP answers "not there" and "not for you" alike, so the tree decides:
+    `probe` is what must exist for a refusal, `remote` when unset.
+
+    One round trip, spent only after the call it explains has already failed.
+    """
+    at = remote if probe is None else probe
+    if at and not self.exists(at): return _gone(at)
+    return _refused(remote)
+
+  def put(
+    self,
+    local:str,
+    remote:str,
+    *,
+    atomic:bool = True,
+    preserve_mtime:bool = False,
+    callback:Progress|None = None,
+    _label:str|None = None,
+  ) -> None:
+    """
+    Upload single file, creating the missing remote parent directories.
+
+    Args:
+      atomic: Upload to a unique `.tmp` beside `remote`, renamed on completion.
+      preserve_mtime: Set remote mtime via MFMT, a no-op when the server lacks it.
+    """
+    self._require_connected()
+    local = PATH.resolve(local, read=True)
+    os.stat(local) # a missing local file fails here, before a round trip
+    label = _label or remote
+    dst = f"{remote}.{os.getpid()}.{next(_tmp_seq)}.tmp" if atomic else remote
+    for attempt in (1, 2):
+      try:
+        self._stor(local, dst, remote, label, callback)
+        break
+      except FileNotFoundError: # the parent is not there: made once, the next files find it
+        if attempt == 2: raise
+        self.mkdir(os.path.dirname(remote))
+      except Exception:
+        if atomic:
+          try: self._ftp.delete(dst) # drop the partial .tmp
+          except Exception: pass
+        raise
+    if atomic: self._rename_overwrite(dst, remote)
+    if preserve_mtime and self._has_mfmt:
+      ts = datetime.datetime.fromtimestamp(
+        Path(local).stat().st_mtime, tz=datetime.timezone.utc,
+      ).strftime("%Y%m%d%H%M%S")
+      try: self._ftp.sendcmd(f"MFMT {ts} {remote}")
+      except Exception:
+        if self.log: self.log.wrn(f"MFMT failed {c.GREY}{remote}{c.END}: mtime not preserved")
+    if self.log: self.log.dot(f"{c.GREY}{local}{c.END} → {c.GREY}{remote}{c.END}")
+
+  def _stor(self, local:str, dst:str, remote:str, label:str, callback:Progress|None) -> None:
+    """Upload one file, reading a refusal against the parent directory."""
+    total, sent = os.path.getsize(local), 0
+    def _cb(block):
+      nonlocal sent
+      sent += len(block)
+      callback(label, sent, total)
+    with open(local, "rb") as f:
+      try: self._ftp.storbinary(f"STOR {dst}", f, callback=_cb if callback else None)
+      except ftplib.error_perm as e: raise self._fault(remote, os.path.dirname(remote)) from e
+
+  def get(
+    self,
+    remote:str,
+    local:str,
+    *,
+    preserve_mtime:bool = False,
+    callback:Progress|None = None,
+    _label:str|None = None,
+  ) -> None:
+    """
+    Download single file, creating the missing local parent directories.
+
+    The bytes land beside the target and are swapped in on completion,
+    so a failed transfer leaves the previous local file untouched.
+
+    Args:
+      preserve_mtime: Set local mtime from the remote MDTM, a no-op when the server lacks it.
+    """
+    self._require_connected()
+    local = PATH.resolve(local, read=False)
+    label = _label or remote
+    with FILE.atomic(local) as tmp, open(tmp, "wb") as f:
+      if callback:
+        self._binary()
+        try: total = self._ftp.size(remote) or 0
+        except Exception: total = 0
+        recv = [0]
+        def _write(block): f.write(block); recv[0] += len(block); callback(label, recv[0], total)
+        self._retr(remote, _write)
+      else:
+        self._retr(remote, f.write)
+    if preserve_mtime:
+      mtime = self._mdtm(remote)
+      if mtime: os.utime(local, (mtime, mtime))
+      elif self.log: self.log.wrn(f"MDTM failed {c.GREY}{remote}{c.END}: mtime not preserved")
+    if self.log: self.log.dot(f"{c.GREY}{remote}{c.END} → {c.GREY}{local}{c.END}")
+
+  def _retr(self, remote:str, write):
+    """Download, reading a refusal against the file itself."""
+    try: self._ftp.retrbinary(f"RETR {remote}", write)
+    except ftplib.error_perm as e: raise self._fault(remote) from e
+
+  def remove(self, remote:str) -> None:
+    """Delete remote file. Silent if it was not there, but a refusal to delete is raised."""
+    self._require_connected()
+    try: self._ftp.delete(remote)
+    except ftplib.error_perm as e:
+      # 550 answers both "no such file" and "permission denied"; still there means the latter
+      if self.exists(remote): raise _refused(remote) from e
+
+  def rename(self, src:str, dst:str) -> None:
+    """Rename/move remote file: overwrites target."""
+    self._require_connected()
+    self._rename_overwrite(src, dst)
+
+  #------------------------------------------------------------------------------------ Directories
+
+  def mkdir(self, remote:str) -> None:
+    """
+    Create remote directory recursively, idempotent.
+
+    MKD answers "it is already there" and "you may not" with the same 550,
+    so each reply is swallowed and the result is read from the tree instead:
+    one probe at the end, not one per component.
+    """
+    self._require_connected()
+    if not remote or remote == "/": return
+    parts = [p for p in remote.replace("\\", "/").split("/") if p]
+    prefix = "/" if remote.startswith("/") else ""
+    cur = ""
+    for p in parts:
+      cur = f"{prefix}{p}" if not cur else f"{cur}/{p}"
+      try: self._ftp.mkd(cur)
+      except ftplib.error_perm: pass
+    if not self._is_dir(remote): raise _refused(remote)
+
+  def ls(self, remote:str) -> list[Attrs]:
+    """
+    List remote directory with attributes.
+
+    A missing directory raises `FileNotFoundError`, as `SFTP.ls` does.
+    Empty means empty or unlistable, which 550 does not tell apart:
+    on NLST it is also how servers answer an empty directory,
+    so the tree is probed before the answer is chosen.
+
+    Without MLSD `st_mtime` stays `None`: entries carry size and kind only.
+    """
+    self._require_connected()
+    result = []
+    if self._has_mlsd:
+      try: entries = list(self._ftp.mlsd(remote, facts=["size", "modify", "type"]))
+      except ftplib.error_perm as e:
+        if not self._is_dir(remote): raise _gone(remote) from e
+        return result
+      for name, facts in entries:
+        if not safe_name(name): continue
+        ftype = facts.get("type", "file").lower() # MLSD fact values are case-insensitive
+        result.append(Attrs(
+          st_size=int(facts.get("size", 0)),
+          st_mtime=_parse_mtime(facts["modify"]) if "modify" in facts else None,
+          filename=name,
+          is_dir=ftype in ("dir", "cdir", "pdir"),
+        ))
+    else:
+      try: paths = self._ftp.nlst(remote)
+      except ftplib.error_perm as e: # a refusal also means "empty" for NLST
+        if not self._is_dir(remote): raise _gone(remote) from e
+        return result
+      self._binary() # nlst reset TYPE to ASCII
+      for path in paths:
+        name = _leaf(path)
+        if not safe_name(name): continue
+        child = f"{remote}/{name}"
+        try:
+          size = self._ftp.size(child)
+        except ftplib.error_perm: # 550: a directory, or SIZE denied - the probe decides
+          size = None
+        is_dir = self._is_dir(child) if size is None else False
+        result.append(Attrs(st_size=size or 0, st_mtime=None, filename=name, is_dir=is_dir))
+    return result
+
+  def rmdir(self, remote:str) -> None:
+    """Remove remote directory recursively."""
+    self._require_connected()
+    for attr in self.ls(remote):
+      path = f"{remote}/{attr.filename}"
+      if attr.is_dir: self.rmdir(path)
+      else: self.remove(path)
+    try: self._ftp.rmd(remote)
+    except ftplib.error_perm as e: raise self._fault(remote) from e
+
+  #--------------------------------------------------------------------------------- Batch transfer
+
+  def put_dir(
+    self,
+    local:str,
+    remote:str,
+    *,
+    filter:Filter|None = None,
+    atomic:bool = True,
+    callback:Progress|None = None,
+  ) -> None:
+    """
+    Upload every file recursively. No skip check: `sync_push` transfers only what changed.
+
+    Walks files, so an empty local directory has no remote counterpart afterwards.
+    """
+    self._require_connected()
+    files = local_index(local)
+    if self.log:
+      self.log.inf(f"put_dir {c.CYAN}{len(files)}{c.END} files → {c.SKY}{remote}{c.END}")
+    for rel, f in files.items():
+      if pruned(rel, filter): continue
+      self.put(str(f), f"{remote}/{rel}", atomic=atomic, callback=callback, _label=rel)
+
+  def get_dir(
+    self,
+    remote:str,
+    local:str,
+    *,
+    filter:Filter|None = None,
+    callback:Progress|None = None,
+  ) -> None:
+    """Download every file recursively. No skip check: `sync_pull` transfers only what changed."""
+    self._require_connected()
+    self._get_dir_rec(remote, remote, Path(PATH.resolve(local, read=False)), filter, callback)
+
+  #------------------------------------------------------------------------------------------- Sync
+
+  def sync_push(
+    self,
+    local:str,
+    remote:str,
+    *,
+    delete:bool = False,
+    dry_run:bool = False,
+    filter:Filter|None = None,
+    callback:Progress|None = None,
+  ) -> list[Action]:
+    """
+    Push local → remote, skipping unchanged files.
+
+    Skip strategy: mtime+size when the server supports MFMT,
+    size-only otherwise - then a same-size edit can be missed.
+
+    `delete` is refused when the local source is not a directory,
+    so a missing source can never wipe the remote.
+
+    Args:
+      delete: Remove remote files absent locally, `filter` respected.
+      dry_run: Plan actions without executing, the returned list is still complete.
+
+    Returns:
+      `("put"|"skip"|"delete", rel_path)` per file.
+    """
+    self._require_connected()
+    root = Path(PATH.resolve(local, read=True))
+    local_files = local_index(local)
+    remote_idx = self._index_remote(remote, filter=filter)
+    actions: list[Action] = []
+    for rel, lpath in local_files.items():
+      if pruned(rel, filter): continue
+      ls = lpath.stat()
+      rs = remote_idx.get(rel)
+      if rs and unchanged(rs, ls.st_mtime, ls.st_size, use_mtime=self._has_mfmt):
+        actions.append(("skip", rel)); continue
+      actions.append(("put", rel))
+      if not dry_run:
+        self.put(str(lpath), f"{remote}/{rel}", atomic=True,
+          preserve_mtime=True, callback=callback, _label=rel)
+    if delete:
+      if not root.is_dir(): # a missing source would make every remote file look deleted
+        if self.log: self.log.wrn("delete skipped: local source is not a directory")
+      else:
+        for rel in remote_idx:
+          if rel not in local_files: # `_index_remote` pruned it, so `filter` has had its say
+            actions.append(("delete", rel))
+            if not dry_run: self.remove(f"{remote}/{rel}")
+    log_sync(self.log, "sync_push", actions, dry_run)
+    return actions
+
+  def sync_pull(
+    self,
+    remote:str,
+    local:str,
+    *,
+    delete:bool = False,
+    dry_run:bool = False,
+    filter:Filter|None = None,
+    callback:Progress|None = None,
+  ) -> list[Action]:
+    """
+    Pull remote → local, skipping unchanged files.
+
+    Skip strategy: mtime+size when the server offers MLSD or MDTM,
+    size-only otherwise - then a same-size edit can be missed.
+
+    `delete` is refused on an incomplete remote listing,
+    so an unreadable remote can never wipe local files.
+
+    Args:
+      delete: Remove local files absent remotely, `filter` respected.
+      dry_run: Plan actions without executing, the returned list is still complete.
+
+    Returns:
+      `("get"|"skip"|"delete", rel_path)` per file.
+    """
+    self._require_connected()
+    root = Path(PATH.resolve(local, read=False))
+    local_idx = local_index(local) if root.exists() else {}
+    remote_idx = self._index_remote(remote, filter=filter)
+    actions: list[Action] = []
+    for rel, rs in remote_idx.items():
+      lpath = root / rel
+      if lpath.exists():
+        ls = lpath.stat()
+        if unchanged(rs, ls.st_mtime, ls.st_size):
+          actions.append(("skip", rel)); continue
+      actions.append(("get", rel))
+      if not dry_run:
+        self.get(f"{remote}/{rel}", str(lpath), preserve_mtime=True,
+          callback=callback, _label=rel)
+    if delete:
+      if self._index_partial: # a partial view would make present files look deleted
+        if self.log: self.log.wrn("delete skipped: remote listing incomplete")
+      else:
+        for rel in local_idx:
+          if rel not in remote_idx and not pruned(rel, filter):
+            actions.append(("delete", rel))
+            if not dry_run: (root / rel).unlink(missing_ok=True)
+    log_sync(self.log, "sync_pull", actions, dry_run)
+    return actions
+
+  #---------------------------------------------------------------------------------------- Helpers
+
+  def _index_remote(self, remote:str, _rel:str="", filter:Filter|None=None) -> dict[str, Attrs]:
+    """
+    Recursively build `{rel_path: Attrs}` for remote dir, pruning filtered paths.
+
+    Sets `_index_partial` when a listing fails, so callers can refuse to delete on a partial view.
+    A missing root yields `{}`: a push then creates it.
+    """
+    if not _rel: self._index_partial = False
+    idx: dict = {}
+    if self._has_mlsd:
+      try: entries = list(self._ftp.mlsd(remote, facts=["size", "modify", "type"]))
+      except ftplib.error_perm:
+        self._index_partial = True; return idx
+      for name, facts in entries:
+        if not safe_name(name): continue
+        rel = f"{_rel}/{name}" if _rel else name
+        if facts.get("type", "file").lower() in ("dir", "cdir", "pdir"):
+          if filter and not (filter(rel) and filter(f"{rel}/")): continue
+          idx.update(self._index_remote(f"{remote}/{name}", rel, filter))
+        else:
+          if filter and not filter(rel): continue
+          idx[rel] = Attrs(
+            st_size=int(facts.get("size", 0)),
+            st_mtime=_parse_mtime(facts["modify"]) if "modify" in facts else None,
+            filename=name,
+          )
+    else:
+      try: paths = self._ftp.nlst(remote)
+      except ftplib.error_perm:
+        self._index_partial = True; return idx
+      self._binary() # nlst reset TYPE to ASCII
+      for path in paths:
+        name = _leaf(path)
+        if not safe_name(name): continue
+        rel = f"{_rel}/{name}" if _rel else name
+        child = f"{remote}/{name}"
+        try:
+          size = self._ftp.size(child)
+          if size is not None:
+            if filter and not filter(rel): continue
+            idx[rel] = Attrs(st_size=size, st_mtime=self._mdtm(child), filename=name)
+            continue
+        except ftplib.error_perm:
+          pass # 550: a directory, or SIZE denied - the nested listing decides
+        if filter and not (filter(rel) and filter(f"{rel}/")): continue
+        idx.update(self._index_remote(child, rel, filter))
+        self._binary() # the nested nlst reset TYPE again
+    return idx
+
+  def _get_dir_rec(
+    self,
+    remote_root:str,
+    remote:str,
+    local:Path,
+    filter:Filter|None,
+    callback:Progress|None,
+  ):
+    for attr in self.ls(remote):
+      rpath = f"{remote}/{attr.filename}"
+      rel = rpath[len(remote_root):].lstrip("/")
+      if attr.is_dir:
+        if filter and not (filter(rel) and filter(f"{rel}/")): continue
+        self._get_dir_rec(remote_root, rpath, local, filter, callback)
+      else:
+        if filter and not filter(rel): continue
+        self.get(rpath, str(local / rel), callback=callback, _label=rel)
+
+#------------------------------------------------------------------------------------------ Helpers
+
+def _leaf(path:str) -> str:
+  """Last segment of an NLST entry: servers answer bare, relative or absolute names."""
+  return path.rstrip("/").rsplit("/", 1)[-1] or path

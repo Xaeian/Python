@@ -1,0 +1,183 @@
+# xaeian/cli/tree.py
+
+"""Directory tree visualizer with filtering and color output."""
+
+import os, sys
+from typing import Any
+from ..files import PATH, DIR, JSON
+from ..files.dir import _linked # a link is shown, never entered
+from ..log import Print
+from ..colors import Color as c
+from .args import fmt_size, make_parser, add_help
+
+p = Print()
+
+#---------------------------------------------------------------------------------------- Internals
+
+_PIPE = "│   "
+_TEE = "├── "
+_LAST = "└── "
+_BLANK = "    "
+
+DEFAULT_IGNORE = {
+  "__pycache__", ".git", ".svn", ".hg",
+  "node_modules", ".tox", ".mypy_cache",
+  ".pytest_cache", ".venv", "venv", ".env",
+  ".DS_Store", "Thumbs.db",
+}
+
+def _fmt_size(b:int) -> str:
+  return fmt_size(b, ("B", "k", "M", "G"))
+
+def _match_exts(name:str, exts:list[str]|None) -> bool:
+  if not exts: return True
+  return any(name.lower().endswith(e.lower()) for e in exts)
+
+def _should_ignore(name:str, ignore:set[str]) -> bool:
+  return name in ignore or name.startswith(".")
+
+#---------------------------------------------------------------------------------------------- API
+
+def tree(
+  root:str,
+  exts:list[str]|None = None,
+  ignore:set[str]|None = None,
+  show_hidden:bool = False,
+  show_size:bool = False,
+  max_depth:int|None = None,
+  dirs_only:bool = False,
+  color:bool = True,
+) -> dict[str, Any]:
+  """
+  Build the tree rows and stats for `root`; nothing is printed.
+
+  Args:
+    exts: Filename suffixes to keep, case-insensitive (e.g. [".py", ".c"]).
+    ignore: Names skipped at any level (default: `DEFAULT_IGNORE`).
+    show_hidden: Include dot-prefixed names; `ignore` still applies.
+    max_depth: Depth cap, `None` = unlimited.
+
+  Returns:
+    Keys: dirs, files, size (bytes), lines (rendered rows, root first).
+  """
+  root = PATH.resolve(root)
+  if not DIR.exists(root): raise FileNotFoundError(f"Directory not found: {root}")
+  if ignore is None:
+    ignore = DEFAULT_IGNORE.copy()
+  stats = {"dirs": 0, "files": 0, "size": 0, "lines": []}
+
+  def _col(text, clr):
+    return f"{clr}{text}{c.END}" if color else text
+
+  def _walk(dirpath:str, prefix:str, depth:int):
+    try:
+      entries = sorted(os.listdir(dirpath),
+        key=lambda e: (not os.path.isdir(os.path.join(dirpath, e)), e.lower()))
+    except PermissionError:
+      stats["lines"].append(f"{prefix}{_LAST}{_col('[permission denied]', c.RED)}")
+      return
+    filtered = []
+    for name in entries:
+      if not show_hidden and _should_ignore(name, ignore): continue
+      if show_hidden and name != "." and name != ".." and name in ignore: continue
+      full = os.path.join(dirpath, name)
+      is_dir = os.path.isdir(full)
+      if dirs_only and not is_dir: continue
+      if not is_dir and not _match_exts(name, exts): continue
+      filtered.append((name, full, is_dir))
+    max_name = max((len(n) for n, _, d in filtered if not d), default=0)
+    for i, (name, full, is_dir) in enumerate(filtered):
+      is_last = (i == len(filtered) - 1)
+      connector = _LAST if is_last else _TEE
+      if is_dir:
+        stats["dirs"] += 1
+        stats["lines"].append(f"{prefix}{connector}{_col(name + '/', c.CYAN)}")
+        if (max_depth is None or depth < max_depth) and not _linked(dirpath, name):
+          extension = _BLANK if is_last else _PIPE
+          _walk(full, prefix + extension, depth + 1)
+      else:
+        stats["files"] += 1
+        try: sz = os.path.getsize(full)
+        except OSError: sz = 0
+        stats["size"] += sz
+        if show_size:
+          size_str = _col(_fmt_size(sz).rjust(6), c.GREY)
+          stats["lines"].append(f"{prefix}{connector}{name.ljust(max_name)} {size_str}")
+        else:
+          stats["lines"].append(f"{prefix}{connector}{name}")
+
+  stats["lines"].append(_col(PATH.basename(root) + "/", c.TEAL))
+  _walk(root, "", 0)
+  return stats
+
+#---------------------------------------------------------------------------------------------- CLI
+
+EXAMPLES = """
+examples:
+  xn tree . - current directory
+  xn tree src/ -e .py .c - only .py and .c files
+  xn tree . -d 2 - max depth 2
+  xn tree . --size - show file sizes
+  xn tree . --dirs - directories only
+  xn tree . --hidden - include dotfiles
+  xn tree . -o tree.json - save stats to JSON
+"""
+
+def main() -> None:
+  parser = make_parser("Draw directory tree with filtering", EXAMPLES)
+  parser.add_argument("root", nargs="?", default=".", help="Root directory (default: .)")
+  parser.add_argument("-e", "--exts", nargs="+", default=None, metavar="EXT",
+    help="Filter by extensions (e.g. .py .c .h)")
+  parser.add_argument("-d", "--depth", type=int, default=None, metavar="N",
+    help="Max depth (default: unlimited)")
+  parser.add_argument("-i", "--ignore", nargs="+", default=None, metavar="NAME",
+    help="Additional names to ignore")
+  parser.add_argument("--size", action="store_true", help="Show file sizes")
+  parser.add_argument("--dirs", action="store_true", help="Show directories only")
+  parser.add_argument("--hidden", action="store_true", help="Show hidden files and directories")
+  parser.add_argument("--no-color", action="store_true", help="Disable ANSI colors")
+  parser.add_argument("-o", "--output", default=None, metavar="PATH",
+    help="Save stats to JSON file")
+  add_help(parser)
+  args = parser.parse_args()
+  root = PATH.resolve(args.root)
+  if not DIR.exists(root):
+    p.err(f"Directory {c.ORANGE}{root}{c.END} not found")
+    sys.exit(1)
+  ignore = DEFAULT_IGNORE.copy()
+  if args.ignore:
+    ignore.update(args.ignore)
+  try:
+    result = tree(
+      args.root,
+      exts=args.exts,
+      ignore=ignore,
+      show_hidden=args.hidden,
+      show_size=args.size,
+      max_depth=args.depth,
+      dirs_only=args.dirs,
+      color=not args.no_color,
+    )
+  except PermissionError:
+    p.err(f"No read permission for {c.ORANGE}{root}{c.END}")
+    sys.exit(1)
+  except Exception as e:
+    p.err(f"Tree failed | {e}")
+    sys.exit(1)
+  for line in result["lines"]:
+    print(line)
+  print()
+  p.inf(f"{c.TEAL}{result['dirs']}{c.END} directories, "
+    f"{c.CYAN}{result['files']}{c.END} files, "
+    f"{c.GREY}{_fmt_size(result['size'])}{c.END} total")
+  if args.output:
+    JSON.save_pretty(args.output, {
+      "root": root,
+      "dirs": result["dirs"],
+      "files": result["files"],
+      "size": result["size"],
+    })
+    p.ok(f"Saved {c.TEAL}{args.output}{c.END}")
+
+if __name__ == "__main__":
+  main()
