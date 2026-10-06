@@ -3,8 +3,9 @@
 """
 `Shell.boot` against a scripted device: the `boot` command of `lib/sh` under the bootloader.
 
-The fake echoes every line the way the console does, answers `BOOT <verb> key:value` lines
-with colors on, and drops a log line into the stream now and then.
+The fake echoes every line the way the console does,
+answers `BOOT <verb> key:value` lines with colors on,
+and drops a log line into the stream now and then.
 """
 
 import struct
@@ -24,11 +25,14 @@ class FakeDevice:
     boot:int = 1,
     torn:bool = False,
     stubborn:bool = False,
+    key:str = "8a1fe3c0",
   ):
     self.slot, self.line, self.boot, self.torn, self.stubborn = slot, line, boot, torn, stubborn
+    self.key = key
     self.pending, self.out = b"", []
     self.size = self.crc = self.offset = 0
     self.staged = bytearray()
+    self.signature = None # hex of the signature `boot begin` takes after the CRC
     self.calls = 0
     self.ended = False
 
@@ -48,9 +52,11 @@ class FakeDevice:
     verb = argv[1]
     if verb == "info":
       self.say(f"BOOT info boot:{self.boot} app:08002000 slot:{self.slot} page:2048 "
-        f"line:{self.line} image:100 crc:0000abcd active:0")
+        f"line:{self.line} image:100 crc:0000abcd active:0 "
+        f"mode:key result:chip key:{self.key} rdp:1")
     elif verb == "begin":
       self.size, self.crc, self.offset = int(argv[2]), int(argv[3], 16), 0
+      self.signature = argv[4] if len(argv) > 4 else None
       self.staged = bytearray()
       self.say(f"BOOT begin size:{self.size} crc:{self.crc:08x}")
     elif verb == "data":
@@ -81,17 +87,22 @@ class FakeDevice:
   def flush(self): pass
 
 class Image:
-  """A class keeps the helper out of reach of `python_functions = ["*"]` collection."""
+  """A class keeps these helpers out of reach of `python_functions = ["*"]` collection."""
   @staticmethod
-  def built(size:int) -> bytes:
-    """The .bin of a build: header at 0x200, eight erased bytes behind the image."""
+  def built(size:int, signature:bytes=b"") -> bytes:
+    """
+    The `.bin` of a build: header at 0x200, eight erased bytes behind the image.
+
+    Eight bytes alone are the trailer of a Core older than the signature.
+    `signature` fills the 64 bytes behind them, erased in an unsigned build.
+    """
     body = bytearray((i * 7 + 3) & 0xFF for i in range(size))
     struct.pack_into("<II", body, 0x200, 0x4E45504F, size)
-    return bytes(body) + b"\xff" * 8
+    return bytes(body) + b"\xff" * 8 + signature
 
   @staticmethod
   def hex(image:bytes, origin:int=0x08002000) -> str:
-    """The same image as Intel HEX, the way objcopy writes it: 16-byte records, one segment."""
+    """The same image as Intel HEX, the way `objcopy` writes it: 16-byte records, one segment."""
     def record(kind:int, addr:int, data:bytes) -> str:
       raw = bytes([len(data), addr >> 8, addr & 0xFF, kind]) + data
       return f":{raw.hex()}{(-sum(raw)) & 0xFF:02x}".upper()
@@ -103,7 +114,7 @@ class Image:
 
 @pytest.fixture
 def shell(monkeypatch):
-  """A Shell whose `connect()` plugs in a `FakeDevice` instead of opening hardware."""
+  """A `Shell` whose `connect()` plugs in a `FakeDevice` instead of opening hardware."""
   def build(**device_kw):
     device = FakeDevice(**device_kw)
     sh = Shell("FAKE", print_console=False, timeout=0.01)
@@ -174,11 +185,30 @@ def a_reply_split_across_reads_is_joined(shell):
   assert sh.boot(Image.built(2500)) is True
   assert device.ended
 
-def info_reads_the_fields_as_numbers(shell):
+def a_signed_build_sends_its_signature_with_begin(shell):
+  signature = bytes(range(64))
+  sh, device = shell()
+  assert sh.boot(Image.built(3000, signature)) is True
+  assert device.ended and device.signature == signature.hex()
+
+def an_unsigned_build_sends_no_signature(shell):
+  """Erased signature field, or a trailer of a Core older than the signature."""
+  for image in (Image.built(3000, b"\xff" * 64), Image.built(3000)):
+    sh, device = shell()
+    assert sh.boot(image) is True
+    assert device.ended and device.signature is None
+
+def info_reads_numbers_and_words(shell):
+  """Numbers as numbers, `app` and `crc` in hex; `mode`, `result` and `key` as the device says."""
   sh, _ = shell()
   info = sh.boot_info()
   assert info["boot"] == 1 and info["app"] == 0x08002000 and info["slot"] == 253952
-  assert info["crc"] == 0xABCD and info["line"] == 2047
+  assert info["crc"] == 0xABCD and info["line"] == 2047 and info["rdp"] == 1
+  assert info["mode"] == "key" and info["result"] == "chip" and info["key"] == "8a1fe3c0"
+
+def a_key_fingerprint_of_digits_stays_text(shell):
+  sh, _ = shell(key="12345678")
+  assert sh.boot_info()["key"] == "12345678"
 
 def a_file_without_the_header_never_goes_out(shell):
   sh, device = shell()
@@ -193,6 +223,9 @@ def a_device_without_a_slot_is_refused(shell):
 def an_image_over_the_slot_is_refused_before_a_byte_goes(shell):
   sh, device = shell(slot=4096)
   assert sh.boot(Image.built(5000)) is False
+  assert device.calls == 1
+  sh, device = shell(slot=4096) # 4060B fits beside a CRC, not beside a signed trailer
+  assert sh.boot(Image.built(4060, bytes(range(64)))) is False
   assert device.calls == 1
 
 def a_refused_line_stops_the_transfer(shell):

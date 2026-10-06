@@ -20,7 +20,7 @@ Example:
 
 import re, struct, time
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Any, Callable
 from .port import SerialPort, _remove_ansi
 from ..colors import Color as c
 from ..crc import crc32_iso
@@ -95,8 +95,10 @@ class Shell(SerialPort):
   RE_MBB_LIST = re.compile(r"(?:mbb|file)\s+list:\s*(.*)", re.IGNORECASE)
   RE_MBB_SIZE = re.compile(r"(\d+)\s*/\s*(\d+)")
   RE_PACK_NBR = re.compile(r"pack:\s*(\d+)")
-  RE_BOOT = re.compile(r"\bBOOT (\w+)((?: \w+:[0-9a-fA-F]+)*)")
-  BOOT_MAGIC = 0x4E45504F # "OPEN" at 0x200 of an image built under the bootloader
+  RE_BOOT = re.compile(r"\bBOOT (\w+)((?: \w+:\w+)*)")
+  BOOT_MAGIC = 0x4E45504F    # "OPEN" at 0x200 of an image built under the bootloader
+  BOOT_SIGNATURE_OFFSET = 8  # into the trailer behind the image, which opens with the CRC
+  BOOT_SIGNATURE_SIZE = 64   # Ed25519, erased in an unsigned image
 
   def __init__(
     self,
@@ -149,7 +151,7 @@ class Shell(SerialPort):
     while attempts:
       attempts -= 1
       if timeout_ms is not None and self.serial:
-        self.serial.timeout = timeout_ms / 1000 # pyserial wants seconds
+        self.serial.timeout = timeout_ms / 1000 # `pyserial` wants seconds
       try:
         resp = self._exec_once(command)
       except Exception as e:
@@ -307,8 +309,9 @@ class Shell(SerialPort):
     """
     Load the entire content of the active MBB.
 
-    Each `mbb load <limit> <offset>` reply is exactly `limit` raw bytes plus the `\\r\\n`
-    of `DBG_Enter()`, so the exact count is read and the newline consumed - no size guessing.
+    Each `mbb load <limit> <offset>` reply is exactly `limit` raw bytes
+    plus the `\\r\\n` of `DBG_Enter()`,
+    so the exact count is read and the newline consumed - no size guessing.
     Replies are read off `self.serial` directly, bypassing the `address` and `crc` handling.
     """
     info = self.mbb_info()
@@ -330,7 +333,7 @@ class Shell(SerialPort):
         return None
       self.print(f"{c.SALMON}{bytes(chunk)}{c.END}")
       result.extend(chunk)
-      self.serial.read(2) # `DBG_Enter()` trailing \r\n
+      self.serial.read(2) # `DBG_Enter()` trailing `\r\n`
       offset += limit
     return bytes(result)
 
@@ -349,9 +352,15 @@ class Shell(SerialPort):
 
   #------------------------------------------------------------------------------------------- BOOT
 
-  def _boot_reply(self, verb:str, timeout_s:float) -> dict[str, int]|None:
+  @staticmethod
+  def _boot_value(field:str, value:str) -> int|str:
+    """`app` and `crc` hex, other numbers decimal; words and the `key` fingerprint stay text."""
+    if field in ("app", "crc"): return int(value, 16)
+    return int(value) if value.isdigit() and field != "key" else value
+
+  def _boot_reply(self, verb:str, timeout_s:float) -> dict[str, Any]|None:
     """
-    Lines up to the `BOOT <verb>` reply, its `key:value` fields as numbers.
+    Lines up to the `BOOT <verb>` reply, its `key:value` fields through `_boot_value`.
 
     The echo of the command and any log line in between are skipped in silence:
     a data line is 2kB of hex, worth nothing on screen.
@@ -366,26 +375,29 @@ class Shell(SerialPort):
       line = _remove_ansi(pending.decode("utf-8", errors="ignore")).strip()
       pending = b""
       if line.startswith(("ERR", "WRN")) and "boot" in line.lower():
-        self.print_error(line)
+        self.print(f"{self.COLOR_ERROR}{line}{c.END}") # the device's line, so without `STYLE_OWN`
         return None
       match = self.RE_BOOT.search(line)
       if match and match.group(1) == verb:
         pairs = (field.split(":") for field in match.group(2).split())
-        return {key: int(value, 16 if key in ("app", "crc") else 10) for key, value in pairs}
+        return {key: self._boot_value(key, value) for key, value in pairs}
     return None
 
-  def _boot_exec(self, command:str, verb:str, timeout_s:float=2.0) -> dict[str, int]|None:
+  def _boot_exec(self, command:str, verb:str, timeout_s:float=2.0) -> dict[str, Any]|None:
     """One `boot` line and its reply; a data line of 2kB takes 0.4s to go and echo at 115200."""
     self._write(f"{command}\n".encode("utf-8")) # not shown: its echo is 2kB of hex
     return self._boot_reply(verb, timeout_s)
 
-  def boot_info(self) -> dict[str, int]|None:
+  def boot_info(self) -> dict[str, Any]|None:
     """
     `boot info` of a build under the bootloader.
 
     `boot` (1 = a slot exists), `app` (slot address), `slot` and `page` [B],
     `line` (console line limit), `image` [B] and `crc` of the running image,
     `active` (a transfer is open).
+    A bootloader with modes adds `mode` (`plain` or `key`),
+    `result` of the last start (`installed`, `none` or why an update was refused),
+    `key` (its fingerprint) and `rdp`.
     """
     return self._boot_exec("boot info", "info")
 
@@ -396,6 +408,7 @@ class Shell(SerialPort):
     A `.hex` carries addresses, so the image is what lies at the slot the device reports.
     A full flash image with the bootloader in front then installs the application alone.
     The image goes over `boot begin`/`data`/`end`, and the device resets to install it.
+    A build for the `key` bootloader sends the signature from its trailer along with `boot begin`.
     `progress(taken, size)` follows every line taken.
     `False` on a file without the header, a device without a slot,
     an image over the slot or a refused line; the old image keeps running then.
@@ -419,15 +432,21 @@ class Shell(SerialPort):
     if magic != self.BOOT_MAGIC or size > len(image):
       self.print_error("Not an image built under the bootloader")
       return False
+    # the signature field is linked erased, so anything else there is the signature Forge wrote
+    at = size + self.BOOT_SIGNATURE_OFFSET
+    signature = image[at:at + self.BOOT_SIGNATURE_SIZE]
+    signed = len(signature) == self.BOOT_SIGNATURE_SIZE and signature != b"\xff" * len(signature)
     image = image[:size] # the header's size: the file may carry an erased tail
     crc = crc32_iso.checksum(image)
-    if size + 4 > info["slot"]: # the slot holds the image and its trailer
+    trailer = self.BOOT_SIGNATURE_OFFSET + self.BOOT_SIGNATURE_SIZE if signed else 4
+    if size + trailer > info["slot"]: # the slot holds the image and its trailer
       self.print_error(f"Image of {size}B over the {info['slot']}B slot")
       return False
     # a data line holds the longest offset and the hex of a chunk, kept a multiple of 16B
     room = (info["line"] - len("boot data 4294967295 ")) // 2
     chunk = min(self.pack_size, room // 16 * 16)
-    if not self._boot_exec(f"boot begin {size} 0x{crc:08x}", "begin"): return False
+    begin = f"boot begin {size} 0x{crc:08x}" + (f" {signature.hex()}" if signed else "")
+    if not self._boot_exec(begin, "begin"): return False
     for offset in range(0, size, chunk):
       part = image[offset:offset + chunk]
       reply = self._boot_exec(f"boot data {offset} {part.hex()}", "data")

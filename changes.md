@@ -1,5 +1,9 @@
 # Changes `xaeian`
 
+## `1.0.1` Signed boot
+
+- `serial`: `Shell.boot` and `boot_info` support the `key` bootloader
+
 ## `1.0.0` Stable
 
 - `serial`: `Shell.boot` installs from a full flash `.hex`; `Recorder` reconnects after a dropout

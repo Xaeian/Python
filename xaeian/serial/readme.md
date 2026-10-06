@@ -1,10 +1,12 @@
 # `xaeian.serial`
 
-Serial communication: low-level port, threaded value recorders, embedded shell client. Requires `pip install xaeian[serial]`.
+Serial communication: low-level port, threaded value recorders, embedded shell client.
+Requires `pip install xaeian[serial]`.
 
 ## `SerialPort`
 
-Base class with colored console output, file logging, address filtering, optional CRC. Context manager support.
+Base class with colored console output, file logging, address filtering, optional CRC.
+Context manager support.
 
 ```py
 from xaeian.serial import SerialPort, serial_scan
@@ -27,6 +29,8 @@ with SerialPort("COM3", 9600, address=0x42, crc=crc16_modbus) as sp:
 Color attrs are class-level - override in subclass or per instance:
 
 ```py
+from xaeian import Color
+
 class QuietPort(SerialPort):
   COLOR_TIME = Color.CREMA
   COLOR_INFO = Color.SKY
@@ -38,7 +42,9 @@ sp.COLOR_TIME = Color.SILVER
 
 ## `Recorder`
 
-Single numeric value read from the newest complete line. Robust to values split across reads (Brymen, Rigol). Built-in regex patterns for common multimeter formats.
+Single numeric value read from the newest complete line.
+Robust to values split across reads (Brymen, Rigol).
+Built-in regex patterns for common multimeter formats.
 
 ```py
 from xaeian.serial import Recorder
@@ -59,7 +65,8 @@ while True:
 
 ## `MultiRecorder`
 
-For instruments emitting N values per line (separator-delimited), like STM32/Arduino. Wrong-shape line returns `None` (error signal).
+For instruments emitting N values per line (separator-delimited), like STM32/Arduino.
+Wrong-shape line returns `None` (error signal).
 
 ```py
 from xaeian.serial import MultiRecorder
@@ -73,7 +80,8 @@ vals = mr.read_values() # [12.5, 0.34, 25.0, 1500] or None
 
 ## Recording pattern
 
-Recorders are pure data sources: `start()` spawns a reader thread that keeps `.value` / `.values` fresh. Output (CSV, DB, MQTT, plot) is application code - run a reap loop that snapshots values at a fixed period, as below.
+Recorders are pure data sources: `start()` spawns a reader thread that keeps `.value` / `.values` fresh.
+Output (CSV, DB, MQTT, plot) is application code - run a reap loop that snapshots values at a fixed period, as below.
 
 ```py
 import threading
@@ -101,7 +109,8 @@ for r in recs: r.stop()
 
 ## `Shell`
 
-Python client for embedded SH shell (`lib/sh` C firmware). Wraps standard built-ins; use `exec()` for everything else.
+Python client for embedded SH shell (`lib/sh` C firmware).
+Wraps standard built-ins; use `exec()` for everything else.
 
 ```py
 from xaeian.serial import Shell
@@ -125,17 +134,17 @@ with Shell("/dev/ttyUSB0") as sh:
   sh.mbb_clear()
 
   # Cooperative wakeup
-  sh.trig(42) # wakes TRIG_Wait / TRIG_WaitFor on device
+  sh.trig(42) # wakes `TRIG_Wait` / `TRIG_WaitFor` on device
 
   # Power
   sh.reboot()
   sh.reset()
-  sh.sleep("standby") # stop|stop0|stop1|standby|shutdown
+  sh.sleep("standby") # stop|stop0|stop1|standby|standbysram|shutdown
 
   # Firmware of a build under the bootloader (`PRO_BOOT`, `CMD_BOOT` on the device)
-  sh.boot_info()      # {"boot": 1, "app": 0x08002000, "slot": 253952, "crc": ..., ...}
-  sh.boot("app.bin")  # path or bytes of the .bin or .hex; the device resets to install it
-  sh.boot("app.hex")  # a .hex is cut at the slot, so a full image with the bootloader works too
+  sh.boot_info()      # {"boot": 1, "app": 0x08002000, ..., "result": "installed", "rdp": 1}
+  sh.boot("app.bin")  # path or bytes of the `.bin` or `.hex`; the device resets to install it
+  sh.boot("app.hex")  # a `.hex` is cut at the slot, so a full image with the bootloader works too
 
   # Non-standard via exec
   sh.exec("alarm 1 set everyday 06:00:00")

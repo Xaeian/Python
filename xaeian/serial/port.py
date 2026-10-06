@@ -6,6 +6,7 @@ Serial port communication with colored console output.
 `SerialPort` prints timestamped colored lines, logs to file with ANSI preserved,
 filters by address on multi-device buses, checks CRC, and closes itself as a context manager.
 Colors are class attributes: `COLOR_TIME`, `COLOR_ADDR`, `COLOR_INFO`, `COLOR_ERROR`, `COLOR_OK`.
+Lines of the port itself also carry `STYLE_OWN`, so they never pass for what a device sent.
 
 Requires: `pyserial`
 
@@ -76,6 +77,7 @@ class SerialPort:
   COLOR_INFO = c.VIOLET
   COLOR_ERROR = c.RED
   COLOR_OK = c.GREEN
+  STYLE_OWN = "\033[3m" # italic
 
   def __init__(
     self,
@@ -142,17 +144,21 @@ class SerialPort:
       except Exception:
         if self.debug: raise
 
+  def _print_own(self, color:str, text:str) -> None:
+    """Print a line of the port itself, set apart from device traffic by `STYLE_OWN`."""
+    self.print(f"{self.STYLE_OWN}{color}{text}{c.END}")
+
   def print_info(self, text:str) -> None:
     """Print a line in `COLOR_INFO`."""
-    self.print(f"{self.COLOR_INFO}{text}{c.END}")
+    self._print_own(self.COLOR_INFO, text)
 
   def print_error(self, text:str) -> None:
     """Print a line in `COLOR_ERROR`. Used for every swallowed exception."""
-    self.print(f"{self.COLOR_ERROR}{text}{c.END}")
+    self._print_own(self.COLOR_ERROR, text)
 
   def print_ok(self, text:str) -> None:
     """Print a line in `COLOR_OK`."""
-    self.print(f"{self.COLOR_OK}{text}{c.END}")
+    self._print_own(self.COLOR_OK, text)
 
   def print_conv2str(self, resp:bytes, str_color=c.WHITE, bytes_color=c.SALMON) -> str|None:
     """Print as utf-8 string, fallback to raw bytes. Returns the stripped text or `None`."""
@@ -165,7 +171,7 @@ class SerialPort:
       return None
 
   def bytes_to_string(self, data:bytes, encoding:str="utf-8", strict:bool=True) -> str|None:
-    """Convert bytes to string. On decode failure `strict` returns `None`, else drops non-ASCII."""
+    """Decode and strip. On decode failure `strict` returns `None`, else drops non-ASCII."""
     try:
       return data.decode(encoding).strip()
     except UnicodeDecodeError:
@@ -220,7 +226,7 @@ class SerialPort:
       return result
     return data
 
-  def _require_connected(self):
+  def _require_connected(self) -> None:
     """A read or write before `connect()` is a programming error, not a quiet miss."""
     if self.serial is None:
       raise RuntimeError(f"Not connected: {self.port} - call connect() or use `with`")
