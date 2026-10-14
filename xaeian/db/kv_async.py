@@ -1,6 +1,6 @@
 # xaeian/db/kv_async.py
 
-"""Async key-value config store with JSON-canonical values."""
+"""Async key-value store in one database table."""
 
 import asyncio
 from typing import Any
@@ -15,16 +15,11 @@ from .utils import ph_list
 
 class AsyncKeyValue:
   """
-  JSON-canonical async key-value store backed by a database table.
+  JSON values by key, read back as stored, dict key order included.
 
-  Values are stored as canonical JSON text, reads return native Python types.
-  `None` is a legitimate value (JSON `null`),
-  so use `has()` to tell a missing key from a stored `None`.
-
-  The table is created on the first operation,
-  under an `asyncio.Lock` so concurrent tasks create it once.
-  Its existence is then assumed for the life of the instance:
-  a table dropped afterwards is never recreated.
+  `None` is a value (JSON `null`): `has()` tells it from a missing key.
+  The first call creates the table, once under concurrent tasks;
+  a table dropped later is not recreated.
 
   Example:
     >>> db = AsyncDatabase("postgres", "app", user="postgres", password="pass")
@@ -58,33 +53,33 @@ class AsyncKeyValue:
   #------------------------------------------------------------------------------------------- Read
 
   async def has(self, key:str) -> bool:
-    """Check if key exists. Distinct from `get(key) is None`."""
+    """`True` for a stored key, its value `None` included."""
     check_key(key)
     await self._ensure()
     return await self.db.exists(self.table, self._where, key)
 
   async def get(self, key:str, default:Any=None) -> Any:
-    """Get value by key, `default` when the key is missing."""
+    """Value of `key`, `default` when missing."""
     check_key(key)
     await self._ensure()
     raw = await self.db.get_value(self._sql_get, key)
     return default if raw is None else loads(raw, key)
 
   async def meta(self, key:str) -> KvEntry|None:
-    """Get value with its `created_at` and `updated_at` epoch milliseconds."""
+    """Value with `created_at` and `updated_at` in epoch ms, `None` when missing."""
     check_key(key)
     await self._ensure()
     row = await self.db.get_dict(self._sql_meta, key)
     return entry(row, key) if row else None
 
   async def read_all(self) -> dict[str, JsonValue]:
-    """Load entire table as `{key: value}`, ordered by key. Use only for small stores."""
+    """Whole table as `{key: value}`, ordered by key; for small stores."""
     await self._ensure()
     rows = await self.db.get_dicts(self._sql_all)
     return {r["key"]: loads(r["value"], r["key"]) for r in rows}
 
   async def read_all_meta(self) -> dict[str, KvEntry]:
-    """Load entire table with both times, ordered by key. Use only for small stores."""
+    """Whole table as `{key: KvEntry}`, ordered by key; for small stores."""
     await self._ensure()
     rows = await self.db.get_dicts(self._sql_all_meta)
     return {r["key"]: entry(r, r["key"]) for r in rows}
@@ -92,7 +87,7 @@ class AsyncKeyValue:
   #------------------------------------------------------------------------------------------ Write
 
   async def set(self, key:str, value:JsonValue) -> int:
-    """Upsert value, returning the write timestamp in epoch milliseconds."""
+    """Store `value`, returning its write time in epoch ms."""
     check_key(key)
     await self._ensure()
     serialized = dumps(value)
@@ -101,7 +96,7 @@ class AsyncKeyValue:
     return ts
 
   async def delete(self, key:str) -> bool:
-    """Delete entry, `True` when a row was actually removed."""
+    """`True` when the key existed."""
     check_key(key)
     await self._ensure()
     return await self.db.delete(self.table, self._where, key) > 0

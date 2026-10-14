@@ -1,6 +1,6 @@
 # xaeian/db/kv_common.py
 
-"""Shared internals for sync/async `KeyValue` stores. Not part of public API."""
+"""Internals of `KeyValue` and `AsyncKeyValue`, not public API."""
 
 import json, time
 from typing import Any, TypeAlias, TypedDict
@@ -11,26 +11,26 @@ from .utils import ident
 JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 
 class KvEntry(TypedDict):
-  """Single entry: decoded value with its first and last write in epoch milliseconds."""
+  """Value with its first and last write time in epoch ms."""
   value: JsonValue
   created_at: int
   updated_at: int
 
 #---------------------------------------------------------------------------------------- Constants
 
-KEY_MAX = 256 # key and table name length, also the VARCHAR width in DDL
-VALUE_MAX_BYTES = 1_000_000 # cap on canonical JSON utf-8 byte size
+KEY_MAX = 256 # longest key and table name, the VARCHAR width too
+VALUE_MAX_BYTES = 1_000_000 # longest JSON of a value, in utf-8 bytes
 
 #--------------------------------------------------------------------------------------- Validators
 
 def check_key(key:Any) -> None:
-  """Non-empty string within `KEY_MAX`. Naming policy is left to the caller."""
+  """Non-empty string within `KEY_MAX`; any naming rule is the caller's."""
   if not isinstance(key, str): raise TypeError(f"key must be string, got {type(key).__name__}")
   if not key: raise ValueError("key must be non-empty")
   if len(key) > KEY_MAX: raise ValueError(f"key too long ({len(key)} > {KEY_MAX})")
 
 def check_table(table:Any) -> None:
-  """Validate table name: `ident` rules, since it is interpolated into DDL, plus a length cap."""
+  """`ident` rules within `KEY_MAX`: the name goes into SQL as it is."""
   if not isinstance(table, str):
     raise TypeError(f"table must be string, got {type(table).__name__}")
   if len(table) > KEY_MAX: raise ValueError(f"table name too long ({len(table)} > {KEY_MAX})")
@@ -40,19 +40,18 @@ def check_table(table:Any) -> None:
 
 def dumps(value:JsonValue) -> str:
   """
-  Canonical JSON: sorted keys, no whitespace, unicode preserved.
+  Compact JSON, keys in the order given, unicode kept.
 
   The `VALUE_MAX_BYTES` cap counts encoded bytes, not characters.
-  `allow_nan` stays at the Python default, so `NaN`/`Infinity` serialize as bare literals:
-  `json.loads` reads them back, strict RFC 8259 parsers of the same table do not.
+  `NaN` and `Infinity` go out bare: `json.loads` reads them back, strict parsers do not.
   """
-  text = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+  text = json.dumps(value, separators=(",", ":"), ensure_ascii=False)
   if len(text.encode("utf-8")) > VALUE_MAX_BYTES:
     raise ValueError(f"value too large (> {VALUE_MAX_BYTES} bytes serialized)")
   return text
 
 def loads(raw:Any, key:str) -> JsonValue:
-  """Parse JSON from a DB row, `key` naming the entry in every error raised."""
+  """Decoded JSON of a row; every error names `key`."""
   if not isinstance(raw, str):
     raise ValueError(f"corrupted entry for key {key!r}: expected string, got {type(raw).__name__}")
   try:
@@ -61,7 +60,7 @@ def loads(raw:Any, key:str) -> JsonValue:
     raise ValueError(f"corrupted JSON for key {key!r}: {e}") from e
 
 def entry(row:dict, key:str) -> KvEntry:
-  """A meta row as `KvEntry`, its timestamps `int` whatever the driver hands over."""
+  """Meta row as `KvEntry`, its times `int` whatever the driver returns."""
   return {
     "value": loads(row["value"], key),
     "created_at": int(row["created_at"]),
@@ -75,23 +74,21 @@ def now_ms() -> int:
   return time.time_ns() // 1_000_000
 
 #------------------------------------------------------------------------------------- SQL Builders
-# Plain SQL accepted by sqlite, mysql and postgres alike.
-# `ph` is the single bound placeholder for the key, always `?`;
-# the backend rewrites it on the way to its driver.
+# Plain SQL for SQLite, MySQL and PostgreSQL alike.
+# `ph` is the placeholder of the key, always `?`; the backend rewrites it for its driver.
 
 def quoted(name:str, q:str) -> str:
   """
-  Validated identifier wrapped in the driver's quote character.
+  Name checked by `ident`, in the quotes of the driver.
 
-  The store owns these names, and one of them is `key`, which is reserved in MySQL.
-  Quoting is safe here precisely because the schema is ours:
-  `ident` has already restricted the name to letters, digits and `_`,
-  so nothing can escape the quotes, and no user table has its case-folding changed underneath it.
+  `key` is reserved in MySQL, so every name of the store is quoted.
+  `ident` allows letters, digits and `_` only: nothing escapes the quotes.
+  The schema is the store's own, so no user table changes its case-folding.
   """
   return f"{q}{ident(name)}{q}"
 
 def sql_create(table:str, q:str) -> str:
-  """Idempotent DDL: `key` primary key, JSON text `value`, both times in epoch milliseconds."""
+  """Table of the store: `key` primary key, JSON `value`, both times in epoch ms."""
   t = quoted(table, q)
   return (
     f"CREATE TABLE IF NOT EXISTS {t} ("
@@ -132,13 +129,11 @@ def sql_read_all_meta(table:str, q:str) -> str:
 
 def sql_upsert(table:str, ph:str, q:str, excluded:str|None) -> str:
   """
-  Insert-or-replace one entry, every identifier quoted.
+  Insert or update one entry; an update leaves `created_at` as it is.
 
-  The generic `upsert` builder leaves identifiers bare, which is right for a user's table
-  but fatal here: `key` is a reserved word in MySQL.
-  `excluded` is the conflict-row alias, or `None` for MySQL,
+  Not the generic `upsert`: it leaves names bare, and `key` is reserved in MySQL.
+  `excluded` is the alias of the conflict row; `None` for MySQL,
   whose `ON DUPLICATE KEY UPDATE` names no conflict target.
-  `created_at` goes in with the first write of a key, an update leaves it.
   """
   t, k, v = quoted(table, q), quoted("key", q), quoted("value", q)
   c, u = quoted("created_at", q), quoted("updated_at", q)

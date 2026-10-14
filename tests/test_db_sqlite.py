@@ -85,7 +85,7 @@ def paginate_refuses_a_page_size_it_cannot_divide_by(db):
 
 def dict_value_is_stored_as_json_and_parsed_back(db):
   db.insert("users", {"name": "Jan", "meta": {"role": "admin", "tags": [1, 2]}})
-  # stored as canonical JSON text...
+  # stored as JSON text...
   stored = db.get_value("SELECT meta FROM users WHERE name = ?", "Jan")
   assert stored == '{"role": "admin", "tags": [1, 2]}'
   # ...and revived to a real dict when the column is marked json
@@ -216,6 +216,11 @@ def kv_round_trips_json_values(kv):
   assert kv.get("limits") == {"max": 100, "min": 1}
   assert kv.get("tags") == ["a", "b"]
 
+def kv_keeps_the_key_order_it_was_given(kv):
+  kv.set("bucket", {"name": "x", "size": 5, "files": {"z": 1, "a": 2}})
+  got = kv.get("bucket")
+  assert list(got) == ["name", "size", "files"] and list(got["files"]) == ["z", "a"]
+
 def kv_creates_its_table_lazily(db, kv):
   assert db.has_table("cfg") is False # nothing written yet
   kv.set("x", 1)
@@ -233,7 +238,7 @@ def kv_meta_carries_integer_timestamps(kv):
   assert isinstance(meta["created_at"], int) and isinstance(meta["updated_at"], int)
 
 def kv_created_at_stays_with_the_first_write(kv, monkeypatch):
-  """An overwrite moves `updated_at` alone; a key deleted and set again is born anew."""
+  """An overwrite moves `updated_at` only; a key set again after `delete` starts over."""
   monkeypatch.setattr("xaeian.db.kv.now_ms", lambda: 1000)
   kv.set("x", "a")
   monkeypatch.setattr("xaeian.db.kv.now_ms", lambda: 2000)

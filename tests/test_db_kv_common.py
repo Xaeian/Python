@@ -1,6 +1,6 @@
 # tests/test_db_kv_common.py
 
-"""`KeyValue` store internals: key/table validation, canonical JSON, SQL builders."""
+"""`KeyValue` store internals: key/table validation, compact JSON, SQL builders."""
 
 import json, time
 
@@ -51,8 +51,8 @@ def check_table_rejects_overlong():
 
 #-------------------------------------------------------------------------------------------- dumps
 
-def dumps_is_canonical_sorted_and_compact():
-  assert dumps({"b": 1, "a": 2}) == '{"a":2,"b":1}'
+def dumps_keeps_key_order_and_is_compact():
+  assert dumps({"b": 1, "a": 2}) == '{"b":1,"a":2}'
 
 def dumps_preserves_unicode():
   text = dumps("zażółć")

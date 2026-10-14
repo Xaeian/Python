@@ -1,5 +1,9 @@
 # Changes `xaeian`
 
+## `1.1.1` Key order
+
+- `db`: `KeyValue` keeps keys of a value in the order they were set
+
 ## `1.1.0` KeyValue
 
 - `db`: `KeyValue` keeps `created_at` of every key beside `updated_at`
