@@ -2,7 +2,7 @@
 
 ## `1.1.1` Key order
 
-- `db`: `KeyValue` keeps keys of a value in the order they were set
+- `db`: `KeyValue` keeps dict key order
 
 ## `1.1.0` KeyValue
 
