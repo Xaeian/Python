@@ -89,12 +89,11 @@ class FakeDevice:
 class Image:
   """A class keeps these helpers out of reach of `python_functions = ["*"]` collection."""
   @staticmethod
-  def built(size:int, signature:bytes=b"") -> bytes:
+  def built(size:int, signature:bytes=b"\xff" * 64) -> bytes:
     """
-    The `.bin` of a build: header at 0x200, eight erased bytes behind the image.
+    The `.bin` of a build: header at 0x200, 72-byte trailer behind the image.
 
-    Eight bytes alone are the trailer of a Core older than the signature.
-    `signature` fills the 64 bytes behind them, erased in an unsigned build.
+    `signature` fills its last 64 bytes, erased in an unsigned build.
     """
     body = bytearray((i * 7 + 3) & 0xFF for i in range(size))
     struct.pack_into("<II", body, 0x200, 0x4E45504F, size)
@@ -192,11 +191,9 @@ def a_signed_build_sends_its_signature_with_begin(shell):
   assert device.ended and device.signature == signature.hex()
 
 def an_unsigned_build_sends_no_signature(shell):
-  """Erased signature field, or a trailer of a Core older than the signature."""
-  for image in (Image.built(3000, b"\xff" * 64), Image.built(3000)):
-    sh, device = shell()
-    assert sh.boot(image) is True
-    assert device.ended and device.signature is None
+  sh, device = shell()
+  assert sh.boot(Image.built(3000)) is True
+  assert device.ended and device.signature is None
 
 def info_reads_numbers_and_words(shell):
   """Numbers as numbers, `app` and `crc` in hex; `mode`, `result` and `key` as the device says."""
@@ -224,8 +221,8 @@ def an_image_over_the_slot_is_refused_before_a_byte_goes(shell):
   sh, device = shell(slot=4096)
   assert sh.boot(Image.built(5000)) is False
   assert device.calls == 1
-  sh, device = shell(slot=4096) # 4060B fits beside a CRC, not beside a signed trailer
-  assert sh.boot(Image.built(4060, bytes(range(64)))) is False
+  sh, device = shell(slot=4096) # 4060B fits alone, not with its 72B trailer
+  assert sh.boot(Image.built(4060)) is False
   assert device.calls == 1
 
 def a_refused_line_stops_the_transfer(shell):

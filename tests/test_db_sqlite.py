@@ -226,11 +226,23 @@ def kv_distinguishes_stored_none_from_missing(kv):
   assert kv.has("nothing") is True and kv.get("nothing") is None
   assert kv.has("missing") is False and kv.get("missing", "default") == "default"
 
-def kv_meta_carries_an_integer_timestamp(kv):
+def kv_meta_carries_integer_timestamps(kv):
   kv.set("x", 42)
   meta = kv.meta("x")
   assert meta["value"] == 42
-  assert isinstance(meta["updated_at"], int)
+  assert isinstance(meta["created_at"], int) and isinstance(meta["updated_at"], int)
+
+def kv_created_at_stays_with_the_first_write(kv, monkeypatch):
+  """An overwrite moves `updated_at` alone; a key deleted and set again is born anew."""
+  monkeypatch.setattr("xaeian.db.kv.now_ms", lambda: 1000)
+  kv.set("x", "a")
+  monkeypatch.setattr("xaeian.db.kv.now_ms", lambda: 2000)
+  kv.set("x", "b")
+  assert kv.meta("x") == {"value": "b", "created_at": 1000, "updated_at": 2000}
+  kv.delete("x")
+  monkeypatch.setattr("xaeian.db.kv.now_ms", lambda: 3000)
+  kv.set("x", "c")
+  assert kv.read_all_meta() == {"x": {"value": "c", "created_at": 3000, "updated_at": 3000}}
 
 def kv_set_overwrites_and_delete_removes(kv):
   kv.set("x", 1)
@@ -251,6 +263,7 @@ def kv_read_all_meta_includes_timestamps(kv):
   meta = kv.read_all_meta()
   assert set(meta) == {"a", "b"}
   assert meta["a"]["value"] == 1
+  assert all(isinstance(e["created_at"], int) for e in meta.values())
   assert all(isinstance(e["updated_at"], int) for e in meta.values())
 
 def kv_rejects_invalid_keys(kv):

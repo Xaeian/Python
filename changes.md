@@ -1,8 +1,12 @@
 # Changes `xaeian`
 
+## `1.1.0` KeyValue
+
+- `db`: `KeyValue` keeps `created_at` of every key beside `updated_at`
+
 ## `1.0.1` Signed boot
 
-- `serial`: `Shell.boot` and `boot_info` support the `key` bootloader
+- `serial`: `Shell.boot` and `boot_info` support bootloader `key`
 
 ## `1.0.0` Stable
 

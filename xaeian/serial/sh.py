@@ -97,7 +97,8 @@ class Shell(SerialPort):
   RE_PACK_NBR = re.compile(r"pack:\s*(\d+)")
   RE_BOOT = re.compile(r"\bBOOT (\w+)((?: \w+:\w+)*)")
   BOOT_MAGIC = 0x4E45504F    # "OPEN" at 0x200 of an image built under the bootloader
-  BOOT_SIGNATURE_OFFSET = 8  # into the trailer behind the image, which opens with the CRC
+  BOOT_TRAILER_SIZE = 72     # behind every image, signed or not
+  BOOT_SIGNATURE_OFFSET = 8  # into the trailer, which opens with the CRC
   BOOT_SIGNATURE_SIZE = 64   # Ed25519, erased in an unsigned image
 
   def __init__(
@@ -394,8 +395,7 @@ class Shell(SerialPort):
 
     `boot` (1 = a slot exists), `app` (slot address), `slot` and `page` [B],
     `line` (console line limit), `image` [B] and `crc` of the running image,
-    `active` (a transfer is open).
-    A bootloader with modes adds `mode` (`plain` or `key`),
+    `active` (a transfer is open), `mode` (`plain` or `key`),
     `result` of the last start (`installed`, `none` or why an update was refused),
     `key` (its fingerprint) and `rdp`.
     """
@@ -438,8 +438,7 @@ class Shell(SerialPort):
     signed = len(signature) == self.BOOT_SIGNATURE_SIZE and signature != b"\xff" * len(signature)
     image = image[:size] # the header's size: the file may carry an erased tail
     crc = crc32_iso.checksum(image)
-    trailer = self.BOOT_SIGNATURE_OFFSET + self.BOOT_SIGNATURE_SIZE if signed else 4
-    if size + trailer > info["slot"]: # the slot holds the image and its trailer
+    if size + self.BOOT_TRAILER_SIZE > info["slot"]: # the slot holds the image and its trailer
       self.print_error(f"Image of {size}B over the {info['slot']}B slot")
       return False
     # a data line holds the longest offset and the hex of a chunk, kept a multiple of 16B

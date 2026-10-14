@@ -6,7 +6,7 @@ import threading
 from typing import Any
 from .abstract import AbstractDatabase
 from .kv_common import (
-  JsonValue, KvEntry, check_key, check_table, dumps, loads, now_ms,
+  JsonValue, KvEntry, check_key, check_table, dumps, loads, entry, now_ms,
   sql_create, sql_upsert, sql_get_value, sql_get_meta, sql_read_all, sql_read_all_meta, where_key,
 )
 from .utils import ph_list
@@ -73,12 +73,11 @@ class KeyValue:
     return default if raw is None else loads(raw, key)
 
   def meta(self, key:str) -> KvEntry|None:
-    """Get value with its `updated_at` epoch milliseconds."""
+    """Get value with its `created_at` and `updated_at` epoch milliseconds."""
     check_key(key)
     self._ensure()
     row = self.db.get_dict(self._sql_meta, key)
-    if not row: return None
-    return {"value": loads(row["value"], key), "updated_at": int(row["updated_at"])}
+    return entry(row, key) if row else None
 
   def read_all(self) -> dict[str, JsonValue]:
     """Load entire table as `{key: value}`, ordered by key. Use only for small stores."""
@@ -87,16 +86,10 @@ class KeyValue:
     return {r["key"]: loads(r["value"], r["key"]) for r in rows}
 
   def read_all_meta(self) -> dict[str, KvEntry]:
-    """Load entire table with `updated_at`, ordered by key. Use only for small stores."""
+    """Load entire table with both times, ordered by key. Use only for small stores."""
     self._ensure()
     rows = self.db.get_dicts(self._sql_all_meta)
-    return {
-      r["key"]: {
-        "value": loads(r["value"], r["key"]),
-        "updated_at": int(r["updated_at"]),
-      }
-      for r in rows
-    }
+    return {r["key"]: entry(r, r["key"]) for r in rows}
 
   #------------------------------------------------------------------------------------------ Write
 
@@ -106,7 +99,7 @@ class KeyValue:
     self._ensure()
     serialized = dumps(value)
     ts = now_ms()
-    self.db.exec(self._sql_set, (key, serialized, ts))
+    self.db.exec(self._sql_set, (key, serialized, ts, ts))
     return ts
 
   def delete(self, key:str) -> bool:

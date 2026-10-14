@@ -99,6 +99,7 @@ def sql_create_declares_kv_schema():
     'CREATE TABLE IF NOT EXISTS "kv" ('
     f'"key" VARCHAR({KEY_MAX}) PRIMARY KEY, '
     '"value" TEXT NOT NULL, '
+    '"created_at" BIGINT NOT NULL, '
     '"updated_at" BIGINT NOT NULL)'
   )
 
@@ -109,15 +110,17 @@ def sql_create_uses_backticks_for_mysql():
 def sql_get_value_selects_single_value():
   assert sql_get_value("kv", "?", '"') == 'SELECT "value" FROM "kv" WHERE "key" = ?'
 
-def sql_get_meta_selects_value_and_timestamp():
-  assert sql_get_meta("kv", "?", "`") == "SELECT `value`, `updated_at` FROM `kv` WHERE `key` = ?"
+def sql_get_meta_selects_value_and_timestamps():
+  assert sql_get_meta("kv", "?", "`") == (
+    "SELECT `value`, `created_at`, `updated_at` FROM `kv` WHERE `key` = ?"
+  )
 
 def sql_read_all_is_ordered_by_key():
   assert sql_read_all("kv", '"') == 'SELECT "key", "value" FROM "kv" ORDER BY "key"'
 
-def sql_read_all_meta_includes_timestamp():
+def sql_read_all_meta_includes_timestamps():
   assert sql_read_all_meta("kv", '"') == (
-    'SELECT "key", "value", "updated_at" FROM "kv" ORDER BY "key"'
+    'SELECT "key", "value", "created_at", "updated_at" FROM "kv" ORDER BY "key"'
   )
 
 def where_key_builds_lookup_clause():
@@ -143,7 +146,7 @@ def quoting_cannot_be_escaped_by_the_name():
 def sql_upsert_writes_the_conflict_form():
   sql = sql_upsert("kv", "?", '"', "EXCLUDED")
   assert sql == (
-    'INSERT INTO "kv" ("key", "value", "updated_at") VALUES (?, ?, ?) '
+    'INSERT INTO "kv" ("key", "value", "created_at", "updated_at") VALUES (?, ?, ?, ?) '
     'ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value", '
     '"updated_at" = EXCLUDED."updated_at"'
   )
@@ -151,7 +154,7 @@ def sql_upsert_writes_the_conflict_form():
 def sql_upsert_writes_the_mysql_form_without_a_conflict_target():
   sql = sql_upsert("kv", "?", "`", None)
   assert sql == (
-    "INSERT INTO `kv` (`key`, `value`, `updated_at`) VALUES (?, ?, ?) "
+    "INSERT INTO `kv` (`key`, `value`, `created_at`, `updated_at`) VALUES (?, ?, ?, ?) "
     "ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), "
     "`updated_at` = VALUES(`updated_at`)"
   )

@@ -91,6 +91,8 @@ def key_value_survives_a_reserved_column_name(live):
   kv.set("limit", 42)
   kv.set("limit", 43)
   assert kv.read_all() == {"limit": 43, "mode": {"fast": True}}
+  entry = kv.meta("limit")
+  assert entry["value"] == 43 and entry["created_at"] <= entry["updated_at"]
   assert kv.has("mode") and kv.delete("mode") and not kv.has("mode")
 
 #-------------------------------------------------------------------------------------------- async
