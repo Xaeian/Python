@@ -12,6 +12,8 @@ COMMANDS = {
   "meta": "xaeian.cli.meta",
   "ico": "xaeian.cli.ico",
   "plot": "xaeian.cli.plot",
+  "commit": "xaeian.cli.commit",
+  "release": "xaeian.cli.release",
 }
 
 def main() -> None:

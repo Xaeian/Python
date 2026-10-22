@@ -13,11 +13,11 @@ p = Print()
 
 EXAMPLES = """
 examples:
-  xn ico logo.png - auto sizes → logo.ico
-  xn ico logo.png -o favicon.ico - custom output
-  xn ico photo.jpg --fit crop - center-crop to square
-  xn ico logo.png --sizes 16,32,48 - specific sizes
-  xn ico logo.png --upscale - include sizes > source
+  xn ico logo.png                   # sizes picked from the source → logo.ico
+  xn ico logo.png -o favicon.ico    # custom output path
+  xn ico photo.jpg --fit crop       # center-crop to square
+  xn ico logo.png --sizes 16,32,48  # only these sizes
+  xn ico logo.png --upscale         # include sizes larger than the source
 """
 
 def main() -> None:
@@ -25,7 +25,7 @@ def main() -> None:
     EXAMPLES)
   parser.add_argument("src", help="Input image path")
   parser.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
-    help="Output .ico path (default: <n>.ico)")
+    help="Output .ico path (default: <name>.ico)")
   parser.add_argument("--fit", choices=["pad", "crop"], default="pad",
     help="Non-square handling (default: pad)")
   parser.add_argument("--sizes", default=None, metavar="LIST",

@@ -141,6 +141,8 @@ xn min photo.jpg -f avif        # convert to AVIF
 xn min photos/ --max-px 1280    # batch resize
 xn meta photo.jpg -i            # strip EXIF in-place
 xn ico logo.png -o favicon.ico  # multi-size .ico
+xn commit -m "fix: Timeout"     # commit and push
+xn release 1.2.0 -n note.md     # merge into main, tag, publish
 ```
 
 ## Modules
@@ -164,4 +166,3 @@ xn ico logo.png -o favicon.ico  # multi-size .ico
 | `eda`     | E-series, KiCad export, ngspice runner                  | [xaeian/eda/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/eda/readme.md)       |
 | `net`     | Network clients _(SFTP, FTP, S3)_                       | [xaeian/net/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/net/readme.md)       |
 | `cli`     | Command-line utilities behind `xn`                      | [xaeian/cli/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/cli/readme.md)       |
-| `cli`     | tree, dupes, wifi, fonts, host, min, meta, ico, plot    | [xaeian/cli/readme.md](https://github.com/Xaeian/Python/blob/main/xaeian/cli/readme.md)       |

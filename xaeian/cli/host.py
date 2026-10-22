@@ -11,10 +11,10 @@ p = Print()
 
 EXAMPLES = """
 examples:
-  xn host - list recorded hosts
-  xn host 10.0.0.1 - show what is recorded for one host
-  xn host 10.0.0.1 --drop - drop it, its key is recorded again on next connect
-  xn host 10.0.0.1 --drop -p 2222 - drop an entry recorded on a non-default port
+  xn host                          # list recorded hosts
+  xn host 10.0.0.1                 # show what is recorded for one host
+  xn host 10.0.0.1 --drop          # drop it, its key is recorded again on next connect
+  xn host 10.0.0.1 --drop -p 2222  # drop an entry recorded on a non-default port
 """
 
 #--------------------------------------------------------------------------------------------- List

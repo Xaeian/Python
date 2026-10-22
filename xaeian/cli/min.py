@@ -13,21 +13,21 @@ p = Print()
 
 EXAMPLES = """
 examples:
-  xn min report.pdf - compress PDF (ebook preset)
-  xn min report.pdf -s /screen - compress PDF for screen
-  xn min photo.jpg - compress image → photo-min.jpg
-  xn min photo.jpg -i - compress image in-place
-  xn min photos/ - compress directory recursively
-  xn min photos/ --max-px 1280 -q 70 - resize + quality limit
-  xn min hero.png -f webp - convert to WebP
-  xn min photos/ --target-kb 200 - fit under 200kB
+  xn min report.pdf                   # compress PDF (ebook preset)
+  xn min report.pdf -s /screen        # compress PDF for screen
+  xn min photo.jpg                    # compress image → photo-min.jpg
+  xn min photo.jpg -i                 # compress image in-place
+  xn min photos/                      # compress directory recursively
+  xn min photos/ --max-px 1280 -q 70  # cap at 1280px, quality 70
+  xn min hero.png -f webp             # convert to WebP
+  xn min photos/ --target-kb 200      # fit under 200kB
 """
 
 def main() -> None:
   parser = make_parser("Compress PDFs and images: auto-detects by extension", EXAMPLES)
   parser.add_argument("src", help="Input file or directory")
   parser.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
-    help="Output path (default: <n>-min.<ext>)")
+    help="Output path (default: <name>-min.<ext>)")
   parser.add_argument("-i", "--inplace", action="store_true", help="Overwrite source file")
   parser.add_argument("-s", "--pdf-settings", default="/ebook", metavar="PRESET",
     choices=["/screen", "/ebook", "/printer", "/prepress", "/default"],

@@ -108,11 +108,11 @@ def find_dupes(
 
 EXAMPLES = """
 examples:
-  xn dupes photos/ - find duplicates
-  xn dupes docs/ --zips - include ZIP contents
-  xn dupes . --min-size 1024 - skip files < 1kB
-  xn dupes . --algo md5 - use MD5 (faster)
-  xn dupes . -o report.json - save JSON report
+  xn dupes photos/            # find duplicates
+  xn dupes docs/ --zips       # include ZIP contents
+  xn dupes . --min-size 1024  # skip files under 1kB
+  xn dupes . --algo md5       # use MD5 (faster)
+  xn dupes . -o report.json   # save JSON report
 """
 
 def main() -> None:
@@ -121,7 +121,7 @@ def main() -> None:
   parser.add_argument("--algo", default="sha256", metavar="ALG",
     choices=["sha256", "md5", "sha1"], help="Hash algorithm (default: sha256)")
   parser.add_argument("--min-size", type=int, default=1, metavar="N",
-    help="Ignore files < N bytes (default: 1)")
+    help="Ignore files under N bytes (default: 1)")
   parser.add_argument("--zips", action="store_true", help="Scan inside .zip archives")
   parser.add_argument("--follow-symlinks", action="store_true",
     help="Measure a linked file as its target")

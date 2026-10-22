@@ -13,10 +13,10 @@ p = Print()
 
 EXAMPLES = """
 examples:
-  xn meta report.pdf - strip PDF metadata → report-nometa.pdf
-  xn meta photo.jpg - strip EXIF → photo-nometa.jpg
-  xn meta photo.jpg -i - strip EXIF in-place
-  xn meta scan.png -o clean.png - custom output path
+  xn meta report.pdf             # strip PDF metadata → report-nometa.pdf
+  xn meta photo.jpg              # strip EXIF → photo-nometa.jpg
+  xn meta photo.jpg -i           # strip EXIF in-place
+  xn meta scan.png -o clean.png  # custom output path
 """
 
 def main() -> None:
@@ -24,7 +24,7 @@ def main() -> None:
     EXAMPLES)
   parser.add_argument("src", help="Input file path")
   parser.add_argument("-o", "--output", dest="dst", default=None, metavar="PATH",
-    help="Output path (default: <n>-nometa.<ext>)")
+    help="Output path (default: <name>-nometa.<ext>)")
   parser.add_argument("-i", "--inplace", action="store_true", help="Overwrite source file")
   add_help(parser)
   args = parser.parse_args()

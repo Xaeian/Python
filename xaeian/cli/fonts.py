@@ -429,22 +429,22 @@ def _generate_css(font_dir:str, css_path:str, results:list[dict], dry_run:bool):
 
 EXAMPLES = """
 examples:
-  xn fonts web/fonts/ - web flat (slug-weight)
-  xn fonts web/fonts/ --css web/css/fonts.css - web + CSS
-  xn fonts assets/fonts/ --mode system - system flat (PascalCase)
-  xn fonts assets/fonts/ --mode system --meta - also rewrite TTF metadata
-  xn fonts fonts/ --dry-run - preview without changes
+  xn fonts web/fonts/                          # web layout: inter-400.ttf
+  xn fonts web/fonts/ --css web/css/fonts.css  # web layout plus its @font-face CSS
+  xn fonts assets/fonts/ --mode system         # system layout: Inter-Regular.ttf
+  xn fonts assets/fonts/ --mode system --meta  # also rewrite the TTF name table to match
+  xn fonts fonts/ --dry-run                    # preview without changes
 """
 
 def main() -> None:
   parser = make_parser("Rename font files to xaeian convention (web or system layout)", EXAMPLES)
   parser.add_argument("root", help="Directory with font files")
   parser.add_argument("--mode", choices=["web", "system"], default="web",
-    help="Layout: web (slug-weight + CSS) or system (PascalCase, reportlab/PIL)")
+    help="Layout: web (inter-400.ttf) or system (Inter-Regular.ttf)")
   parser.add_argument("--css", default=None, metavar="PATH",
     help="Output CSS file path (web mode only)")
   parser.add_argument("--meta", action="store_true",
-    help="Rewrite TTF/OTF name table to match new files (needs fontTools)")
+    help="Rewrite TTF/OTF name table to match new names (needs fontTools)")
   parser.add_argument("--dry-run", action="store_true",
     help="Preview without renaming or writing files")
   add_help(parser)

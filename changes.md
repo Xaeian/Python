@@ -1,5 +1,10 @@
 # Changes `xaeian`
 
+## `1.1.2` Commit and release
+
+- `cli`: `xn commit` adds, commits and pushes everything changed on the branch
+- `cli`: `xn release` signs, tags and publishes `main`, with the branch merged in first
+
 ## `1.1.1` Key order
 
 - `db`: `KeyValue` keeps dict key order

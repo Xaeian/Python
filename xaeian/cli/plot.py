@@ -13,11 +13,11 @@ p = Print()
 
 EXAMPLES = """
 examples:
-  xn plot log.csv - every column against the first, one panel per unit
-  xn plot log.csv -c vin_V,vout_V - only these columns
-  xn plot sweep.csv -x vin_V - another column on the x axis
-  xn plot log.csv -o log.png - save instead of opening a window (.png .svg .pdf)
-  xn plot log.csv --dark - dark theme
+  xn plot log.csv                  # every column against the first, one panel per unit
+  xn plot log.csv -c vin_V,vout_V  # only these columns
+  xn plot sweep.csv -x vin_V       # another column on the x axis
+  xn plot log.csv -o log.png       # save instead of opening a window (.png .svg .pdf)
+  xn plot log.csv --dark           # dark theme
 """
 
 #------------------------------------------------------------------------------------------- Values

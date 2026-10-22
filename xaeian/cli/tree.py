@@ -114,13 +114,13 @@ def tree(
 
 EXAMPLES = """
 examples:
-  xn tree . - current directory
-  xn tree src/ -e .py .c - only .py and .c files
-  xn tree . -d 2 - max depth 2
-  xn tree . --size - show file sizes
-  xn tree . --dirs - directories only
-  xn tree . --hidden - include dotfiles
-  xn tree . -o tree.json - save stats to JSON
+  xn tree .               # current directory
+  xn tree src/ -e .py .c  # only .py and .c files
+  xn tree . -d 2          # max depth 2
+  xn tree . --size        # show file sizes
+  xn tree . --dirs        # directories only
+  xn tree . --hidden      # include dotfiles
+  xn tree . -o tree.json  # save stats to JSON
 """
 
 def main() -> None:

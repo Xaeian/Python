@@ -288,9 +288,9 @@ def generate(package:str, folder:str|None=None, ci:bool=False) -> None:
 
 EXAMPLES = """
 examples:
-  py workflow.py xaeian              Just publish.yml
-  py workflow.py xaeian --ci         Add ci.yml and gate publishing on it
-  py workflow.py xaeian -o .github   Custom output folder
+  py workflow.py xaeian             # publish.yml only
+  py workflow.py xaeian --ci        # add ci.yml and gate publishing on it
+  py workflow.py xaeian -o .github  # custom output folder
 """
 
 if __name__ == "__main__":
@@ -300,7 +300,7 @@ if __name__ == "__main__":
   parser.add_argument("-o", "--output", default=None, metavar="DIR",
     help="Output folder (default: .github/workflows)")
   parser.add_argument("--ci", action="store_true",
-    help="Add ci.yml and gate publishing on it; a generated gate is kept without this")
+    help="Add ci.yml and gate publishing on it (kept once generated)")
   add_help(parser)
   args = parser.parse_args()
   generate(args.package, args.output, args.ci)

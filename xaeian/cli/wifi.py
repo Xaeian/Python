@@ -105,8 +105,8 @@ def wifi_passwords() -> list[dict[str, Any]]:
 
 EXAMPLES = """
 examples:
-  xn wifi - list all saved networks + passwords
-  xn wifi -o wifi.json - save report to JSON file
+  xn wifi               # list saved networks and their passwords
+  xn wifi -o wifi.json  # save report to JSON file
 """
 
 def main() -> None:
