@@ -142,7 +142,7 @@ xn min photos/ --max-px 1280    # batch resize
 xn meta photo.jpg -i            # strip EXIF in-place
 xn ico logo.png -o favicon.ico  # multi-size .ico
 xn commit -m "fix: Timeout"     # commit and push
-xn release 1.2.0 -n note.md     # merge into main, tag, publish
+xn release                      # merge into main, tag, publish
 ```
 
 ## Modules

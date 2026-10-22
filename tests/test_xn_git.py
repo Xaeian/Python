@@ -19,8 +19,8 @@ if not shutil.which("git"): pytest.skip("git needed", allow_module_level=True)
 
 FIRST = "## `1.0.0` First\n\n- `demo`: start\n"
 SECOND = "## `1.1.0` Second\n\n- `demo`: more\n\n"
-NOTE = "Refs:\n#12 boot hangs\nVerification:\n- bench BT-04 PASS\nKnown issues: none\n"
-NOTES = f"**Second**\n- `demo`: more\n\n{NOTE}" # GitHub Release text of `1.1.0`
+THIRD = "## `1.2.0` Third\n\n- `demo`: again\n\n"
+TEXT = "**Second**\n- `demo`: more" # release text of `1.1.0`, taken from `changes.md`
 
 #-------------------------------------------------------------------------------------------- Setup
 
@@ -48,7 +48,6 @@ class Repo:
   def __init__(self, root:Path, monkeypatch:pytest.MonkeyPatch):
     self.work = root / "work"
     self.origin_path = root / "origin.git"
-    self.note = root / "note.md"
     self.gh = FakeGh()
     self.monkeypatch = monkeypatch
     (root / "gitconfig").touch()
@@ -95,8 +94,7 @@ class Repo:
     return self.xn(commit, "-m", message)
 
   def xn_release(self, *args:str) -> int:
-    """`xn release args` with the note of the fixture."""
-    return self.xn(release, *args, "-n", str(self.note))
+    return self.xn(release, *args)
 
 @pytest.fixture(scope="session")
 def key(tmp_path_factory) -> str:
@@ -135,7 +133,6 @@ def template(tmp_path_factory, key) -> Path:
     repo.write("changes.md", f"# Changes\n\n{SECOND}{FIRST}")
     repo.commit_all("Second")
     repo.git("push", "-q", "-u", "origin", "develop")
-    repo.note.write_text(NOTE, encoding="utf-8")
   return root
 
 @pytest.fixture
@@ -179,15 +176,15 @@ def a_commit_on_main_goes_in_as_on_any_branch(repo):
   assert repo.xn_commit() == 0
   assert repo.origin("rev-parse", "main") == repo.git("rev-parse", "HEAD")
 
-def the_list_names_each_change_in_words(repo, capsys):
+def the_list_names_each_file_then_its_change(repo, capsys):
   repo.write("a.txt", "changed\n")
   repo.write("new.txt", "new\n")
   (repo.work / "changes.md").unlink()
   assert repo.xn_commit() == 0
-  out = capsys.readouterr().out
-  assert "changed a.txt" in out
-  assert "new     new.txt" in out
-  assert "deleted changes.md" in out
+  out = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
+  assert "a.txt changed" in out
+  assert "new.txt new" in out
+  assert "changes.md deleted" in out
 
 def a_branch_tracking_nothing_keeps_its_commit_here(repo, capsys):
   repo.git("switch", "-q", "-c", "local")
@@ -199,6 +196,12 @@ def a_branch_tracking_nothing_keeps_its_commit_here(repo, capsys):
   out = capsys.readouterr().out
   assert "tracks no remote branch: nothing pushed" in out
   assert "Nothing to commit" in out
+
+def a_branch_tracking_one_of_another_name_pushes_there(repo):
+  repo.git("switch", "-q", "-c", "work", "--track", "origin/develop")
+  repo.write("a.txt", "changed\n")
+  assert repo.xn_commit() == 0
+  assert repo.origin("rev-parse", "develop") == repo.git("rev-parse", "HEAD")
 
 def a_staged_removal_and_a_move_go_in(repo):
   """`git add` cannot match a path already gone from the index, so staged changes stay staged."""
@@ -307,14 +310,40 @@ def a_release_on_main_tags_it_without_a_merge(main):
   assert main.origin("rev-parse", "main") == head
   assert main.origin("rev-parse", "1.1.0^{commit}") == head
   trailers = main.origin("tag", "--list", "--format=%(trailers:only)", "1.1.0")
-  assert "Release-Checks: note, unreleased, version, changelog, code-version, ci" in trailers
+  assert "Release-Checks: unreleased, version, changelog, code-version, ci" in trailers
 
 def a_release_is_tagged_signed_and_published(repo):
   assert repo.xn_release("1.1.0") == 0
+  assert "-----BEGIN SSH SIGNATURE-----" in repo.origin("cat-file", "tag", "1.1.0")
+  assert (repo.gh.title, repo.gh.notes) == ("Demo 1.1.0", TEXT)
+
+def a_bare_release_takes_version_and_text_from_changes_md(repo):
+  assert repo.xn_release() == 0
+  assert repo.origin("rev-parse", "1.1.0^{commit}") == repo.origin("rev-parse", "main")
+  assert (repo.gh.title, repo.gh.notes) == ("Demo 1.1.0", TEXT)
+
+def changelog_md_stands_in_for_changes_md(repo):
+  repo.git("mv", "changes.md", "changelog.md")
+  repo.commit_all("Rename")
+  repo.git("push", "-q")
+  assert repo.xn_release() == 0
+  assert (repo.gh.title, repo.gh.notes) == ("Demo 1.1.0", TEXT)
+
+def a_note_is_the_release_text_as_written(repo, tmp_path):
+  (tmp_path / "note.md").write_text("Refs:\n#12 boot hangs\n", encoding="utf-8")
+  assert repo.xn_release("-n", str(tmp_path / "note.md")) == 0
+  assert repo.gh.notes == "Refs:\n#12 boot hangs"
   tag = repo.origin("cat-file", "tag", "1.1.0")
-  assert "-----BEGIN SSH SIGNATURE-----" in tag
   assert "\n#12 boot hangs\n" in tag # `--cleanup=strip` would cut it
-  assert (repo.gh.title, repo.gh.notes) == ("Demo 1.1.0", NOTES)
+
+def without_a_changes_file_a_given_version_goes_out_without_text(repo, capsys):
+  repo.git("rm", "-q", "changes.md")
+  repo.commit_all("No changes file")
+  repo.git("push", "-q")
+  assert repo.xn_release("1.1.0") == 0
+  assert "No release text" in capsys.readouterr().out
+  assert repo.gh.notes == ""
+  assert "changelog:none" in repo.origin("tag", "--list", "--format=%(trailers:only)", "1.1.0")
 
 def the_record_lists_the_new_commits_and_closes_with_trailers(repo):
   develop = repo.git("rev-parse", "develop")
@@ -323,7 +352,7 @@ def the_record_lists_the_new_commits_and_closes_with_trailers(repo):
   trailers = repo.origin("tag", "--list", "--format=%(trailers:only)", "1.1.0")
   assert re.fullmatch(
     r"Release-Version: 1\.1\.0\n"
-    r"Release-Checks: note, target-pure, ahead, unreleased, version, changelog, code-version, ci\n"
+    r"Release-Checks: target-pure, ahead, unreleased, version, changelog, code-version, ci\n"
     r"Release-CI: green 101\n"
     r"Release-Tool: xaeian \S+ release@[0-9a-f]{12} git \S+ gh 2\.80\.0\n"
     r"Approved-by: Tester <tester@example\.com>",
@@ -334,7 +363,7 @@ def a_second_release_takes_only_the_new_commits(repo):
   assert repo.xn_release("1.1.0") == 0
   first = repo.origin("rev-parse", "main")
   repo.set_version("1.2.0")
-  repo.write("changes.md", f"# Changes\n\n## `1.2.0` Third\n\n- `demo`: again\n\n{SECOND}{FIRST}")
+  repo.write("changes.md", f"# Changes\n\n{THIRD}{SECOND}{FIRST}")
   repo.commit_all("Third")
   repo.git("push", "-q")
   assert repo.xn_release("1.2.0") == 0
@@ -345,7 +374,7 @@ def a_second_release_takes_only_the_new_commits(repo):
 def a_release_from_a_subdirectory_keeps_paths_relative_to_it(repo, monkeypatch, capsys):
   """The note is read where it was named, and the notes left behind are shown from there."""
   (repo.work / "docs").mkdir()
-  (repo.work / "docs" / "note.md").write_text(NOTE, encoding="utf-8")
+  (repo.work / "docs" / "note.md").write_text("Tested on the bench\n", encoding="utf-8")
   monkeypatch.chdir(repo.work / "docs")
   repo.gh.down = True
   assert repo.xn(release, "1.1.0", "-n", "note.md") == 2
@@ -395,7 +424,7 @@ def a_failed_github_release_leaves_its_notes_to_finish_with(repo, capsys):
   repo.gh.down = True
   assert repo.xn_release("1.1.0") == 2
   assert repo.origin("rev-parse", "1.1.0^{commit}") == repo.origin("rev-parse", "main")
-  assert (repo.work / ".git" / "xn-release.md").read_text(encoding="utf-8") == NOTES
+  assert (repo.work / ".git" / "xn-release.md").read_text(encoding="utf-8") == TEXT
   assert "gh release create 1.1.0 --verify-tag" in capsys.readouterr().out
 
 def a_push_race_leaves_origin_without_the_release(repo, monkeypatch, capsys):
@@ -421,8 +450,8 @@ def a_detached_head_is_refused(repo, capsys):
   assert "Detached HEAD" in capsys.readouterr().out
 
 def a_released_commit_is_not_released_again(main, capsys):
-  assert main.xn_release("1.1.0") == 0
-  assert main.xn_release("1.1.1") == 1
+  assert main.xn_release() == 0
+  assert main.xn_release() == 1
   assert "Nothing to release: the commit is 1.1.0 already" in capsys.readouterr().out
 
 def without_main_or_master_nothing_is_released(repo, capsys):
@@ -448,43 +477,44 @@ def a_branch_matching_main_has_nothing_to_release(repo, capsys):
   assert repo.xn_release("1.1.0") == 1
   assert "Nothing to release: same matches main" in capsys.readouterr().out
 
+def without_a_changes_file_the_version_has_to_be_given(repo, capsys):
+  repo.git("rm", "-q", "changes.md")
+  repo.commit_all("No changes file")
+  repo.git("push", "-q")
+  assert repo.xn_release() == 1
+  assert "No changes.md or changelog.md on the commit: pass the version" in capsys.readouterr().out
+
+def a_given_version_has_to_match_the_changes_entry(repo, capsys):
+  repo.set_version("1.2.0")
+  repo.commit_all("Bump")
+  repo.git("push", "-q")
+  assert repo.xn_release("1.2.0") == 1
+  assert "changes.md opens with 1.1.0, not 1.2.0" in capsys.readouterr().out
+
 def a_tag_of_the_version_is_refused_with_v_or_without(repo, capsys):
   repo.git("tag", "v1.1.0", "main")
   assert repo.xn_release("1.1.0") == 1
   assert "Tag v1.1.0 exists only here: git tag -d v1.1.0" in capsys.readouterr().out
 
 def a_version_below_the_last_tag_is_refused(repo, capsys):
-  assert repo.xn_release("0.9.0") == 1
+  repo.write("changes.md", f"# Changes\n\n## `0.9.0` Old\n\n- `demo`: back\n\n{FIRST}")
+  repo.commit_all("Old")
+  repo.git("push", "-q")
+  assert repo.xn_release() == 1
   assert "0.9.0 is below 1.0.0" in capsys.readouterr().out
 
 def a_pyproject_of_another_version_is_refused(repo, capsys):
-  assert repo.xn_release("1.2.0") == 1
-  assert "pyproject.toml says 1.1.0, not 1.2.0" in capsys.readouterr().out
-
-def changes_md_has_to_open_with_the_version(repo, capsys):
-  repo.set_version("1.2.0")
-  repo.commit_all("Bump")
+  repo.write("changes.md", f"# Changes\n\n{THIRD}{SECOND}{FIRST}")
+  repo.commit_all("Third")
   repo.git("push", "-q")
-  assert repo.xn_release("1.2.0") == 1
-  assert "changes.md opens with `1.1.0` Second, not 1.2.0" in capsys.readouterr().out
+  assert repo.xn_release() == 1
+  assert "pyproject.toml says 1.1.0, not 1.2.0" in capsys.readouterr().out
 
 #--------------------------------------------------------------------------- Note, CI and code hash
 
 def a_note_is_read_with_lf(tmp_path):
-  (tmp_path / "note.md").write_bytes(NOTE.replace("\n", "\r\n").encode("utf-8"))
-  assert release.read_note(str(tmp_path / "note.md")) == NOTE.strip()
-
-@pytest.mark.parametrize("text, said", [
-  ("Refs: #1\nVerification: bench\n", "misses Known issues"),
-  ("Refs:\nVerification: bench\nKnown issues: none\n", "misses Refs"),
-  ("Refs: #1\nRefs: #2\nVerification: bench\nKnown issues: none\n", "has Refs twice"),
-  ("Hello\nRefs: #1\nVerification: bench\nKnown issues: none\n", "text before its first section"),
-  ("Changes:\n- more\nRefs: #1\nVerification: bench\nKnown issues: none\n", "has Changes"),
-])
-def a_note_short_of_its_sections_is_refused(tmp_path, capsys, text, said):
-  (tmp_path / "note.md").write_text(text, encoding="utf-8")
-  with pytest.raises(SystemExit): release.read_note(str(tmp_path / "note.md"))
-  assert said in capsys.readouterr().out
+  (tmp_path / "note.md").write_bytes(b"Refs:\r\n#12 boot hangs\r\n\r\n")
+  assert release.read_note(str(tmp_path / "note.md")) == "Refs:\n#12 boot hangs"
 
 @pytest.mark.parametrize("runs, said", [
   ([], "No CI run"),

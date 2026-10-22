@@ -56,7 +56,7 @@ A header carries its unit, `vout_V` or `Vout [V]`, and columns sharing a unit sh
 Empty or garbled cells become gaps. A `;` file may use a decimal comma.
 Requires `pip install xaeian[plot]`.
 
-## `commit`: Signed commit and push
+## `commit`: Commit and push
 
 ```sh
 xn commit -m "fix: Timeout"
@@ -76,34 +76,38 @@ Refused before anything is staged:
 ## `release`: Merge, tag and publish
 
 ```sh
-xn release 1.2.0 -n note.md
-xn release 1.2.0 -n note.md --dry-run
+xn release
+xn release 1.2.0
+xn release -n note.md
+xn release --dry-run
 ```
 
 On `develop`, or any branch besides `main` and `master`, merges it into `main`, else `master`.
 The merge is a signed commit built from refs, and one atomic push moves `main` and the tag.
 On `main` or `master` itself, tags what the branch holds on origin, with no merge.
-Then `gh` publishes the GitHub Release. The working tree is never touched.
+Then `gh` publishes the GitHub Release.
+The working tree is never touched.
+
+The version comes from the first entry of `changes.md`, else `changelog.md`, unless given.
+Without either file the version has to be given.
+Both files are read from the released commit, never from the working tree.
+The release text is the first that exists:
+
+1. the note given with `-n`, as written
+2. the title and list of that first entry
+3. nothing, with a warning
 
 Checked before anything leaves the machine:
 
 - the local branch matches origin, and its commit is not released yet
 - when merging, `main` holds nothing the branch lacks: after a hotfix, merge `origin/main` into the branch first
-- the first entry of `changes.md` is the version, with `v` or without
+- a given version matches the first entry of the changes file, with `v` or without
 - `pyproject.toml`, when there is one, says the same version
 - no tag of the version exists, and the version is above every earlier tag
 - CI finished green on the released commit, unless `--no-ci`, which the record keeps
 
 The release is named after the previous one: `Xaeian 1.1.1` → `Xaeian 1.2.0`.
 `--name` gives the name the first time.
-Its text is the title and list of the `changes.md` entry, followed by the note:
-
-```md
-Refs: #12, #15
-Verification:
-- bench BT-04 PASS
-Known issues: none
-```
 
 The signed tag carries the record, and so does the merge commit when there is one.
 The record holds the text, the commits since the release before, and trailers.

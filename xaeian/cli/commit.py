@@ -3,6 +3,7 @@
 """
 `xn commit` - everything changed on the active branch, committed and pushed.
 
+A branch tracking no remote one keeps the commit here.
 Signed when git signs commits anyway (`commit.gpgsign`), as a plain `git commit` would be.
 """
 
@@ -21,6 +22,7 @@ examples:
 
 SECRETS = (".env*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*", "id_ed25519*")
 SIZE_MAX_MB = 5
+COLORS = {"new": c.CREAM, "changed": c.GREY, "deleted": c.SALMON} # of each word `label` gives
 
 # marker in the git directory of each operation that can be left half done
 BUSY = (
@@ -78,7 +80,7 @@ def label(status:str) -> str:
 def push(name:str) -> None:
   """Push the branch to the one it tracks; a refusal keeps the commit here."""
   try:
-    git("push")
+    git("-c", "push.default=upstream", "push") # `simple` refuses a tracked branch of another name
   except CommandError as e:
     p.err(f"Push of {c.SKY}{name}{c.END} refused, the commit stays here | {e}")
     p.tip(f"Take the remote in with {c.YELLOW}git pull --rebase{c.END}, "
@@ -105,7 +107,9 @@ def commit(message:str) -> None:
     for path in out: p.dot(f"{c.ORANGE}{path}{c.END}")
     p.tip(f"If it belongs in the repo, commit it with plain {c.YELLOW}git{c.END}")
     sys.exit(1)
-  for status, path in entries: p.dot(f"{label(status):<7} {path}")
+  for status, path in entries:
+    word = label(status)
+    p.dot(f"{path} {COLORS[word]}{word}{c.END}")
   # Exactly the paths checked: a file that appeared since stays out.
   # A staged path is in already, and a staged removal is no path `git add` can match.
   # No `-A`: with an empty list it would take the whole tree.
