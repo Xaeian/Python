@@ -115,10 +115,10 @@ A value in a message takes the colour of its role, and the sentence stays plain:
 from xaeian import Print, grey, fmt_id, fmt_path, fmt_cmd, fmt_count, fmt_list
 
 p = Print()
-p.inf(f"{fmt_id(3, 12)} {fmt_path('out/img/a.svg')} {grey('(0.8s)')}")  # #3 cream, out/img/ grey
-p.ok(f"{fmt_count(2, 'file')} written")                               # 2 blue, the word to match
-p.inf(f"Styles: {fmt_list(['light', 'dark'])}")                       # names in sky
-p.run(f"Check with {fmt_cmd('py main.py --check')}")                  # py yellow, --check grey
+p.inf(f"{fmt_id(3, 12)} {fmt_path('out/img/a.svg')} {grey('(0.8s)')}")  # 3 cream, out/img/ grey
+p.ok(f"{fmt_count(2, 'file')} written")                                 # 2 blue, the word to match
+p.inf(f"Styles: {fmt_list(['light', 'dark'])}")                         # names in sky
+p.run(f"Check with {fmt_cmd('py main.py --check')}")                    # py yellow, --check grey
 ```
 
 ## `crc`
