@@ -12,6 +12,7 @@ Read, write, append, hash. Auto-creates parent directories on write.
 from xaeian import FILE
 
 FILE.save("data.txt", "Hello!")
+FILE.put("data.txt", "Hello!")      # → "unchanged": the file and its mtime stay
 FILE.load("data.txt")               # → "Hello!"
 FILE.append("data.txt", "\nmore")
 FILE.load("data.bin", binary=True)  # → bytes

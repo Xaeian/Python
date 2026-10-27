@@ -355,8 +355,8 @@ class Shell(SerialPort):
 
   @staticmethod
   def _boot_value(field:str, value:str) -> int|str:
-    """`app` and `crc` hex, other numbers decimal; words and the `key` fingerprint stay text."""
-    if field in ("app", "crc"): return int(value, 16)
+    """`app`, `crc` and `loader` hex, other numbers decimal; words and `key` stay text."""
+    if field in ("app", "crc", "loader"): return int(value, 16)
     return int(value) if value.isdigit() and field != "key" else value
 
   def _boot_reply(self, verb:str, timeout_s:float) -> dict[str, Any]|None:
@@ -397,13 +397,16 @@ class Shell(SerialPort):
     `line` (console line limit), `image` [B] and `crc` of the running image,
     `active` (a transfer is open), `mode` (`plain` or `key`),
     `result` of the last start (`installed`, `none` or why an update was refused),
-    `key` (its fingerprint) and `rdp`.
+    `last` result of the last update request, kept until the next one,
+    `epoch` and `revoked` floors (keys below `revoked` sign nothing),
+    `loader` (CRC-32 of the bootloader code with its keys),
+    `key` (fingerprints of the bootloader keys, comma-separated) and `rdp`.
     """
     return self._boot_exec("boot info", "info")
 
   def boot(self, image:bytes|str, progress:Callable[[int, int], None]|None=None) -> bool:
     """
-    Install a `PRO_BOOT` build: the bytes or the path of its `.bin` or `.hex`.
+    Install a build under the bootloader: the bytes or the path of its `.bin` or `.hex`.
 
     A `.hex` carries addresses, so the image is what lies at the slot the device reports.
     A full flash image with the bootloader in front then installs the application alone.

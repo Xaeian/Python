@@ -73,6 +73,8 @@ Refused before anything is staged:
 - a file over 5MB
 - a merge, rebase, cherry-pick or revert in progress, or an unmerged path
 
+Requires `gh`, logged in: git takes its github.com credentials from it.
+
 ## `release`: Merge, tag and publish
 
 ```sh
@@ -83,9 +85,10 @@ xn release --dry-run
 ```
 
 On `develop`, or any branch besides `main` and `master`, merges it into `main`, else `master`.
-The merge is a signed commit built from refs, and one atomic push moves `main` and the tag.
+The merge is a commit built from refs, and one atomic push moves `main` and the tag.
 On `main` or `master` itself, tags what the branch holds on origin, with no merge.
 Then `gh` publishes the GitHub Release.
+Tag and merge are signed when `user.signingkey` is set.
 The working tree is never touched.
 
 The version comes from the first entry of `changes.md`, else `changelog.md`, unless given.
@@ -104,17 +107,17 @@ Checked before anything leaves the machine:
 - a given version matches the first entry of the changes file, with `v` or without
 - `pyproject.toml`, when there is one, says the same version
 - no tag of the version exists, and the version is above every earlier tag
-- CI finished green on the released commit, unless `--no-ci`, which the record keeps
+- CI tests passed on the released commit, unless `--no-ci`, which the record keeps
 
 The release is named after the previous one: `Xaeian 1.1.1` → `Xaeian 1.2.0`.
 `--name` gives the name the first time.
 
 The signed tag carries the record, and so does the merge commit when there is one.
 The record holds the text, the commits since the release before, and trailers.
-The trailers name the checks, the CI runs, the tool with a hash of its own code, and the approver.
+The trailers name the checks, the CI test runs, the tool with a hash of its own code, and the approver.
 
 > [!NOTE]
 > Exit `2` means the release is on origin but the GitHub Release failed.
 > The notes wait in `.git/xn-release.md`, with the command to finish printed.
 
-Requires `gh`, logged in.
+Requires `gh`, logged in: git takes its github.com credentials from it.

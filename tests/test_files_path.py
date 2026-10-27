@@ -48,6 +48,9 @@ def ensure_suffix_appends_when_missing():
 def ensure_suffix_is_noop_when_already_present():
   assert PATH.ensure_suffix("report.pdf", ".pdf") == "report.pdf"
 
+def ensure_suffix_takes_the_extension_in_any_case():
+  assert PATH.ensure_suffix("Report.PDF", ".pdf") == "Report.PDF"
+
 def ensure_suffix_empty_suffix_just_normalizes():
   assert PATH.ensure_suffix("a\\b", "") == "a/b"
 

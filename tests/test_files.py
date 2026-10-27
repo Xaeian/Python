@@ -94,6 +94,21 @@ def file_save_creates_parent_dirs():
   FILE.save("deep/nested/x.txt", "ok") # parent dirs auto-created
   assert FILE.load("deep/nested/x.txt") == "ok"
 
+def json_and_csv_take_their_extension_in_any_case():
+  JSON.save("X.JSON", {"a": 1})
+  assert FILE.exists("X.JSON") and not FILE.exists("X.JSON.json")
+  assert JSON.load("X.JSON") == {"a": 1}
+  CSV.save("T.CSV", [{"a": "1"}])
+  assert FILE.exists("T.CSV") and not FILE.exists("T.CSV.csv")
+
+def file_put_writes_only_what_changed():
+  assert FILE.put("p/x.txt", "one", dry=True) == "new" and not FILE.exists("p/x.txt")
+  assert FILE.put("p/x.txt", "one") == "new" and FILE.load("p/x.txt") == "one"
+  stamp = FILE.mtime("p/x.txt")
+  assert FILE.put("p/x.txt", "one") == "unchanged" and FILE.mtime("p/x.txt") == stamp
+  assert FILE.put("p/x.txt", b"two", dry=True) == "updated" and FILE.load("p/x.txt") == "one"
+  assert FILE.put("p/x.txt", b"two") == "updated" and FILE.load("p/x.txt") == "two"
+
 def file_exists_and_remove():
   FILE.save("e.txt", "x")
   assert FILE.exists("e.txt") and not FILE.exists(["e.txt", "missing"])

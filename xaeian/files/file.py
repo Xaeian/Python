@@ -133,6 +133,19 @@ class FILE:
           file.write(content)
 
   @staticmethod
+  def put(path:str, content:str|bytes, dry:bool=False) -> str:
+    """
+    Save `content` unless the file already holds it, so an unchanged file keeps its mtime
+    → `new`, `updated` or `unchanged`; `dry` only says which, and writes nothing.
+    """
+    data = content if isinstance(content, bytes) else content.encode(get_context().encoding)
+    if not FILE.exists(path): state = "new"
+    elif FILE.load(path, binary=True) == data: return "unchanged"
+    else: state = "updated"
+    if not dry: FILE.save(path, content)
+    return state
+
+  @staticmethod
   def save_lines(path:str, lines:list[str]) -> None:
     """Save list of lines to text file, joined as-is; the lines carry their own line ends."""
     FILE.save(path, "".join(lines))

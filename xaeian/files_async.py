@@ -75,6 +75,7 @@ class FILE:
   """Async file operations."""
   load = _offload(_FILE.load)
   save = _offload(_FILE.save)
+  put = _offload(_FILE.put)
   append = _offload(_FILE.append)
   load_lines = _offload(_FILE.load_lines)
   save_lines = _offload(_FILE.save_lines)

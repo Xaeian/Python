@@ -3,15 +3,15 @@
 """
 `xn commit` - everything changed on the active branch, committed and pushed.
 
-A branch tracking no remote one keeps the commit here.
+A branch tracking no remote one keeps its commit local.
 Signed when git signs commits anyway (`commit.gpgsign`), as a plain `git commit` would be.
 """
 
 import fnmatch, os, sys
 from ..log import Print
-from ..colors import Color as c
+from ..colors import Color as c, fmt_cmd
 from .args import make_parser, add_help
-from ._git import CommandError, git, sha, branch, fail
+from ._git import CommandError, git, sha, branch, fail, github, fmt_branch, fmt_sha, fmt_file
 
 p = Print()
 
@@ -36,12 +36,13 @@ BUSY = (
 #------------------------------------------------------------------------------------------- Checks
 
 def preflight() -> str:
-  """The active branch, once a commit may go on it; any refusal exits."""
+  """Active branch, once a commit may go on it; any refusal exits."""
+  github()
   name = branch()
   if name is None: fail("Detached HEAD: switch to a branch first")
   for operation, mark in BUSY:
     if os.path.exists(git("rev-parse", "--git-path", mark)):
-      fail(f"A {operation} is in progress: finish or abort it first")
+      fail(f"{operation.capitalize()} in progress: finish or abort it first")
   if git("diff", "--name-only", "--diff-filter=U"): fail("Unmerged paths: resolve them first")
   return name
 
@@ -60,7 +61,7 @@ def refused(paths:list[str]) -> list[str]:
   out = []
   for path in paths:
     if not os.path.isfile(path): continue
-    name = os.path.basename(path).lower() # the same answer on every system
+    name = os.path.basename(path).lower() # same answer on every system
     secret = name != ".env.example" and any(fnmatch.fnmatchcase(name, s) for s in SECRETS)
     if secret or os.path.getsize(path) > SIZE_MAX_MB * 1024**2: out.append(path)
   return out
@@ -70,7 +71,7 @@ def ahead() -> bool:
   return git("rev-list", "--count", "@{upstream}..HEAD") != "0"
 
 def label(status:str) -> str:
-  """`deleted`, `new` or `changed`, the word for an `XY` code of `git status`."""
+  """`deleted`, `new` or `changed`: the word for an `XY` code of `git status`."""
   if "D" in status: return "deleted"
   if "?" in status or "A" in status: return "new"
   return "changed"
@@ -78,15 +79,14 @@ def label(status:str) -> str:
 #------------------------------------------------------------------------------------------- Commit
 
 def push(name:str) -> None:
-  """Push the branch to the one it tracks; a refusal keeps the commit here."""
+  """Push the branch to the one it tracks; a refusal keeps the commit local."""
   try:
     git("-c", "push.default=upstream", "push") # `simple` refuses a tracked branch of another name
   except CommandError as e:
-    p.err(f"Push of {c.SKY}{name}{c.END} refused, the commit stays here | {e}")
-    p.tip(f"Take the remote in with {c.YELLOW}git pull --rebase{c.END}, "
-      f"then {c.YELLOW}git push{c.END}")
+    p.err(f"Push of {fmt_branch(name)} rejected, commit kept locally | {e}")
+    p.tip(f"Pull first with {fmt_cmd('git pull --rebase')}, then push with {fmt_cmd('git push')}")
     sys.exit(1)
-  p.ok(f"Pushed {c.SKY}{name}{c.END}")
+  p.ok(f"Pushed {fmt_branch(name)}")
 
 def commit(message:str) -> None:
   """
@@ -99,13 +99,13 @@ def commit(message:str) -> None:
   entries = changes()
   if not entries:
     if tracked and ahead(): push(name)
-    else: p.inf(f"Nothing to commit on {c.SKY}{name}{c.END}")
+    else: p.inf(f"Nothing to commit on {fmt_branch(name)}")
     return
   out = refused([path for _, path in entries])
   if out:
-    p.err(f"Nothing committed: a secret, or a file over {SIZE_MAX_MB}MB")
-    for path in out: p.dot(f"{c.ORANGE}{path}{c.END}")
-    p.tip(f"If it belongs in the repo, commit it with plain {c.YELLOW}git{c.END}")
+    p.err(f"Nothing committed: secrets or files over {SIZE_MAX_MB}MB")
+    for path in out: p.dot(fmt_file(path))
+    p.tip(f"To commit one anyway, use plain {fmt_cmd('git')}")
     sys.exit(1)
   for status, path in entries:
     word = label(status)
@@ -117,10 +117,10 @@ def commit(message:str) -> None:
   listing = "\0".join(todo).encode("utf-8", "surrogateescape")
   git("--literal-pathspecs", "add", "--pathspec-from-file=-", "--pathspec-file-nul", data=listing)
   git("commit", "-F", "-", data=message.encode("utf-8"))
-  short = git("rev-parse", "--short", "HEAD")
-  p.ok(f"Committed {c.GOLD}{short}{c.END} on {c.SKY}{name}{c.END}")
+  head = git("rev-parse", "HEAD")
+  p.ok(f"Committed {fmt_sha(head)} on {fmt_branch(name)}")
   if tracked: push(name)
-  else: p.inf(f"{c.SKY}{name}{c.END} tracks no remote branch: nothing pushed")
+  else: p.inf(f"{fmt_branch(name)} has no remote branch, commit kept locally")
 
 #--------------------------------------------------------------------------------------------- Main
 
@@ -130,7 +130,7 @@ def main() -> None:
   add_help(parser)
   args = parser.parse_args()
   try:
-    os.chdir(git("rev-parse", "--show-toplevel"))
+    os.chdir(git("rev-parse", "--show-toplevel")) # paths of `git status` count from repo root
     commit(args.message)
   except CommandError as e:
     fail(str(e))

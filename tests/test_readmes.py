@@ -16,8 +16,6 @@ import pytest
 import xaeian
 import xaeian.db
 import xaeian.eda
-import xaeian.eda.fp
-import xaeian.eda.sym
 import xaeian.net
 import xaeian.serial
 from xaeian import MissingExtra
@@ -36,8 +34,7 @@ OBJECTS = {
     "sh": xaeian.serial.Shell},
   "xaeian/net/readme.md": {"r": xaeian.net.SFTP, "sftp": xaeian.net.SFTP, "ftp": xaeian.net.FTP,
     "s3": xaeian.net.S3},
-  "xaeian/eda/readme.md": {"kc": xaeian.eda.KiCad, "sim": xaeian.eda.Simulation,
-    "fp": xaeian.eda.fp.Footprint, "sym": xaeian.eda.sym.Symbol, "lib": xaeian.eda.sym.SymbolLib},
+  "xaeian/eda/readme.md": {"kc": xaeian.eda.KiCad, "sim": xaeian.eda.Simulation},
   "xaeian/media/readme.md": {},
   "xaeian/cli/readme.md": {},
   "xaeian/readme.md": {},

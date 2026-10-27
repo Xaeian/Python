@@ -12,8 +12,10 @@ import json, os, re, shutil, subprocess, sys
 from pathlib import Path
 from types import ModuleType
 import pytest
-from xaeian.cli import commit, release
+from xaeian.cli import _git, commit, release
 from xaeian.cli._git import CommandError
+from xaeian.colors import fmt_cmd
+from xaeian.colors import Color as c
 
 if not shutil.which("git"): pytest.skip("git needed", allow_module_level=True)
 
@@ -21,6 +23,8 @@ FIRST = "## `1.0.0` First\n\n- `demo`: start\n"
 SECOND = "## `1.1.0` Second\n\n- `demo`: more\n\n"
 THIRD = "## `1.2.0` Third\n\n- `demo`: again\n\n"
 TEXT = "**Second**\n- `demo`: more" # release text of `1.1.0`, taken from `changes.md`
+
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 #-------------------------------------------------------------------------------------------- Setup
 
@@ -37,7 +41,7 @@ class FakeGh:
       if self.down: raise CommandError("HTTP 502: GitHub down")
       self.title = args[args.index("--title") + 1]
       self.notes = data.decode("utf-8")
-      return ""
+      return f"https://github.com/demo/demo/releases/tag/{args[2]}"
     if args[:2] == ("run", "list"): return json.dumps(self.runs)
     if args[:2] == ("release", "list"): return json.dumps(self.releases)
     if args == ("--version",): return "gh version 2.80.0 (2026-01-01)"
@@ -141,6 +145,9 @@ def repo(template, tmp_path, monkeypatch) -> Repo:
   shutil.copytree(template, tmp_path, dirs_exist_ok=True)
   repo = Repo(tmp_path, monkeypatch)
   monkeypatch.setattr(release, "gh", repo.gh)
+  # install and login of `gh` have tests of their own
+  monkeypatch.setattr(commit, "github", lambda: None)
+  monkeypatch.setattr(release, "github", lambda: None)
   monkeypatch.chdir(repo.work)
   return repo
 
@@ -181,7 +188,7 @@ def the_list_names_each_file_then_its_change(repo, capsys):
   repo.write("new.txt", "new\n")
   (repo.work / "changes.md").unlink()
   assert repo.xn_commit() == 0
-  out = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
+  out = ANSI.sub("", capsys.readouterr().out)
   assert "a.txt changed" in out
   assert "new.txt new" in out
   assert "changes.md deleted" in out
@@ -193,8 +200,8 @@ def a_branch_tracking_nothing_keeps_its_commit_here(repo, capsys):
   assert repo.git("log", "-1", "--format=%s") == "fix: Timeout"
   assert repo.origin("branch", "--list", "local") == ""
   assert repo.xn_commit() == 0
-  out = capsys.readouterr().out
-  assert "tracks no remote branch: nothing pushed" in out
+  out = ANSI.sub("", capsys.readouterr().out)
+  assert "has no remote branch, commit kept locally" in out
   assert "Nothing to commit" in out
 
 def a_branch_tracking_one_of_another_name_pushes_there(repo):
@@ -212,13 +219,13 @@ def a_staged_removal_and_a_move_go_in(repo):
 
 @pytest.mark.parametrize("setup, said", [
   (lambda repo: repo.git("switch", "-q", "--detach"), "Detached HEAD"),
-  (lambda repo: repo.write(".git/MERGE_HEAD", repo.git("rev-parse", "HEAD")), "A merge is in progress"),
+  (lambda repo: repo.write(".git/MERGE_HEAD", repo.git("rev-parse", "HEAD")), "Merge in progress"),
 ])
 def a_branch_not_ready_takes_no_commit(repo, capsys, setup, said):
   repo.write("a.txt", "changed\n")
   setup(repo)
   assert repo.xn_commit() == 1
-  assert said in capsys.readouterr().out
+  assert said in ANSI.sub("", capsys.readouterr().out)
   assert repo.git("diff", "--cached", "--name-only") == ""
 
 def a_secret_at_the_root_stops_a_commit_from_a_subdirectory(repo, monkeypatch, capsys):
@@ -227,7 +234,7 @@ def a_secret_at_the_root_stops_a_commit_from_a_subdirectory(repo, monkeypatch, c
   repo.write(".env", "TOKEN=secret\n")
   monkeypatch.chdir(repo.work / "docs")
   assert repo.xn_commit() == 1
-  assert "Nothing committed: a secret" in capsys.readouterr().out
+  assert "Nothing committed: secrets" in ANSI.sub("", capsys.readouterr().out)
 
 def an_unmerged_path_takes_no_commit(repo, capsys):
   """A conflicted `stash pop` leaves no operation in progress, only the unmerged path."""
@@ -237,14 +244,14 @@ def an_unmerged_path_takes_no_commit(repo, capsys):
   repo.commit_all("Theirs")
   subprocess.run(["git", "stash", "pop", "-q"], cwd=repo.work, capture_output=True) # conflicts
   assert repo.xn_commit() == 1
-  assert "Unmerged paths" in capsys.readouterr().out
+  assert "Unmerged paths" in ANSI.sub("", capsys.readouterr().out)
 
 @pytest.mark.parametrize("name", [".env", "deploy.PEM"])
 def a_secret_stops_the_commit_and_the_index_stays(repo, capsys, name):
   repo.write("a.txt", "changed\n")
   repo.write(name, "secret\n")
   assert repo.xn_commit() == 1
-  assert name in capsys.readouterr().out
+  assert name in ANSI.sub("", capsys.readouterr().out)
   assert repo.git("diff", "--cached", "--name-only") == ""
 
 def a_template_of_a_secret_goes_in(repo):
@@ -278,7 +285,7 @@ def with_nothing_changed_a_waiting_commit_goes_out(repo, capsys):
   assert repo.xn_commit() == 0
   assert repo.origin("rev-parse", "develop") == repo.git("rev-parse", "HEAD")
   assert repo.xn_commit() == 0
-  assert "Nothing to commit" in capsys.readouterr().out
+  assert "Nothing to commit" in ANSI.sub("", capsys.readouterr().out)
 
 def a_refused_push_keeps_the_commit(repo, capsys):
   repo.git("commit", "-q", "--allow-empty", "-m", "Elsewhere")
@@ -287,7 +294,7 @@ def a_refused_push_keeps_the_commit(repo, capsys):
   repo.write("a.txt", "changed\n")
   assert repo.xn_commit() == 1
   assert repo.git("log", "-1", "--format=%s") == "fix: Timeout"
-  assert "git pull --rebase" in capsys.readouterr().out
+  assert "git pull --rebase" in ANSI.sub("", capsys.readouterr().out)
 
 #--------------------------------------------------------------------------------------- xn release
 
@@ -312,10 +319,19 @@ def a_release_on_main_tags_it_without_a_merge(main):
   trailers = main.origin("tag", "--list", "--format=%(trailers:only)", "1.1.0")
   assert "Release-Checks: unreleased, version, changelog, code-version, ci" in trailers
 
-def a_release_is_tagged_signed_and_published(repo):
+def a_release_is_tagged_signed_and_published(repo, capsys):
   assert repo.xn_release("1.1.0") == 0
+  out = ANSI.sub("", capsys.readouterr().out)
+  assert "Released Demo 1.1.0: https://github.com/demo/demo/releases/tag/1.1.0" in out
   assert "-----BEGIN SSH SIGNATURE-----" in repo.origin("cat-file", "tag", "1.1.0")
   assert (repo.gh.title, repo.gh.notes) == ("Demo 1.1.0", TEXT)
+
+def a_release_without_a_signing_key_goes_out_unsigned(repo, capsys):
+  repo.git("config", "--unset", "user.signingkey")
+  assert repo.xn_release() == 0
+  assert "Release without signature" in ANSI.sub("", capsys.readouterr().out)
+  assert "\ngpgsig " not in repo.origin("cat-file", "commit", "main")
+  assert "SSH SIGNATURE" not in repo.origin("cat-file", "tag", "1.1.0")
 
 def a_bare_release_takes_version_and_text_from_changes_md(repo):
   assert repo.xn_release() == 0
@@ -329,6 +345,14 @@ def changelog_md_stands_in_for_changes_md(repo):
   assert repo.xn_release() == 0
   assert (repo.gh.title, repo.gh.notes) == ("Demo 1.1.0", TEXT)
 
+def an_entry_under_a_deeper_heading_takes_its_subheadings_along(repo):
+  repo.write("changes.md", "# Changes\n\nNewest first.\n\n### `1.1.0` 2026-10-22\n\n- more\n\n"
+    "#### Fixed\n\n- boot\n\n### `1.0.0` 2026-10-01\n\n- start\n")
+  repo.commit_all("Deeper")
+  repo.git("push", "-q")
+  assert repo.xn_release() == 0
+  assert repo.gh.notes == "**2026-10-22**\n- more\n\n#### Fixed\n\n- boot"
+
 def a_note_is_the_release_text_as_written(repo, tmp_path):
   (tmp_path / "note.md").write_text("Refs:\n#12 boot hangs\n", encoding="utf-8")
   assert repo.xn_release("-n", str(tmp_path / "note.md")) == 0
@@ -341,7 +365,7 @@ def without_a_changes_file_a_given_version_goes_out_without_text(repo, capsys):
   repo.commit_all("No changes file")
   repo.git("push", "-q")
   assert repo.xn_release("1.1.0") == 0
-  assert "No release text" in capsys.readouterr().out
+  assert "Release without text" in ANSI.sub("", capsys.readouterr().out)
   assert repo.gh.notes == ""
   assert "changelog:none" in repo.origin("tag", "--list", "--format=%(trailers:only)", "1.1.0")
 
@@ -378,12 +402,12 @@ def a_release_from_a_subdirectory_keeps_paths_relative_to_it(repo, monkeypatch, 
   monkeypatch.chdir(repo.work / "docs")
   repo.gh.down = True
   assert repo.xn(release, "1.1.0", "-n", "note.md") == 2
-  assert "--notes-file ../.git/xn-release.md" in capsys.readouterr().out
+  assert "--notes-file ../.git/xn-release.md" in ANSI.sub("", capsys.readouterr().out)
   assert os.path.isfile("../.git/xn-release.md")
 
 def a_dry_run_prints_the_record_and_changes_nothing(repo, capsys):
   assert repo.xn_release("1.1.0", "--dry-run") == 0
-  assert "Demo 1.1.0" in capsys.readouterr().out
+  assert "Record of Demo 1.1.0:\n\nDemo 1.1.0\n\n" in ANSI.sub("", capsys.readouterr().out)
   assert repo.origin("rev-parse", "main") == repo.git("rev-parse", "main")
   assert repo.git("tag", "--list") == "1.0.0"
   assert repo.gh.title is None
@@ -391,16 +415,16 @@ def a_dry_run_prints_the_record_and_changes_nothing(repo, capsys):
 def a_skipped_ci_stays_in_the_record(repo, capsys):
   repo.gh.runs = []
   assert repo.xn_release("1.1.0", "--no-ci", "--dry-run") == 0
-  out = capsys.readouterr().out
+  out = ANSI.sub("", capsys.readouterr().out)
   assert "ci:skipped" in out
   assert "Release-CI: skipped" in out
 
 def a_first_release_needs_a_name(repo, capsys):
   repo.gh.releases = []
   assert repo.xn_release("1.1.0", "--dry-run") == 1
-  assert "pass --name" in capsys.readouterr().out
+  assert "pass --name" in ANSI.sub("", capsys.readouterr().out)
   assert repo.xn_release("1.1.0", "--dry-run", "--name", "Demo") == 0
-  assert "Demo 1.1.0" in capsys.readouterr().out
+  assert "Demo 1.1.0" in ANSI.sub("", capsys.readouterr().out)
 
 def master_takes_the_release_without_main(repo):
   repo.origin("symbolic-ref", "HEAD", "refs/heads/master")
@@ -415,7 +439,7 @@ def a_hotfix_on_main_has_to_be_merged_back_first(repo, capsys):
   repo.git("push", "-q")
   repo.git("switch", "-q", "develop")
   assert repo.xn_release("1.1.0") == 1
-  assert "main has changes the branch lacks" in capsys.readouterr().out
+  assert "main has changes develop lacks" in ANSI.sub("", capsys.readouterr().out)
   repo.git("merge", "-q", "--no-edit", "origin/main")
   repo.git("push", "-q")
   assert repo.xn_release("1.1.0") == 0
@@ -425,7 +449,14 @@ def a_failed_github_release_leaves_its_notes_to_finish_with(repo, capsys):
   assert repo.xn_release("1.1.0") == 2
   assert repo.origin("rev-parse", "1.1.0^{commit}") == repo.origin("rev-parse", "main")
   assert (repo.work / ".git" / "xn-release.md").read_text(encoding="utf-8") == TEXT
-  assert "gh release create 1.1.0 --verify-tag" in capsys.readouterr().out
+  assert "gh release create 1.1.0 --verify-tag" in ANSI.sub("", capsys.readouterr().out)
+
+def a_diverged_local_main_is_left_with_a_pull_tip(repo, capsys):
+  repo.git("switch", "-q", "main")
+  repo.git("commit", "-q", "--allow-empty", "-m", "Local only")
+  repo.git("switch", "-q", "develop")
+  assert repo.xn_release("1.1.0") == 0
+  assert "Local main not updated: run git pull on it" in ANSI.sub("", capsys.readouterr().out)
 
 def a_push_race_leaves_origin_without_the_release(repo, monkeypatch, capsys):
   """Origin `main` moves between the checks and the push: the atomic push takes nothing."""
@@ -437,7 +468,7 @@ def a_push_race_leaves_origin_without_the_release(repo, monkeypatch, capsys):
     return git(*args, data=data)
   monkeypatch.setattr(release, "git", racing)
   assert repo.xn_release("1.1.0") == 1
-  assert "Push refused" in capsys.readouterr().out
+  assert "Push rejected" in ANSI.sub("", capsys.readouterr().out)
   assert repo.origin("rev-parse", "main") == other
   assert repo.origin("tag", "--list") == "1.0.0"
   assert repo.git("tag", "--list") == "1.0.0"
@@ -447,68 +478,88 @@ def a_push_race_leaves_origin_without_the_release(repo, monkeypatch, capsys):
 def a_detached_head_is_refused(repo, capsys):
   repo.git("switch", "-q", "--detach")
   assert repo.xn_release("1.1.0") == 1
-  assert "Detached HEAD" in capsys.readouterr().out
+  assert "Detached HEAD" in ANSI.sub("", capsys.readouterr().out)
 
 def a_released_commit_is_not_released_again(main, capsys):
   assert main.xn_release() == 0
   assert main.xn_release() == 1
-  assert "Nothing to release: the commit is 1.1.0 already" in capsys.readouterr().out
+  out = ANSI.sub("", capsys.readouterr().out)
+  assert re.search(r"Nothing to release: [0-9a-f]{7} already released as 1\.1\.0", out)
 
 def without_main_or_master_nothing_is_released(repo, capsys):
   repo.origin("symbolic-ref", "HEAD", "refs/heads/develop")
   repo.git("push", "-q", "origin", ":main")
   assert repo.xn_release("1.1.0") == 1
-  assert "Neither main nor master on origin" in capsys.readouterr().out
+  assert "No main or master branch on origin" in ANSI.sub("", capsys.readouterr().out)
 
 def a_local_branch_apart_from_origin_is_refused(repo, capsys):
   repo.git("commit", "-q", "--allow-empty", "-m", "Unpushed")
   assert repo.xn_release("1.1.0") == 1
-  assert "Local develop differs from origin" in capsys.readouterr().out
+  assert "Local develop differs from origin" in ANSI.sub("", capsys.readouterr().out)
 
 def a_branch_gone_from_origin_is_refused(repo, capsys):
   """Deleted on origin by someone else: the stale `origin/develop` here must not count."""
   repo.origin("update-ref", "-d", "refs/heads/develop")
   assert repo.xn_release("1.1.0") == 1
-  assert "develop is not on origin" in capsys.readouterr().out
+  assert "develop is not on origin" in ANSI.sub("", capsys.readouterr().out)
+
+def an_unreachable_origin_says_the_fetch_failed(repo, capsys):
+  repo.git("remote", "set-url", "origin", "../nowhere.git")
+  assert repo.xn_release() == 1
+  assert "Fetch from origin failed" in ANSI.sub("", capsys.readouterr().out)
 
 def a_branch_matching_main_has_nothing_to_release(repo, capsys):
   repo.git("switch", "-q", "-c", "same", "origin/main")
   repo.git("push", "-q", "-u", "origin", "same")
   assert repo.xn_release("1.1.0") == 1
-  assert "Nothing to release: same matches main" in capsys.readouterr().out
+  out = ANSI.sub("", capsys.readouterr().out)
+  assert "Nothing to release: same has nothing new for main" in out
 
 def without_a_changes_file_the_version_has_to_be_given(repo, capsys):
   repo.git("rm", "-q", "changes.md")
   repo.commit_all("No changes file")
   repo.git("push", "-q")
   assert repo.xn_release() == 1
-  assert "No changes.md or changelog.md on the commit: pass the version" in capsys.readouterr().out
+  out = ANSI.sub("", capsys.readouterr().out)
+  assert "No changes.md or changelog.md on commit: pass version" in out
 
 def a_given_version_has_to_match_the_changes_entry(repo, capsys):
   repo.set_version("1.2.0")
   repo.commit_all("Bump")
   repo.git("push", "-q")
   assert repo.xn_release("1.2.0") == 1
-  assert "changes.md opens with 1.1.0, not 1.2.0" in capsys.readouterr().out
+  assert "changes.md starts with 1.1.0, not 1.2.0" in ANSI.sub("", capsys.readouterr().out)
 
-def a_tag_of_the_version_is_refused_with_v_or_without(repo, capsys):
+def a_tag_of_the_version_on_origin_is_refused_with_v_or_without(repo, capsys):
   repo.git("tag", "v1.1.0", "main")
+  repo.git("push", "-q", "origin", "v1.1.0")
   assert repo.xn_release("1.1.0") == 1
-  assert "Tag v1.1.0 exists only here: git tag -d v1.1.0" in capsys.readouterr().out
+  assert "Tag v1.1.0 already exists on origin" in ANSI.sub("", capsys.readouterr().out)
+
+def a_local_tag_of_the_same_name_is_in_the_way(repo, capsys):
+  repo.git("tag", "1.1.0", "main")
+  assert repo.xn_release("1.1.0") == 1
+  out = ANSI.sub("", capsys.readouterr().out)
+  assert "Tag 1.1.0 exists locally but not on origin: remove it with git tag -d 1.1.0" in out
+
+def a_local_tag_apart_from_origin_blocks_nothing(repo):
+  """Tags are read from origin; a fetch of them would refuse to clobber the local one."""
+  repo.git("tag", "-f", "1.0.0", "develop")
+  assert repo.xn_release() == 0
 
 def a_version_below_the_last_tag_is_refused(repo, capsys):
   repo.write("changes.md", f"# Changes\n\n## `0.9.0` Old\n\n- `demo`: back\n\n{FIRST}")
   repo.commit_all("Old")
   repo.git("push", "-q")
   assert repo.xn_release() == 1
-  assert "0.9.0 is below 1.0.0" in capsys.readouterr().out
+  assert "Version 0.9.0 lower than last release 1.0.0" in ANSI.sub("", capsys.readouterr().out)
 
 def a_pyproject_of_another_version_is_refused(repo, capsys):
   repo.write("changes.md", f"# Changes\n\n{THIRD}{SECOND}{FIRST}")
   repo.commit_all("Third")
   repo.git("push", "-q")
   assert repo.xn_release() == 1
-  assert "pyproject.toml says 1.1.0, not 1.2.0" in capsys.readouterr().out
+  assert "pyproject.toml says 1.1.0, not 1.2.0" in ANSI.sub("", capsys.readouterr().out)
 
 #--------------------------------------------------------------------------- Note, CI and code hash
 
@@ -517,18 +568,68 @@ def a_note_is_read_with_lf(tmp_path):
   assert release.read_note(str(tmp_path / "note.md")) == "Refs:\n#12 boot hangs"
 
 @pytest.mark.parametrize("runs, said", [
-  ([], "No CI run"),
-  ([{"status": "in_progress", "conclusion": "", "databaseId": 7}], "CI still running"),
-  ([{"status": "completed", "conclusion": "failure", "databaseId": 7}], "CI failed on the commit, run 7"),
+  ([], "No CI tests on commit 0000000 yet"),
+  ([{"status": "in_progress", "conclusion": ""}], "CI tests still running on commit 0000000"),
+  ([{"status": "completed", "conclusion": "failure", "url": "https://ci/7"}], "CI tests failed on commit 0000000: https://ci/7"),
 ])
 def ci_short_of_green_is_refused(monkeypatch, capsys, runs, said):
   gh = FakeGh()
   gh.runs = runs
   monkeypatch.setattr(release, "gh", gh)
   with pytest.raises(SystemExit): release.ci_runs("0" * 40)
-  assert said in capsys.readouterr().out
+  assert said in ANSI.sub("", capsys.readouterr().out)
 
 def code_hash_reads_crlf_as_lf(tmp_path):
   (tmp_path / "lf.py").write_bytes(b"a = 1\nb = 2\n")
   (tmp_path / "crlf.py").write_bytes(b"a = 1\r\nb = 2\r\n")
   assert release.code_hash(str(tmp_path / "lf.py")) == release.code_hash(str(tmp_path / "crlf.py"))
+
+#------------------------------------------------------------------------------- Tools and messages
+
+def both_commands_stop_the_same_way_without_gh(repo, monkeypatch, capsys):
+  monkeypatch.setattr(commit, "github", _git.github)
+  monkeypatch.setattr(release, "github", _git.github)
+  monkeypatch.setattr(_git.shutil, "which", lambda name: None)
+  assert repo.xn_commit() == 1
+  assert repo.xn_release() == 1
+  out = ANSI.sub("", capsys.readouterr().out)
+  assert out.count("Missing gh tool") == 2
+  assert out.count("Install it with package manager: ") == 2
+
+def a_gh_logged_out_is_sent_to_log_in(monkeypatch, capsys):
+  def logged_out(*args:str, data:bytes|None=None) -> str:
+    raise CommandError("You are not logged into any GitHub hosts")
+  monkeypatch.setattr(_git.shutil, "which", lambda name: "gh")
+  monkeypatch.setattr(_git, "gh", logged_out)
+  with pytest.raises(SystemExit): _git.github()
+  assert "gh auth login" in ANSI.sub("", capsys.readouterr().out)
+
+def git_takes_github_credentials_from_gh(monkeypatch):
+  calls = []
+  def record(*cmd:str, data:bytes|None=None) -> str:
+    calls.append(cmd)
+    return ""
+  monkeypatch.setattr(_git, "run", record)
+  _git.git("push")
+  assert calls[0][-1] == "push"
+  assert "credential.https://github.com.helper=!gh auth git-credential" in calls[0]
+
+def a_command_tip_lights_its_program_and_greys_its_syntax():
+  tip = fmt_cmd("winget install --id GitHub.cli | xn release <version>")
+  assert tip == (f"{c.YELLOW}winget{c.END} install {c.GREY}--id{c.END} GitHub.cli "
+    f"{c.GREY}|{c.END} {c.GOLD}xn{c.END} release {c.GREY}<version>{c.END}")
+
+def a_failed_command_says_on_one_line_what_went_wrong():
+  said = ("From https://github.com/a/b\n"
+    " ! [rejected] 0.5.0 -> 0.5.0 (would clobber existing tag)\n"
+    "hint: pull first\n")
+  with pytest.raises(CommandError) as e:
+    _git.run(sys.executable, "-c", f"import sys; sys.stderr.write({said!r}); sys.exit(1)")
+  assert str(e.value) == "! [rejected] 0.5.0 -> 0.5.0 (would clobber existing tag)"
+
+def each_role_keeps_its_color():
+  assert _git.fmt_branch("main") == f"{c.VIOLET}main{c.END}"
+  assert _git.fmt_release("OpenCPLC 0.6.0") == f"{c.SKY}OpenCPLC 0.6.0{c.END}"
+  assert _git.fmt_sha("47cc7a4e1f9b") == f"{c.GOLD}47cc7a4{c.END}"
+  assert _git.fmt_file("changes.md") == f"{c.ORANGE}changes.md{c.END}"
+  assert _git.fmt_tool("gh") == f"{c.CYAN}gh{c.END}"

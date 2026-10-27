@@ -1,9 +1,13 @@
 # Changes `xaeian`
 
-## `1.1.2` Commit and release
+## `1.2.0` GIT
 
-- `cli`: `xn commit` adds, commits and pushes everything changed on the branch
-- `cli`: `xn release` signs, tags and publishes `main`, with the branch merged in first
+- `cli`: `xn commit` adds, commits and pushes all changes
+- `cli`: `xn release` merges into `main`, tags and publishes
+- `serial`: `print_info` in white, `Connect` and `Disconnect` in `COLOR_PORT`
+- `colors`: `grey` and `fmt_*` color a value by its role
+- `files`: `FILE.put` writes only when content changed
+- `files`: `JSON` and `CSV` take their extension in any case
 
 ## `1.1.1` Key order
 
@@ -60,13 +64,13 @@ Breaking: `Struct(crc=)` guards every record; a list used to get one tail
 
 ## `0.9.0` Correctness & layers
 
-Breaking: `?` in raw SQL, `shape=` in `DIR` listings, `FILE.exists`/`DIR.exists`,
-one dict per file from `compress`, short names on `Print`, `Time` vs `Time`/`datetime`,
-no walk into a link, optional exports on first use.
-
 - Silent data faults fixed across `db`, `media`, `files`, `cstruct` and `eda`
 - One seam for sync and async in `db`, `files` and `net`
 - `import xaeian` 1.5s → 120ms, tests 465 → 685
+
+Breaking: `?` in raw SQL, `shape=` in `DIR` listings, `FILE.exists`/`DIR.exists`,
+one dict per file from `compress`, short names on `Print`, `Time` vs `Time`/`datetime`,
+no walk into a link, optional exports on first use.
 
 ## `0.8.2` CLI host keys
 
@@ -78,16 +82,15 @@ no walk into a link, optional exports on first use.
 
 ## `0.8.0` Safety audit
 
-Breaking: `FILE.save`/`append` preserve line endings, `split_sql` drops comments,
-and `pdf_compress` verifies its output.
-
 - Safer atomic writes, paths, database transactions, file transfers, and media replacement
 - Correctness and performance fixes across serial, EDA, strings, time, and checksums
+
+Breaking: `FILE.save`/`append` preserve line endings, `split_sql` drops comments,
+and `pdf_compress` verifies its output.
 
 ## `0.7.5` FTP & SFTP, SQLite fix
 
 - `db`: async `get_rows`/`get_dicts` commit `RETURNING` writes
-  _(left the WAL lock held, or silently rolled back)_
 - `net`: hardened `FTP` and `SFTP`, fixed data loss in `sync_pull(delete=True)`
 - `eda`: footprint generator updates
 - Added `net` and async SQLite test suites
@@ -123,7 +126,7 @@ and `pdf_compress` verifies its output.
 ## `0.6.2` Recorder
 
 - `serial_port`: Recorder bug fix
-- `eda`: Minor fixes
+- `eda`: minor fixes
 
 ## `0.6.1` Remove PDF module
 
@@ -132,12 +135,12 @@ and `pdf_compress` verifies its output.
 
 ## `0.6.0` KiCad, Database key-value & Fixes
 
-- `eda`: Submodules for KiCad footprint and symbol generation and cleanup
-- `db`: Key-value store for database backends _(`KeyValue`, `AsyncKeyValue`)_
-- `db`: Adding **pool** to asynchronous database SQL controller versions
-- `cli/fonts`: Script for converting fonts for web use
-- `files`: Added `DIR.unzip` as counterpart to `DIR.zip`
-- Bug fixes, immutability hardening, and dependency declarations across existing modules
+- `eda`: KiCad footprint and symbol generation and cleanup
+- `db`: key-value store `KeyValue` and `AsyncKeyValue`
+- `db`: connection pool in async MySQL and PostgreSQL
+- `cli/fonts`: converts fonts for web use
+- `files`: `DIR.unzip` beside `DIR.zip`
+- Bug fixes, immutability hardening and dependency declarations across modules
 
 ## `0.5.3` YAML
 
@@ -175,8 +178,7 @@ and `pdf_compress` verifies its output.
 
 - `elc`: E-series, VConv divider finder, KiCad production export
 - `mf/ico.py`: multi-size `.ico` generator
-- Fixes: `crc` pretabulated reflectIn, `table.aggregate` type guard,
-  `img_compress` inplace ext change
+- Fixes in `crc`, `table.aggregate` and `img_compress`
 
 ## `0.2.0` New features
 

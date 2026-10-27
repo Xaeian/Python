@@ -164,11 +164,14 @@ class PATH:
 
   @staticmethod
   def ensure_suffix(path:str, suffix:str) -> str:
-    """Append `suffix` when the extension differs, never replace it: `a.txt` → `a.txt.json`."""
+    """
+    Append `suffix` unless the extension is it, in any case; never replace one:
+    `a.txt` → `a.txt.json`, `a.JSON` stays.
+    """
     if not suffix: return PATH.normalize(path)
     path = PATH.normalize(path)
     _, ext = os.path.splitext(path)
-    if ext == suffix: return path
+    if ext.lower() == suffix.lower(): return path
     return path + suffix
 
   @staticmethod

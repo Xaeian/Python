@@ -8,7 +8,6 @@ from .config import get_context
 from .path import PATH
 from .dir import DIR
 from .file import FILE
-from ..xstring import ensure_suffix
 
 #------------------------------------------------------------------------------------ CSV namespace
 
@@ -50,7 +49,7 @@ class CSV:
     an empty or unconvertible cell becomes `None` rather than raising.
     """
     cfg = get_context()
-    path = ensure_suffix(path, ".csv")
+    path = PATH.ensure_suffix(path, ".csv")
     path = PATH.resolve(path, read=True)
     if not os.path.isfile(path): return []
     rows: list[dict[str, Any]] = []
@@ -76,7 +75,7 @@ class CSV:
     `types` is keyed by header name and casts as in `load`.
     """
     cfg = get_context()
-    path = ensure_suffix(path, ".csv")
+    path = PATH.ensure_suffix(path, ".csv")
     path = PATH.resolve(path, read=True)
     if not os.path.isfile(path): return []
     with open(path, "r", encoding=CSV._read_encoding(cfg.encoding), newline="") as file:
@@ -144,7 +143,7 @@ class CSV:
     if datarow is None: raise ValueError("datarow must not be None")
     cfg = get_context()
     # appends in place rather than through the atomic `FILE.save`, so it resolves its own path
-    path = PATH.resolve(ensure_suffix(path, ".csv"), read=False)
+    path = PATH.resolve(PATH.ensure_suffix(path, ".csv"), read=False)
     DIR.ensure(path, is_file=True)
     file_exists = os.path.isfile(path) and os.path.getsize(path) > 0
     with open(path, "a", newline="", encoding=cfg.encoding) as csv_file:
@@ -180,7 +179,7 @@ class CSV:
     No rows leave the header alone, or an empty file without `field_names`:
     the rows of the previous save must not read as the current ones.
     """
-    path = ensure_suffix(path, ".csv")
+    path = PATH.ensure_suffix(path, ".csv")
     # rendered whole first, so a bad row cannot leave a truncated file behind
     csv_file = io.StringIO()
     if data and all(isinstance(row, dict) for row in data):
@@ -210,7 +209,7 @@ class CSV:
     if len(vector_lengths) > 1: raise ValueError("All vectors must have same length")
     if header and len(header) != len(columns):
       raise ValueError("Header length must match number of vectors")
-    path = ensure_suffix(path, ".csv")
+    path = PATH.ensure_suffix(path, ".csv")
     file = io.StringIO()
     writer = csv.writer(file, delimiter=delimiter)
     if header: writer.writerow(header)

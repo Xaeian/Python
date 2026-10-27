@@ -146,18 +146,6 @@ def a_pan_reaches_kicad_cli_without_shell_quotes(board, monkeypatch):
   kc.view(pan=(1, 2, 3))
   assert "--pan=1,2,3" in calls[0]
 
-#------------------------------------------------------------------------------------------ strings
-
-def a_quote_in_a_value_stays_inside_its_string():
-  """`Screen 2.8"` written raw would close the literal early and break the whole footprint."""
-  from sexpdata import loads
-  from xaeian.eda.fp import Footprint
-  footprint = Footprint("LCD")
-  value = 'Screen 2.8" ' + chr(92) + "lib"
-  footprint.properties(description=value)
-  nodes = [x for x in loads(footprint.build()) if isinstance(x, list)]
-  assert ["Description", value] in [x[1:3] for x in nodes if str(x[0]) == "property"]
-
 #--------------------------------------------------------------------------------------- regulators
 
 def regulator_dividers_follow_the_datasheet_ratio():

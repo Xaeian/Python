@@ -12,7 +12,7 @@ Example:
   >>> from xaeian import logger, JSON, split_sql, Files, Plot
 """
 
-__version__ = "1.1.2"
+__version__ = "1.2.0"
 __repo__ = "Xaeian/Python"
 __python__ = ">=3.12"
 __description__ = (
@@ -47,7 +47,7 @@ from .files import (
 )
 from .extras import MissingExtra
 from .crc import CRC
-from .colors import Color, Ico
+from .colors import Color, Ico, grey, fmt_id, fmt_path, fmt_cmd, fmt_count, fmt_list
 from .log import logger, Logger, Print
 
 # Name → module, loaded on first attribute access.
@@ -81,6 +81,7 @@ __all__ = [
   "PATH", "DIR", "FILE", "INI", "CSV", "JSON",
   "CRC", "MissingExtra",
   "logger", "Logger", "Print", "Color", "Ico",
+  "grey", "fmt_id", "fmt_path", "fmt_cmd", "fmt_count", "fmt_list",
   *_LAZY,
 ]
 

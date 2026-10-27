@@ -5,7 +5,8 @@ Serial port communication with colored console output.
 
 `SerialPort` prints timestamped colored lines, logs to file with ANSI preserved,
 filters by address on multi-device buses, checks CRC, and closes itself as a context manager.
-Colors are class attributes: `COLOR_TIME`, `COLOR_ADDR`, `COLOR_INFO`, `COLOR_ERROR`, `COLOR_OK`.
+Colors are class attributes: `COLOR_TIME`, `COLOR_ADDR`, `COLOR_INFO`, `COLOR_ERROR`, `COLOR_OK`,
+`COLOR_PORT`.
 Lines of the port itself also carry `STYLE_OWN`, so they never pass for what a device sent.
 
 Requires: `pyserial`
@@ -74,9 +75,10 @@ class SerialPort:
   """
   COLOR_TIME = c.GREY
   COLOR_ADDR = c.TURQUS
-  COLOR_INFO = c.VIOLET
+  COLOR_INFO = c.WHITE
   COLOR_ERROR = c.RED
   COLOR_OK = c.GREEN
+  COLOR_PORT = c.VIOLET # the port opening and closing
   STYLE_OWN = "\033[3m" # italic
 
   def __init__(
@@ -186,7 +188,7 @@ class SerialPort:
     if self.connected: return True
     try:
       self.serial = pyserial.Serial(self.port, self.baudrate, timeout=self.timeout)
-      self.print_info(f"Connect {self.port}")
+      self._print_own(self.COLOR_PORT, f"Connect {self.port}")
       self.connected = True
       return True
     except Exception as e: # missing, taken or refused: the driver's message tells which
@@ -197,7 +199,7 @@ class SerialPort:
   def disconnect(self) -> None:
     """Close serial port. Idempotent."""
     if not self.connected: return
-    self.print_info(f"Disconnect {self.port}")
+    self._print_own(self.COLOR_PORT, f"Disconnect {self.port}")
     try: self.serial.close()
     except Exception:
       if self.debug: raise

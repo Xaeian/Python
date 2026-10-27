@@ -141,7 +141,7 @@ with Shell("/dev/ttyUSB0") as sh:
   sh.reset()
   sh.sleep("standby") # stop|stop0|stop1|standby|standbysram|shutdown
 
-  # Firmware of a build under the bootloader (`PRO_BOOT`, `CMD_BOOT` on the device)
+  # Firmware of a build under the bootloader (`CMD_BOOT` on the device)
   sh.boot_info()      # {"boot": 1, "app": 0x08002000, ..., "result": "installed", "rdp": 1}
   sh.boot("app.bin")  # path or bytes of the `.bin` or `.hex`; the device resets to install it
   sh.boot("app.hex")  # a `.hex` is cut at the slot, so a full image with the bootloader works too

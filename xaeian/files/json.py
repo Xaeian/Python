@@ -7,7 +7,6 @@ from typing import Any
 from .config import get_context
 from .path import PATH
 from .file import FILE
-from ..xstring import ensure_suffix
 
 #----------------------------------------------------------------------------------- JSON namespace
 
@@ -17,7 +16,7 @@ class JSON:
   def load(path:str, otherwise:Any=None) -> Any:
     """Load JSON file, `otherwise` when missing or empty."""
     cfg = get_context()
-    path = ensure_suffix(path, ".json")
+    path = PATH.ensure_suffix(path, ".json")
     path = PATH.resolve(path, read=True)
     if not os.path.isfile(path): return otherwise
     with open(path, "r", encoding=cfg.encoding) as file:
@@ -28,7 +27,7 @@ class JSON:
   @staticmethod
   def save(path:str, content:Any, ensure_ascii:bool=False) -> None:
     """Save JSON in compact form, no whitespace."""
-    path = ensure_suffix(path, ".json")
+    path = PATH.ensure_suffix(path, ".json")
     FILE.save(path, json.dumps(content, separators=(",", ":"), ensure_ascii=ensure_ascii))
 
   @staticmethod
@@ -40,7 +39,7 @@ class JSON:
     ensure_ascii:bool = False,
   ) -> None:
     """Save JSON indented, LF line ends, trailing newline."""
-    path = ensure_suffix(path, ".json")
+    path = PATH.ensure_suffix(path, ".json")
     text = json.dumps(content, indent=indent, ensure_ascii=ensure_ascii, sort_keys=sort_keys)
     FILE.save(path, text + "\n")
 
@@ -148,7 +147,7 @@ class JSON:
     ensure_ascii:bool = False,
   ) -> None:
     """Save JSON formatted by `smart`, LF line ends, trailing newline."""
-    path = ensure_suffix(path, ".json")
+    path = PATH.ensure_suffix(path, ".json")
     text = JSON.smart(
       content, max_line=max_line, array_wrap=array_wrap,
       compact_dict=compact_dict, ensure_ascii=ensure_ascii,

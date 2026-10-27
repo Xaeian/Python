@@ -53,7 +53,8 @@ class FakeDevice:
     if verb == "info":
       self.say(f"BOOT info boot:{self.boot} app:08002000 slot:{self.slot} page:2048 "
         f"line:{self.line} image:100 crc:0000abcd active:0 "
-        f"mode:key result:chip key:{self.key} rdp:1")
+        f"mode:key result:chip last:installed epoch:2 revoked:1 loader:00123456 "
+        f"key:{self.key} rdp:1")
     elif verb == "begin":
       self.size, self.crc, self.offset = int(argv[2]), int(argv[3], 16), 0
       self.signature = argv[4] if len(argv) > 4 else None
@@ -196,12 +197,14 @@ def an_unsigned_build_sends_no_signature(shell):
   assert device.ended and device.signature is None
 
 def info_reads_numbers_and_words(shell):
-  """Numbers as numbers, `app` and `crc` in hex; `mode`, `result` and `key` as the device says."""
+  """Numbers as numbers, `app`, `crc` and `loader` in hex; words and `key` as the device says."""
   sh, _ = shell()
   info = sh.boot_info()
   assert info["boot"] == 1 and info["app"] == 0x08002000 and info["slot"] == 253952
   assert info["crc"] == 0xABCD and info["line"] == 2047 and info["rdp"] == 1
   assert info["mode"] == "key" and info["result"] == "chip" and info["key"] == "8a1fe3c0"
+  assert info["last"] == "installed" and info["epoch"] == 2 and info["revoked"] == 1
+  assert info["loader"] == 0x123456
 
 def a_key_fingerprint_of_digits_stays_text(shell):
   sh, _ = shell(key="12345678")
