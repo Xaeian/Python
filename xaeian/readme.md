@@ -17,7 +17,7 @@ rows = CSV.load("data")
 
 where(rows, lambda r: r["status"] == "active")
 select(rows, "name", "age", "email")
-rename(rows, {"Ref": "Designator", "Pacage": "Footprint"})
+rename(rows, {"Ref": "Designator", "Package": "Footprint"})
 sort_by(rows, "age", reverse=True)
 pluck(rows, "email") # ["a@b.com", "c@d.com"]
 
