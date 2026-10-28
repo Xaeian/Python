@@ -12,8 +12,8 @@ import pytest
 np = pytest.importorskip("numpy", reason="dsp needs the [dsp] extra")
 pytest.importorskip("scipy", reason="dsp needs the [dsp] extra")
 
-from scipy.signal import get_window
-from xaeian.dsp import Signal, Spectrum
+from scipy.signal import get_window, sosfiltfilt, sosfreqz
+from xaeian.dsp import Signal, Spectrum, butterworth, filtfilt
 
 FS = 10_000
 
@@ -58,6 +58,82 @@ def the_offset_goes_and_the_peak_scales_to_one(accel):
 def the_envelope_of_a_sine_is_its_amplitude():
   envelope = Signal.sine(50, fs=1000, amplitude=3).envelope()
   assert np.allclose(envelope.trim(0.1, 0.9).data, 3, atol=0.01)
+
+#------------------------------------------------------------------------------------------ filters
+
+@pytest.mark.parametrize("zero_phase", [True, False])
+@pytest.mark.parametrize("method, edges, freq", [
+  ("lowpass", (100,), 100),
+  ("highpass", (100,), 100),
+  ("bandpass", (100, 400), 100),
+  ("bandpass", (100, 400), 400),
+  ("bandstop", (100, 400), 100),
+  ("bandstop", (100, 400), 400),
+])
+def a_sine_on_an_edge_comes_out_3dB_down(method, edges, freq, zero_phase):
+  """-3dB is half the power: the rms of a unit sine, 1/√2, falls to 1/2 either way it is run."""
+  sine = Signal.sine(freq, 2, fs=FS)
+  out = getattr(sine, method)(*edges, zero_phase=zero_phase).trim(0.5, 1.5)
+  assert out.rms == pytest.approx(0.5, rel=0.01)
+
+@pytest.mark.parametrize("zero_phase, passes", [(False, 1), (True, 2)])
+@pytest.mark.parametrize("order", [2, 4, 8])
+def the_order_is_the_slope_far_from_the_edge(order, zero_phase, passes):
+  """20dB a decade for each order, from one pass of it or from a zero-phase pair of half."""
+  _, h = sosfreqz(butterworth("lowpass", 1, FS, order, zero_phase=zero_phase), [10, 100], fs=FS)
+  gain_dB = 20 * passes * np.log10(np.abs(h))
+  assert gain_dB[0] - gain_dB[1] == pytest.approx(20 * order, abs=0.5)
+
+@pytest.mark.parametrize("zero_phase", [True, False])
+def a_gap_in_a_signal_stays_a_gap(zero_phase):
+  data = np.random.default_rng(0).standard_normal(5000)
+  data[2000:2100] = np.nan
+  out = Signal(data, fs=FS).lowpass(100, zero_phase=zero_phase).data
+  assert np.array_equal(np.isnan(out), np.isnan(data))
+
+def filtfilt_is_sosfiltfilt_a_block_at_a_time(monkeypatch):
+  monkeypatch.setattr("xaeian.dsp.BLOCK", 1000) # 25 blocks, a seam every 1000 samples
+  sos = butterworth("bandpass", [50, 500], FS)
+  noise = np.random.default_rng(0).standard_normal(25_000)
+  assert np.allclose(filtfilt(sos, noise), sosfiltfilt(sos, noise), rtol=0, atol=1e-12)
+
+def a_gap_stays_and_each_run_is_filtered_on_its_own():
+  sos = butterworth("lowpass", 100, FS)
+  data = np.random.default_rng(0).standard_normal(5000)
+  data[2000:2100] = np.nan
+  out = filtfilt(sos, data)
+  assert np.array_equal(np.isnan(out), np.isnan(data))
+  assert np.allclose(out[:2000], sosfiltfilt(sos, data[:2000]))
+  assert np.allclose(out[2100:], sosfiltfilt(sos, data[2100:]))
+
+def a_run_too_short_to_pad_stays_a_gap():
+  data = np.ones(1000)
+  data[[400, 410]] = np.nan # 9 samples between two gaps, and the padding takes 9
+  out = filtfilt(butterworth("lowpass", 100, FS), data)
+  assert np.isnan(out[400:411]).all()
+  assert np.isfinite(out[:400]).all() and np.isfinite(out[411:]).all()
+
+def filtfilt_writes_float32_in_place():
+  sos = butterworth("lowpass", 100, FS)
+  data = np.random.default_rng(0).standard_normal(5000).astype(np.float32)
+  expect = sosfiltfilt(sos, data)
+  assert filtfilt(sos, data, out=data) is data
+  assert np.allclose(data, expect, atol=1e-5)
+
+def raw_adc_counts_filter_as_their_values():
+  """Counts at rest near 0 and a ramp near full scale: their odd reflection leaves the type."""
+  sos = butterworth("lowpass", 100, FS)
+  rest = np.random.default_rng(0).integers(0, 12, 5000).astype(np.uint16)
+  ramp = np.linspace(32_000, -32_000, 600).astype(np.int16) # 107 counts a sample off the top
+  for counts in (rest, ramp):
+    assert np.allclose(filtfilt(sos, counts), sosfiltfilt(sos, counts.astype(np.float64)))
+
+def one_pass_starts_settled_after_a_gap():
+  """Gravity on the axis: from rest at 0, every run would ring up to 9.81 first."""
+  data = 9.81 + 0.1 * np.random.default_rng(0).standard_normal(4000)
+  data[2000:2100] = np.nan
+  out = Signal(data, fs=1000).lowpass(100, zero_phase=False).data
+  assert abs(out[0] - 9.81) < 0.5 and abs(out[2100] - 9.81) < 0.5
 
 #----------------------------------------------------------------------------------------- spectrum
 
@@ -118,6 +194,11 @@ def integration_turns_acceleration_into_velocity(accel):
   assert len(velocity) == len(accel)
   assert accel.integrate().units == accel.derivative().units == "" # never the source's m/s²
 
+def integration_high_passes_3dB_down_at_its_edge():
+  """A unit 5Hz sine integrates to amplitude 1/(2π·5), and a 5Hz edge takes 1/√2 of that."""
+  velocity = Signal.sine(5, 10, fs=1000).integrate(highpass_Hz=5).trim(2, 8)
+  assert velocity.rms == pytest.approx(1 / (2 * np.pi * 5) / 2, rel=0.01)
+
 def numpy_gets_a_writable_copy_without_a_warning(accel, recwarn):
   data = np.asarray(accel)
   data[0] = 0.0
@@ -148,6 +229,44 @@ def a_window_is_one_scipy_knows():
   assert np.allclose(sig.window("hann").data, sig.data * get_window("hann", len(sig)))
   with pytest.raises(ValueError):
     sig.window("sum") # a numpy function, which would have scaled the signal by its length
+
+def a_zero_phase_order_is_even():
+  sig = Signal.sine(50, fs=1000)
+  with pytest.raises(ValueError):
+    sig.lowpass(100, order=3) # half of it each way would not be whole
+  assert len(sig.lowpass(100, order=3, zero_phase=False)) == len(sig) # one pass takes an odd one
+
+def an_order_is_at_least_one():
+  sig = Signal.sine(50, fs=1000)
+  with pytest.raises(ValueError):
+    sig.lowpass(100, order=0, zero_phase=False) # scipy's order 0 passes the samples unfiltered
+
+def an_edge_lies_inside_half_the_rate_low_edge_first():
+  sig = Signal.sine(50, fs=1000)
+  with pytest.raises(ValueError):
+    sig.lowpass(500)
+  with pytest.raises(ValueError):
+    sig.highpass(0)
+  with pytest.raises(ValueError):
+    sig.bandpass(300, 200)
+  with pytest.raises(ValueError, match="an edge lies"):
+    sig.lowpass(float("nan")) # NaN fails every comparison, so only a positive check catches it
+
+def butterworth_takes_only_its_four_kinds():
+  """scipy's alias "band" would otherwise get the edge shift of a band-stop."""
+  with pytest.raises(ValueError):
+    butterworth("band", [100, 400], FS)
+
+def a_band_takes_both_edges():
+  with pytest.raises(ValueError):
+    butterworth("bandpass", 100, FS)
+
+def filtfilt_takes_one_channel_long_enough_to_pad():
+  sos = butterworth("lowpass", 100, FS) # pads 9 samples at each end
+  with pytest.raises(ValueError):
+    filtfilt(sos, np.zeros((100, 2))) # rows of channels would run as one
+  with pytest.raises(ValueError):
+    filtfilt(sos, np.ones(9))
 
 def times_land_on_the_nearest_sample():
   sig = Signal(np.arange(100), fs=100)

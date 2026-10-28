@@ -155,6 +155,15 @@ def gaps_in_a_hex_are_erased_as_flash_holds_them():
   assert image[0xC0:0x200] == b"\xff" * 0x140
   assert image[:0xC0] == vectors and image[0x200:] == body
 
+def data_far_beyond_the_slot_stays_out_of_the_image(shell):
+  """Option bytes at 0x1FFF7800 would stretch the image over 400MB of erased flash."""
+  image = Image.built(3000)
+  text = Image.hex(image).replace(":00000001FF\n", "") + Image.hex(b"\xaa\x55\x00\xff", 0x1FFF7800)
+  assert ihex_to_bin(text, 0x08002000, size=0x10000) == image
+  sh, device = shell()
+  assert sh.boot(text.encode()) is True
+  assert device.ended and bytes(device.staged) == image[:3000]
+
 def a_hex_with_nothing_at_the_slot_is_refused(shell):
   sh, device = shell()
   assert sh.boot(Image.hex(Image.built(2000), 0x08010000).encode()) is False

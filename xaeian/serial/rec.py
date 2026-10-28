@@ -36,9 +36,9 @@ class Recorder(SerialPort):
   which the calling thread reads without a lock.
 
   Patterns for `regex=`:
-    `SCI_NORM` - 1.23456e+02 (SCPI, Brymen, Rigol)
+    `SCI_NORM` - 1.23456e+02 (SCPI, Brymen, Rigol), a zero as 0.00000e+00
     `SCI` - general scientific notation
-    `FLOAT` - 123.456
+    `FLOAT` - 123.456, refusing 1.2e-05 rather than reading 1.2
     `NUM` - int or float, its exponent included
 
   Args:
@@ -47,10 +47,11 @@ class Recorder(SerialPort):
     color: ANSI color for raw data lines.
     err_delay_ms: Milliseconds without fresh data before forced disconnect.
   """
-  SCI_NORM = r"-?[1-9]\.\d+[eE][+-]?\d{2}"
+  SCI_NORM = r"(?<![\d.])-?\d\.\d+[eE][+-]?\d{2}(?!\d)"
   SCI = r"-?\d+\.?\d*[eE][+-]?\d+"
-  FLOAT = r"-?\d+\.\d+"
-  NUM = r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?" # an exponent is part of the number, not a second one
+  FLOAT = r"(?<![\d.])-?\d+\.\d+(?![\d.eE])"
+  # an exponent is part of the number, not a second one
+  NUM = r"(?<![\d.])-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?(?![\d.])"
 
   _BUF_MAX = 4096
 
@@ -97,7 +98,7 @@ class Recorder(SerialPort):
 
   def _check_timeout(self) -> bool:
     """
-    Disconnect and report `True` once `err_delay_ms` passed without a successful read.
+    Disconnect and report `True` once `err_delay_ms` passed without a fresh line.
 
     The port closes as `SerialPort` closes it: `Recorder.disconnect` would stop the reader,
     and this runs on the reader itself.
@@ -110,7 +111,7 @@ class Recorder(SerialPort):
     return False
 
   def _reset_timeout(self):
-    """Push the deadline `err_delay_ms` into the future after a successful read."""
+    """Push the deadline `err_delay_ms` into the future after a fresh line."""
     self.err_time = time.time() + self.err_delay_ms / 1000
 
   def _reset_state(self):
@@ -134,6 +135,7 @@ class Recorder(SerialPort):
     # cap in case the instrument streams without newlines
     if len(self._print_buf) > self._BUF_MAX:
       self._print_buf = self._print_buf[-self._BUF_MAX:]
+    if new_lines: self._reset_timeout() # a meter showing `OL` talks: only silence is a lost link
     return new_lines
 
   @staticmethod
@@ -149,7 +151,9 @@ class Recorder(SerialPort):
     """
     Latest numeric value from the newest complete line, also stored in `self.value`.
 
-    The previous value persists until a new match; `None` after a timeout or a failed open.
+    The value stands while no new line arrives.
+    A new line without a number, an overload `OL` or `----`, makes it `None`, not the last reading;
+    so do a timeout and a failed open.
     """
     if self._check_timeout():
       self._reset_state()
@@ -164,12 +168,10 @@ class Recorder(SerialPort):
     if not new_lines: return self.value # no fresh line, the cached value stays valid
     pattern = self._strip_anchors(self.regex or self.NUM)
     matches = list(re.finditer(pattern, new_lines[-1]))
-    if matches:
-      try:
-        self.value = float(matches[-1].group())
-        self._reset_timeout()
-      except ValueError:
-        pass
+    try:
+      self.value = float(matches[-1].group()) if matches else None
+    except ValueError:
+      self.value = None
     return self.value
 
   #-------------------------------------------------------------------------------------- Lifecycle
@@ -282,7 +284,6 @@ class MultiRecorder(Recorder):
       return None
     try:
       self.values = [float(re.search(pattern, p.strip()).group()) for p in parts]
-      self._reset_timeout()
       return self.values
     except (AttributeError, ValueError): # `AttributeError` = `re.search` found nothing in a part
       self.values = None

@@ -254,6 +254,7 @@ class SerialPort:
   ) -> bytes|None:
     """
     Read available bytes: up to `buffer_size`, blocking until `timeout`.
+    With `crc`, a reply the timeout cut reads on until it verifies or the line goes quiet.
 
     `None` covers every miss alike - nothing arrived, the read failed,
     the address did not match, or the CRC did not verify.
@@ -264,6 +265,10 @@ class SerialPort:
     """
     resp = self._read_chunk()
     if not resp: return None
+    while self.crc and self.crc.decode(resp) is None and len(resp) < self.buffer_size:
+      more = self._read_chunk()
+      if not more: break
+      resp += more
     resp = self._crc_decode(resp) # CRC covers the address byte, as `send()` writes it
     if resp and self.address is not None: resp = self._check_address(resp)
     if not resp: return None

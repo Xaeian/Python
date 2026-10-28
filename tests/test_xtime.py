@@ -32,6 +32,12 @@ def rejects_unparseable_string():
   with pytest.raises(ValueError):
     Time("definitely not a date")
 
+def a_timestamp_in_milliseconds_is_refused_in_plain_words():
+  """Devices often send milliseconds; as seconds they lie past year 9999, `OSError` on Windows."""
+  for stamp in (1761652800000, "1761652800000"):
+    with pytest.raises(ValueError, match="milliseconds"):
+      Time(stamp)
+
 def rejects_unsupported_type():
   with pytest.raises(TypeError):
     Time(["nope"])

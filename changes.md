@@ -1,5 +1,15 @@
 # Changes `xaeian`
 
+## `1.2.1` Filters
+
+- `dsp`: filters keep the `order` and -3dB edges asked for, NaN as a gap
+- `dsp`: `butterworth` and `filtfilt` for plain arrays of any length
+- `cstruct`: scaled values round to their step, floats keep full precision
+- `cstruct`: a bitfield refuses unknown names and out-of-range values
+- `serial`: `Recorder` reads a zero and takes `OL` as no reading
+- `serial`: `read` with a CRC completes a reply cut by the timeout
+- `xtime`: a timestamp in milliseconds is refused clearly
+
 ## `1.2.0` GIT
 
 - `cli`: `xn commit` adds, commits and pushes all changes

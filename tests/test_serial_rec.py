@@ -13,7 +13,8 @@ import pytest
 
 pytest.importorskip("serial", reason="serial needs the [serial] extra")
 
-from xaeian.serial import Recorder, SerialPort
+from xaeian.serial import Recorder, MultiRecorder, SerialPort
+from xaeian.crc import crc16_modbus
 
 class FakePort:
   """Scripted byte stream; a `gate` makes every read block until the test releases it."""
@@ -29,18 +30,22 @@ class FakePort:
   def close(self):
     self.closed = True
 
+  def plug(self, monkeypatch) -> None:
+    """Make `SerialPort.connect` hand out this port instead of opening hardware."""
+    def connect(port):
+      if port.serial is None:
+        port.serial = self
+        port.connected = True
+      return True
+    monkeypatch.setattr(SerialPort, "connect", connect)
+
 @pytest.fixture
 def recorder(monkeypatch):
   """A Recorder whose `connect()` plugs in a `FakePort` instead of opening hardware."""
   def build(**port_kw):
     rec = Recorder("FAKE", print_console=False)
     fake = FakePort(**port_kw)
-    def connect(self):
-      if self.serial is None:
-        self.serial = fake
-        self.connected = True
-      return True
-    monkeypatch.setattr(SerialPort, "connect", connect)
+    fake.plug(monkeypatch)
     return rec, fake
   return build
 
@@ -108,6 +113,62 @@ def scientific_notation_reads_whole_by_default(recorder):
   rec, _ = recorder(chunks=[b"1.25e+01\n"])
   rec.connect()
   assert rec.read_value() == 12.5
+
+def an_overload_is_no_reading_not_the_last_one(recorder):
+  """A meter over its range prints `OL`: the reading before it is no longer true."""
+  rec, _ = recorder(chunks=[b"1.234\n", b"OL\n"])
+  rec.connect()
+  assert rec.read_value() == 1.234
+  assert rec.read_value() is None
+
+def a_meter_showing_ol_keeps_its_port(recorder):
+  """A line without a number still comes in: it pushes back the deadline only silence reaches."""
+  rec, _ = recorder(chunks=[b"OL\n"])
+  rec.connect()
+  rec.read_value()
+  assert rec.err_time > time.time()
+
+def a_reply_cut_by_the_timeout_is_read_whole(monkeypatch):
+  """Modbus RTU ends a reply with silence; cut by the timeout, neither half would verify."""
+  reply = crc16_modbus.encode(bytes.fromhex("010302002a"))
+  FakePort([reply[:3], reply[3:]]).plug(monkeypatch)
+  port = SerialPort("FAKE", crc=crc16_modbus, print_console=False)
+  port.connect()
+  assert port.read() == bytes.fromhex("010302002a")
+
+def a_zero_reading_reads_as_zero(recorder):
+  """A meter at 0V prints a 0 before the point; missed, a true zero would read as no reading."""
+  rec, _ = recorder(chunks=[b"+4.99876543E+00\n", b"+0.00000000E+00\n"])
+  rec.regex = Recorder.SCI_NORM
+  rec.connect()
+  assert rec.read_value() == 4.99876543
+  assert rec.read_value() == 0.0
+
+@pytest.mark.parametrize("regex, line", [
+  ("SCI_NORM", b"10.5E+02\n"), # not normalized: 0.5E+02 out of it would read 50
+  ("SCI_NORM", b"1.23E+045\n"), # three exponent digits: 1.23E+04 out of it would read 12300
+  ("FLOAT", b"1.2e-05\n"), # the mantissa alone would read 1.2
+  ("NUM", b"1.2.3\n"), # a version, not a reading: its last part would read 3
+])
+def a_pattern_never_reads_part_of_a_number(recorder, regex, line):
+  rec, _ = recorder(chunks=[line])
+  rec.regex = getattr(Recorder, regex)
+  rec.connect()
+  assert rec.read_value() is None
+
+def a_line_of_values_reads_whole_by_default(monkeypatch):
+  """The readme's line, an integer among the values and an exponent on the next."""
+  FakePort([b"12.5,0.34,25.0,1500\r\n", b"0.5,1.2e-05,25,3.3\r\n"]).plug(monkeypatch)
+  mr = MultiRecorder("FAKE", count=4, separator=",", print_console=False)
+  mr.connect()
+  assert mr.read_values() == [12.5, 0.34, 25.0, 1500.0]
+  assert mr.read_values() == [0.5, 1.2e-05, 25.0, 3.3]
+
+def float_refuses_a_line_it_would_cut(monkeypatch):
+  FakePort([b"0.5,1.2e-05,25.0,3.3\r\n"]).plug(monkeypatch)
+  mr = MultiRecorder("FAKE", count=4, separator=",", regex=Recorder.FLOAT, print_console=False)
+  mr.connect()
+  assert mr.read_values() is None # never 1.2 in place of 0.000012
 
 def a_silent_device_is_reconnected_not_abandoned(recorder):
   """After `err_delay_ms` of silence the reader drops the port and opens it again, still alive."""

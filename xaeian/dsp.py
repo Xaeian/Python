@@ -6,6 +6,8 @@ Signal processing for embedded sensor data.
 Immutable `Signal` wraps one channel of samples with its sample rate.
 Every transform returns a new Signal, so calls chain: `sig.highpass(10).integrate().rms`.
 What would come out wrong is refused instead: a 2-D array, a stepped slice, an unknown window.
+A filter has the `order` and the -3dB edges it was asked for, zero-phase too; NaN is a gap.
+`butterworth` and `filtfilt` filter a plain array of any length, a block at a time.
 
 Requires: `pip install xaeian[dsp]`
 
@@ -26,13 +28,102 @@ __extras__ = ("dsp", ["scipy", "numpy"])
 try:
   import numpy as np
   from scipy.signal import (
-    butter, sosfilt, sosfiltfilt,
+    butter, sosfilt, sosfilt_zi,
     detrend as _detrend, get_window, hilbert, welch, windows,
   )
   from scipy.integrate import cumulative_trapezoid
 except ModuleNotFoundError as e:
   if not absent(e, "scipy", "numpy"): raise
   raise MissingExtra("Install with: pip install xaeian[dsp]") from e
+
+#------------------------------------------------------------------------------------------ Filters
+
+BLOCK = 1 << 20 # samples a pass takes at once: a long input costs a block of float64, not a copy
+
+EDGES = {"lowpass": 1, "highpass": 1, "bandpass": 2, "bandstop": 2} # how many each kind takes
+
+def butterworth(
+  kind:str,
+  freqs_Hz:float|list,
+  fs:float,
+  order:int = 4,
+  *,
+  zero_phase:bool = True,
+) -> np.ndarray:
+  """
+  Butterworth sections of `order`, -3dB at `freqs_Hz`.
+  `kind` is "lowpass", "highpass", "bandpass" or "bandstop", as the `Signal` filters are named.
+
+  `zero_phase` designs for `filtfilt`: `order / 2` each way, so `order` is even,
+  edges moved so the two passes together are -3dB at `freqs_Hz`; same slope, softer knee.
+  `zero_phase=False` designs for one pass through `sosfilt`.
+  """
+  if kind not in EDGES: raise ValueError(f"kind {kind!r}: lowpass, highpass, bandpass or bandstop")
+  edges = np.array(freqs_Hz, dtype=np.float64, ndmin=1)
+  if len(edges) != EDGES[kind]:
+    want = "one edge" if EDGES[kind] == 1 else "two edges"
+    raise ValueError(f"{kind} takes {want}, got {freqs_Hz}Hz")
+  if not 0 < edges.min() <= edges.max() < fs / 2: # NaN fails it too
+    raise ValueError(f"{freqs_Hz}Hz: an edge lies above 0 and below {fs / 2:g}Hz, half the rate")
+  if order < 1: raise ValueError(f"order {order}: a filter takes at least 1")
+  if zero_phase:
+    if order % 2:
+      raise ValueError(f"order {order}: a zero-phase pair runs half of it each way, so even")
+    order //= 2 # each of the two passes
+    # the pair is -3dB where each pass is -1.5dB, which a prototype cut at 1 reaches at `shift`
+    shift = (np.sqrt(2) - 1) ** (1 / (2 * order))
+    warped = np.tan(np.pi * edges / fs) # where the bilinear transform puts the edges
+    if kind == "lowpass": warped /= shift
+    elif kind == "highpass": warped *= shift
+    else:
+      low, high = warped
+      width = (high - low) / shift if kind == "bandpass" else (high - low) * shift
+      top = (width + np.sqrt(width ** 2 + 4 * low * high)) / 2 # geometric center kept, width moved
+      warped = np.array([low * high / top, top])
+    edges = np.arctan(warped) * fs / np.pi
+  return butter(order, edges if len(edges) > 1 else edges[0], kind, fs=fs, output="sos")
+
+def filtfilt(sos:np.ndarray, data, out:np.ndarray|None=None) -> np.ndarray:
+  """
+  `sos` forward and back, as `scipy.signal.sosfiltfilt` with its odd padding, a block at a time.
+  Memory beyond `out` is one block and 3 bytes a sample to find the gaps.
+  `out` may be `data` itself, filtered in place.
+
+  NaN is a gap: each finite run is filtered on its own, one too short to pad stays NaN.
+  An input too short to pad is refused. A float32 `out` also rounds between the two passes.
+  """
+  data = np.asarray(data)
+  if data.ndim != 1: raise ValueError(f"one channel at a time, got shape {data.shape}")
+  # as `sosfiltfilt` pads: 3 times the taps, 2 a section plus 1, a first-order section 1 fewer
+  pad = 3 * (2 * len(sos) + 1 - min(np.sum(sos[:, 2] == 0), np.sum(sos[:, 5] == 0)))
+  if len(data) <= pad: raise ValueError(f"{len(data)} samples, padding takes {pad} at each end")
+  out = np.empty(len(data)) if out is None else out
+  zi = sosfilt_zi(sos)
+  finite = np.isfinite(data)
+  out[~finite] = np.nan
+  for start, end in _runs(finite):
+    if end - start > pad: _filtfilt_run(sos, zi, pad, data[start:end], out[start:end])
+    else: out[start:end] = np.nan
+  return out
+
+def _runs(finite:np.ndarray) -> np.ndarray:
+  """Start and end of every run of True in `finite`, a row of two each."""
+  flips = np.diff(np.concatenate(([False], finite, [False])))
+  return np.flatnonzero(flips).reshape(-1, 2)
+
+def _filtfilt_run(sos:np.ndarray, zi:np.ndarray, pad:int, x:np.ndarray, out:np.ndarray) -> None:
+  """One finite run forward and back into `out`, each end extended by its odd reflection."""
+  head = 2.0 * x[0] - x[pad:0:-1] # in float: integer counts near a rail would wrap
+  tail = 2.0 * x[-1] - x[-2:-pad - 2:-1]
+  _, z = sosfilt(sos, head, zi=zi * head[0])
+  for i in range(0, len(x), BLOCK):
+    out[i:i + BLOCK], z = sosfilt(sos, x[i:i + BLOCK], zi=z)
+  tail, _ = sosfilt(sos, tail, zi=z) # the forward pass runs on through the tail
+  _, z = sosfilt(sos, tail[::-1], zi=zi * tail[-1]) # and the back pass starts from its end
+  for i in range(len(x), 0, -BLOCK):
+    block = slice(max(0, i - BLOCK), i)
+    back, z = sosfilt(sos, out[block][::-1], zi=z)
+    out[block] = back[::-1]
 
 #----------------------------------------------------------------------------------------- Spectrum
 
@@ -265,22 +356,34 @@ class Signal:
 
   #---------------------------------------------------------------------------------- Filters (SOS)
 
-  def _sos_filter(self, Wn, btype:str, order:int, zero_phase:bool) -> Signal:
-    sos = butter(order, Wn, btype, fs=self._fs, output="sos")
-    filt = sosfiltfilt if zero_phase else sosfilt
-    return self._new(filt(sos, self._data))
+  def _sos_filter(self, freqs_Hz, kind:str, order:int, zero_phase:bool) -> Signal:
+    """
+    `butterworth` over the samples; NaN stays a gap, each run between filtered on its own.
+    One pass starts each run settled at its first sample, so an offset does not ring in.
+    """
+    sos = butterworth(kind, freqs_Hz, self._fs, order, zero_phase=zero_phase)
+    if zero_phase: return self._new(filtfilt(sos, self._data))
+    zi = sosfilt_zi(sos)
+    out = np.full(len(self._data), np.nan)
+    for start, end in _runs(np.isfinite(self._data)):
+      run = self._data[start:end]
+      out[start:end], _ = sosfilt(sos, run, zi=zi * run[0])
+    return self._new(out)
 
   def lowpass(self, cutoff_Hz:float, order:int=4, zero_phase:bool=True) -> Signal:
-    """Butterworth low-pass. `zero_phase` filters forward and back: no phase shift."""
-    return self._sos_filter(cutoff_Hz, "low", order, zero_phase)
+    """
+    Butterworth low-pass of `order`, -3dB at `cutoff_Hz`, as `butterworth` designs it.
+    `zero_phase` filters forward and back: no phase shift.
+    """
+    return self._sos_filter(cutoff_Hz, "lowpass", order, zero_phase)
 
   def highpass(self, cutoff_Hz:float, order:int=4, zero_phase:bool=True) -> Signal:
     """Butterworth high-pass."""
-    return self._sos_filter(cutoff_Hz, "high", order, zero_phase)
+    return self._sos_filter(cutoff_Hz, "highpass", order, zero_phase)
 
   def bandpass(self, low_Hz:float, high_Hz:float, order:int=4, zero_phase:bool=True) -> Signal:
     """Butterworth band-pass."""
-    return self._sos_filter([low_Hz, high_Hz], "band", order, zero_phase)
+    return self._sos_filter([low_Hz, high_Hz], "bandpass", order, zero_phase)
 
   def bandstop(self, low_Hz:float, high_Hz:float, order:int=4, zero_phase:bool=True) -> Signal:
     """Butterworth band-stop (notch)."""
@@ -318,8 +421,8 @@ class Signal:
     """
     data = self._data - np.mean(self._data)
     data *= windows.tukey(len(data), alpha=0.05)
-    sos = butter(4, highpass_Hz, "high", fs=self._fs, output="sos")
-    data = sosfiltfilt(sos, data)
+    # steep: integration lifts whatever leaks below the edge
+    data = filtfilt(butterworth("highpass", highpass_Hz, self._fs, order=8), data)
     result = cumulative_trapezoid(data, dx=1 / self._fs, initial=0)
     result = _detrend(result, type="linear")
     return self._new(result, units=units)

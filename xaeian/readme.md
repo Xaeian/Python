@@ -126,7 +126,7 @@ p.run(f"Check with {fmt_cmd('py main.py --check')}")                    # py yel
 ```py
 from xaeian.crc import crc32_iso, crc16_modbus, crc8_maxim, CRC
 
-crc16_modbus.checksum(b"123456789")  # 0x4B37
+crc16_modbus.checksum(b"123456789")  # 0x374B: 0x4B37 byte-swapped, low byte first on the wire
 crc32_iso.checksum(b"123456789")     # 0xCBF43926
 
 encoded = crc16_modbus.encode(b"Hello!")
@@ -272,10 +272,13 @@ sig * 2                         # scale
 sig1 + sig2                     # add (same fs required)
 -sig                            # invert
 abs(sig)                        # rectify
-# Filter chain: SOS Butterworth, zero-phase
+# Filter chain: SOS Butterworth, zero-phase, order and -3dB edges as asked
 clean = sig.highpass(10).lowpass(500).detrend()
 bp = sig.bandpass(100, 1000)
 notch = sig.bandstop(49, 51)    # mains rejection
+# Arrays of any length: a block at a time, NaN as a gap
+from xaeian.dsp import butterworth, filtfilt
+y = filtfilt(butterworth("lowpass", 500, fs=10_000), samples)
 # Vibration metrics
 sig.rms                         # root mean square
 sig.peak                        # max absolute value

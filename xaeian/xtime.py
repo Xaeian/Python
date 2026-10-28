@@ -322,19 +322,28 @@ class Time(datetime):
   ]
 
   @classmethod
+  def _from_timestamp(cls, seconds:float) -> Time:
+    """
+    Unix seconds → `Time`, in the local zone.
+    Past the calendar it is refused in plain words: milliseconds, common on devices, land there.
+    """
+    try: return cls._from_datetime(datetime.fromtimestamp(seconds, tz=tzlocal.get_localzone()))
+    except (OverflowError, OSError, ValueError):
+      raise ValueError(f"Timestamp {seconds:.0f}s out of range: milliseconds?") from None
+
+  @classmethod
   def _parse(cls, v:TimeInput) -> Time:
     """Any input → `Time`, `TypeError` for unsupported types, `ValueError` for unreadable text."""
     if isinstance(v, Time): return v
     if isinstance(v, datetime): return cls._from_datetime(v)
     if isinstance(v, timedelta):
       return cls._from_datetime(datetime.now(tz=tzlocal.get_localzone()) + v)
-    if isinstance(v, (int, float)):
-      return cls._from_datetime(datetime.fromtimestamp(v, tz=tzlocal.get_localzone()))
+    if isinstance(v, (int, float)): return cls._from_timestamp(v)
     if not isinstance(v, str): raise TypeError(f"Cannot create Time from {type(v).__name__}")
     s = v.strip()
     if s.lower() == "now": return cls._now()
     if re.fullmatch(r"-?\d+(?:\.\d+)?", s): # `2025-03` is no timestamp, it fails as a date
-      return cls._from_datetime(datetime.fromtimestamp(float(s), tz=tzlocal.get_localzone()))
+      return cls._from_timestamp(float(s))
     if cls.is_intervals(s): return cls._now()._apply_intervals(s)
     try: return cls._from_datetime(datetime.fromisoformat(s))
     except ValueError: pass

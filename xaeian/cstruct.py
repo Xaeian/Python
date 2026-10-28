@@ -26,10 +26,9 @@ Example:
   {'x': 1, 'y': 2, 'z': 3}
 """
 
-from struct import pack, unpack_from, calcsize
+from struct import pack, unpack_from, calcsize, error as PackError
 from enum import Enum
 from typing import Callable, Any, Generic, Iterator, TypeVar, overload
-from numbers import Real
 
 from .crc import CRC, crc32_iso
 
@@ -57,12 +56,12 @@ class Type(Enum):
 
   @property
   def is_integer(self) -> bool:
-    """`True` for the integer types, whose values get truncated before packing."""
+    """`True` for the integer types, whose values round to the nearest whole before packing."""
     return self.value not in ("f", "d", "str", "byte", "pad")
 
   @property
   def is_float(self) -> bool:
-    """`True` for float and double, the types decoding rounds to `precision`."""
+    """`True` for float and double, the types `precision` applies to."""
     return self.value in ("f", "d")
 
   @property
@@ -91,6 +90,20 @@ class Endian(Enum):
 
 #-------------------------------------------------------------------------------------------- Field
 
+def _float32(value:float) -> float:
+  """
+  Shortest decimal packing into the same float32 bits: 23.45, not 23.450000762939453.
+  Up to 9 digits, so a read and a rewrite keep every bit; past the float32 range, `value` as is.
+  """
+  try: bits = pack("<f", value)
+  except OverflowError: return value
+  for digits in range(1, 10):
+    short = float(f"{value:.{digits}g}")
+    try:
+      if pack("<f", short) == bits: return short
+    except OverflowError: continue # rounded past FLT_MAX, as 3.403e+38 is for 3.4028235e+38
+  return value
+
 class Field:
   """
   Single field within a Struct.
@@ -109,9 +122,9 @@ class Field:
     scale:float = 1,
     point_shift:int = 0,
     offset:float = 0,
-    encoder:Callable[[Real], Real]|None = None,
-    decoder:Callable[[Real], Real]|None = None,
-    precision:int = 3,
+    encoder:Callable[[float], float]|None = None,
+    decoder:Callable[[float], float]|None = None,
+    precision:int|None = None,
     optional:bool = False,
     default:Any = None,
   ) -> None:
@@ -121,7 +134,7 @@ class Field:
       unit: Documentation only, e.g. "V", "Hz"
       length: 1 = scalar, >1 = fixed-size array, ignored by string and bytes
       point_shift: Honored only when `scale == 1`, then `scale = 10 ** point_shift`
-      precision: Decimal places when rounding decoded floats
+      precision: Decimal places of a decoded float, `None` = all its type holds
       optional: Missing key falls back to `default` instead of raising
     """
     self.type: Type = ctype
@@ -134,9 +147,9 @@ class Field:
     if scale == 1 and point_shift != 0: scale = 10 ** point_shift
     self.scale: float = scale
     self.offset: float = offset
-    self.encoder: Callable[[Real], Real]|None = encoder
-    self.decoder: Callable[[Real], Real]|None = decoder
-    self.precision: int = precision
+    self.encoder: Callable[[float], float]|None = encoder
+    self.decoder: Callable[[float], float]|None = decoder
+    self.precision: int|None = precision
     self.optional: bool = optional
     self.default: Any = default
 
@@ -150,20 +163,28 @@ class Field:
     """`True` for string and bytes, whose encoded size depends on the value."""
     return self.type.value in ("str", "byte")
 
-  def encode_value(self, value:Real, for_pack:bool=True) -> Real:
-    """Encode transform; `for_pack` truncates integer types to int."""
+  def encode_value(self, value:float, for_pack:bool=True) -> float:
+    """
+    Encode transform; `for_pack` rounds integer types to the nearest whole.
+    Truncated, `2.3` at scale 100 would go out as 229: in floating point it is 229.99999999999997.
+    """
     if self.scale != 1: value *= self.scale
     if self.offset: value += self.offset
     if self.encoder: value = self.encoder(value)
-    if for_pack and self.type.is_integer: value = int(value)
+    if for_pack and self.type.is_integer: value = int(round(value))
     return value
 
-  def decode_value(self, value:Real) -> Real:
-    """Decode transform, rounding float types to `precision` places."""
+  def decode_value(self, value:float) -> float:
+    """
+    Decode transform, a float trimmed to `precision` places when set.
+    Unset, a float comes back as the shortest decimal of its float32 bits; a double stays whole.
+    Shortened on the raw bits, before `offset`, `scale` and `decoder`, so a rewrite keeps them.
+    """
+    if self.type == Type.float and self.precision is None: value = _float32(value)
     if self.offset: value -= self.offset
     if self.scale != 1: value /= self.scale
     if self.decoder: value = self.decoder(value)
-    if self.type.is_float: value = round(value, self.precision)
+    if self.type.is_float and self.precision is not None: value = round(value, self.precision)
     return value
 
   def __str__(self) -> str:
@@ -217,13 +238,20 @@ class Bitfield:
       pos += width
 
   def encode(self, values:dict[str, int]) -> int:
-    """Pack named bit values into one integer, a name missing from `values` packing as 0."""
+    """
+    Pack named bit values into one integer, a name missing from `values` packing as 0.
+    A name the bitfield lacks and a value outside its bits are refused:
+    a typo would pack its bit as 0 and -1 would pack as all ones, both without a word.
+    """
+    unknown = values.keys() - self.bit_widths.keys()
+    if unknown: raise KeyError(f"Bitfield '{self.name}' has no {', '.join(sorted(unknown))}")
     result = 0
     for bit_name in self.bit_names:
       value = values.get(bit_name, 0)
       mask = self._masks[bit_name]
-      if value > mask: raise ValueError(f"Bit '{bit_name}' value {value} exceeds max {mask}")
-      result |= (value & mask) << self._offsets[bit_name]
+      if not 0 <= value <= mask:
+        raise ValueError(f"Bit '{bit_name}' value {value} outside 0 to {mask}")
+      result |= value << self._offsets[bit_name]
     return result
 
   def decode(self, packed:int) -> dict[str, int]:
@@ -371,6 +399,12 @@ class Struct:
     if self.endian is not None: return self.endian
     return Endian.little
 
+  @staticmethod
+  def _pack(field:Field, value:float, endian:Endian) -> bytes:
+    """One value as `field` holds it; past its type's range, refused by the field's name."""
+    try: return pack(endian.value + field.type.value, value)
+    except PackError as e: raise ValueError(f"Field '{field.name}': {e}") from None
+
   def _encode_field(self, field:Field, value:Any, endian:Endian) -> bytes:
     if field.type == Type.string:
       if not isinstance(value, str):
@@ -387,13 +421,11 @@ class Struct:
         raise ValueError(f"Field '{field.name}' expects {field.length} elements, got {len(value)}")
       result = b""
       for v in value:
-        encoded = field.encode_value(v)
-        result += pack(endian.value + field.type.value, encoded)
+        result += self._pack(field, field.encode_value(v), endian)
       return result
     if isinstance(value, (list, tuple)):
       raise TypeError(f"Field '{field.name}' expects scalar, got {type(value).__name__}")
-    encoded = field.encode_value(value)
-    return pack(endian.value + field.type.value, encoded)
+    return self._pack(field, field.encode_value(value), endian)
 
   def _decode_field(self, field:Field, msg:bytes, offset:int, endian:Endian) -> tuple[Any, int]:
     """Decode one field → `(value, next_offset)`."""

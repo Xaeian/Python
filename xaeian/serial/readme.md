@@ -71,8 +71,7 @@ Wrong-shape line returns `None` (error signal).
 ```py
 from xaeian.serial import MultiRecorder
 
-mr = MultiRecorder("COM9", count=4, separator=",",
-  name="STM", regex=Recorder.FLOAT)
+mr = MultiRecorder("COM9", count=4, separator=",", name="STM")
 
 mr.connect()
 vals = mr.read_values() # [12.5, 0.34, 25.0, 1500] or None

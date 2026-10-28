@@ -43,12 +43,14 @@ def convert_value(value:str|None) -> bool|int|float|str|None:
     try: return float(value)
     except ValueError: return value
 
-def ihex_to_bin(text:str, start:int|None=None) -> bytes:
+def ihex_to_bin(text:str, start:int|None=None, size:int|None=None) -> bytes:
   """
   Intel HEX as the bytes flash holds from `start` up, gaps erased to `0xFF`.
 
   `start` defaults to the lowest address in the file, and bytes below it are dropped.
   At the slot address, a full flash image with the bootloader in front gives the application.
+  `size` drops the bytes from `start + size` up: option bytes or EEPROM far behind the code
+  would stretch the image over all the erased flash between.
 
   Data, end-of-file and both extended-address records are honoured.
   Start-address records carry nothing for an image.
@@ -71,13 +73,15 @@ def ihex_to_bin(text:str, start:int|None=None) -> bytes:
   if start is None: start = min(chunks)
   if not any(addr <= start < addr + len(data) for addr, data in chunks.items()):
     raise ValueError(f"no data at 0x{start:08X} in the Intel HEX file")
+  if size is not None:
+    chunks = {addr: data for addr, data in chunks.items() if addr < start + size}
   end = max(addr + len(data) for addr, data in chunks.items())
   image = bytearray(b"\xff" * (end - start))
   for addr, data in chunks.items():
     if addr + len(data) <= start: continue
     skip = max(start - addr, 0)
     image[addr + skip - start:addr + len(data) - start] = data[skip:]
-  return bytes(image)
+  return bytes(image[:size])
 
 #-------------------------------------------------------------------------------------------- Shell
 
@@ -427,7 +431,7 @@ class Shell(SerialPort):
       return False
     if image[:1] == b":":
       try:
-        image = ihex_to_bin(image.decode(errors="ignore"), info["app"])
+        image = ihex_to_bin(image.decode(errors="ignore"), info["app"], info["slot"])
       except ValueError as e:
         self.print_error(str(e))
         return False

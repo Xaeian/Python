@@ -25,10 +25,39 @@ def floats_keep_value():
   data = {"x": 1.5, "y": 0.25} # exact in IEEE-754, no rounding slack needed
   assert s.decode(s.encode(data)) == data
 
+def a_float_decodes_to_what_its_type_holds():
+  """At 3 decimals 0.000123A would decode as 0.0; at 7 digits 12345678 would come back 12345680."""
+  s = Struct(name="meter").add(
+    Field(Type.float, "a"), Field(Type.float, "v"), Field(Type.float, "n"),
+    Field(Type.float, "k"), Field(Type.double, "wh"),
+  )
+  data = {"a": 0.000123, "v": 3.2999, "n": 12345678.0, "k": 1.2345678, "wh": 12345.678901}
+  assert s.decode(s.encode(data)) == data
+  shown = Struct(name="shown").add(Field(Type.float, "v", precision=1))
+  assert shown.decode(shown.encode({"v": 3.2999})) == {"v": 3.3}
+  top = Struct(name="top").add(Field(Type.float, "v"))
+  assert top.decode(top.encode({"v": 3.4028235e38})) == {"v": 3.4028235e38} # FLT_MAX, no reading
+
+def a_float_read_and_written_back_keeps_its_bits():
+  """A config read, one field changed and saved again must leave every other float as it was."""
+  s = Struct(name="cfg").add(Field(Type.float, "x"), Field(Type.float, "k", scale=1000))
+  rng = random.Random(1)
+  for _ in range(2000):
+    wire = s.encode({"x": rng.uniform(-1e4, 1e4), "k": rng.uniform(-10, 10)})
+    assert s.encode(s.decode(wire)) == wire
+
 def scale_stores_fixed_point():
   s = Struct(name="scaled").add(Field(Type.uint16, "mv", scale=1000))
   assert s.encode({"mv": 1.5}) == (1500).to_bytes(2, "little")
   assert s.decode(s.encode({"mv": 1.5})) == {"mv": 1.5}
+
+@pytest.mark.parametrize("sp, lim", [(2.3, 33.3), (19.99, 1.1), (-1.15, 0.3), (4.35, 99.9)])
+def fixed_point_rounds_to_its_step(sp, lim):
+  """`2.3 * 100` is 229.99999999999997 in floating point: truncated, the device would get 2.29."""
+  s = Struct(name="setpoint").add(
+    Field(Type.int16, "sp", scale=100), Field(Type.uint16, "lim", point_shift=1),
+  )
+  assert s.decode(s.encode({"sp": sp, "lim": lim})) == {"sp": sp, "lim": lim}
 
 def array_field():
   s = Struct(name="arr").add(Field(Type.uint8, "xs", length=4))
@@ -55,6 +84,15 @@ def bitfield():
   s = Struct(name="flags").add(Bitfield("st", [("on", 1), ("err", 1), ("mode", 6)]))
   data = {"st": {"on": 1, "err": 0, "mode": 42}}
   assert s.decode(s.encode(data)) == data
+
+def a_bitfield_refuses_a_name_it_lacks_and_a_value_outside_its_bits():
+  """A typo would pack its bit as 0 and -1 would pack as all ones, both without a word."""
+  st = Bitfield("st", [("on", 1), ("mode", 6)])
+  with pytest.raises(KeyError, match="onn"):
+    st.encode({"onn": 1})
+  for mode in (-1, 64):
+    with pytest.raises(ValueError, match="mode"):
+      st.encode({"mode": mode})
 
 def optional_field_uses_default():
   s = Struct(name="opt").add(
@@ -217,6 +255,11 @@ def missing_required_field_raises():
   s = Struct(name="req").add(Field(Type.uint8, "a"))
   with pytest.raises(KeyError):
     s.encode({})
+
+def a_value_past_its_type_is_refused_by_the_field_name():
+  s = Struct(name="range").add(Field(Type.uint8, "ok"), Field(Type.int16, "temp", scale=100))
+  with pytest.raises(ValueError, match="temp"):
+    s.encode({"ok": 1, "temp": 400}) # 40000 is past int16
 
 @pytest.fixture
 def registry():
