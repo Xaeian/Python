@@ -81,17 +81,17 @@ def the_database_example_runs(tmp_path):
     assert db.update("users", {"verified": True}, "id = ?", 1) == 1
 
 def binary_structs_round_trip():
-  from xaeian.cstruct import Struct, Field, Bitfield, Type, Endian
+  from xaeian.cstruct import Struct, Field, Bitfield, Type
   from xaeian.crc import crc32_iso
-  pkt = Struct(endian=Endian.little, crc=crc32_iso)
-  pkt.add(
+  pkt = Struct("sensor",
     Field(Type.uint32, "timestamp", "s"),
     Bitfield("flags", [("enabled", 1), ("error", 1), ("mode", 6)]),
     Field(Type.float, "temperature", "°C"),
+    crc=crc32_iso,
   )
   data = {"timestamp": 1234567890, "flags": {"enabled": 1, "error": 0, "mode": 5},
     "temperature": 23.5}
-  assert pkt.decode(pkt.encode(data))["timestamp"] == 1234567890
+  assert pkt.decode(pkt.encode(data)) == data
 
 def logging_is_colored_and_rotating(tmp_path):
   log = logger("readme_example", file=str(tmp_path / "app.log"), stream=False)

@@ -5,6 +5,7 @@ Table-driven CRC checksums.
 
 Fully configurable CRC-8/16/32, plus predefined instances for common standards
 (ISO, Modbus, SMBus, Maxim).
+CRC-32/ISO-HDLC goes through `zlib`: the same value, computed in C.
 
 Example:
   >>> from xaeian.crc import crc16_modbus
@@ -12,6 +13,8 @@ Example:
   >>> crc16_modbus.decode(encoded)
   b'hello'
 """
+
+import zlib
 
 CRC_MASK = {8: 0xFF, 16: 0xFFFF, 32: 0xFFFFFFFF}
 
@@ -57,6 +60,11 @@ class CRC:
     self.array: list[int] = []
     self._build_table()
 
+  @property
+  def size(self) -> int:
+    """Bytes of the checksum on the wire."""
+    return self.width // 8
+
   def _build_table(self) -> None:
     """Build the remainder lookup table, plus the reflected-byte table when `reflect_in`."""
     for i in range(256):
@@ -88,7 +96,7 @@ class CRC:
 
   def to_bytes(self, crc:int) -> bytes:
     """Convert CRC integer to bytes (big-endian)."""
-    return crc.to_bytes(self.width // 8, byteorder="big")
+    return crc.to_bytes(self.size, byteorder="big")
 
   def to_int(self, crc:bytes) -> int:
     """Convert big-endian CRC bytes to integer."""
@@ -99,8 +107,8 @@ class CRC:
 
   def decode(self, frame:bytes) -> bytes|None:
     """Verify and strip the trailing CRC of `frame`, `None` when it does not match."""
-    n = self.width // 8
-    if not frame or len(frame) < n: return None
+    n = self.size
+    if len(frame) < n: return None
     msg = frame[:-n]
     crc = frame[-n:]
     if self.to_int(crc) == self.checksum(msg): return msg
@@ -111,9 +119,13 @@ class CRC:
     crc = self.checksum(msg)
     return msg + self.to_bytes(crc)
 
+class _ZlibCRC(CRC):
+  """CRC-32/ISO-HDLC as `zlib` computes it in C: the table's value, without the Python loop."""
+  def checksum(self, msg:bytes) -> int: return zlib.crc32(msg)
+
 #--------------------------------------------------------------------------------------- Predefined
 
-crc32_iso = CRC(32, 0x04C11DB7, 0xFFFFFFFF, True, True, 0xFFFFFFFF, False)
+crc32_iso = _ZlibCRC(32, 0x04C11DB7, 0xFFFFFFFF, True, True, 0xFFFFFFFF, False)
 """CRC-32 ISO 3309: Ethernet, ZIP, PNG, GZIP."""
 
 crc32_aixm = CRC(32, 0x814141AB, 0x00000000, False, False, 0x00000000, False)

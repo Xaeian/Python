@@ -106,13 +106,13 @@ clean = sig.highpass(10).lowpass(500)
 print(f"RMS:{clean.rms:.4f}  peak_freq:{clean.fft().peak_freq:.0f}Hz")
 
 # Binary structs: C-like encoding with CRC, bitfields, scale/offset
-from xaeian.cstruct import Struct, Field, Bitfield, Type, Endian
+from xaeian.cstruct import Struct, Field, Bitfield, Type
 from xaeian.crc import crc32_iso
-pkt = Struct(endian=Endian.little, crc=crc32_iso)
-pkt.add(
+pkt = Struct("sensor",
   Field(Type.uint32, "timestamp", "s"),
   Bitfield("flags", [("enabled", 1), ("error", 1), ("mode", 6)]),
   Field(Type.float, "temperature", "°C"),
+  crc=crc32_iso,
 )
 flags = {"enabled": 1, "error": 0, "mode": 5}
 raw = pkt.encode({"timestamp": 1234567890, "flags": flags, "temperature": 23.5})

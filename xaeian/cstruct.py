@@ -1,39 +1,38 @@
 # xaeian/cstruct.py
 
 """
-Binary struct serialization for C-like structures.
+Binary records described once, for Python, numpy and C.
 
-Numeric, string and byte fields, fixed arrays, bitfields, padding, optionals and tagged variants,
-with scale/offset transforms, a CRC per record and schema export to C headers or Markdown.
+Numeric, string and byte fields, fixed arrays, nested structs, bitfields and padding,
+a scale and an offset per number, a CRC per record.
+A record exports as a C header that mirrors the wire byte for byte, as a numpy `dtype()`,
+or as a Markdown table.
 
-Three layers put records on a wire:
-`Struct` is one record, `Message` multiplexes blocks of several structs into one body,
-`Frame` is the envelope that gives a raw byte stream its boundaries and integrity.
-The mirror of `FRAME_t` in C.
+Three layers put records on a wire, joined by the caller:
+`Struct` is one record, `Message` puts blocks of records under codes into one body,
+`Frame` is the envelope that gives a raw byte stream its boundaries and integrity,
+the mirror of `FRAME_t` in C: `frame.encode(message.encode(data))`.
 
 Example:
-  >>> from xaeian.cstruct import Struct, Field, Type, Endian
-  >>> from xaeian.crc import crc32_iso
-  >>> xyz = Struct(endian=Endian.little, crc=crc32_iso)
-  >>> xyz.add(
-  ...   Field(Type.uint16, "x"),
-  ...   Field(Type.uint16, "y"),
-  ...   Field(Type.uint16, "z"),
-  ... )
-  >>> message = xyz.encode({"x": 1, "y": 2, "z": 3})
-  >>> data = xyz.decode(message)
-  >>> data
-  {'x': 1, 'y': 2, 'z': 3}
+  >>> from xaeian.cstruct import Struct, Field, Type
+  >>> point = Struct("point", Field(Type.int16, "x", "mm"), Field(Type.int16, "y", "mm"))
+  >>> point.decode(point.encode({"x": 1, "y": -2}))
+  {'x': 1, 'y': -2}
 """
 
+import re
+from numbers import Integral
 from struct import pack, unpack_from, calcsize, error as PackError
 from enum import Enum
-from typing import Callable, Any, Generic, Iterator, TypeVar, overload
+from typing import Any, Iterator, NamedTuple
 
 from .crc import CRC, crc32_iso
+from .extras import MissingExtra, absent
+
+__extras__ = ("cstruct", ["numpy"]) # `dtype()` alone
 
 class Type(Enum):
-  """Field data types; value is the `struct` format char, except `string`, `bytes`, `pad`."""
+  """Field types named as in C; the value is the `struct` format char, except string and bytes."""
   uint8 = "B"
   int8 = "b"
   uint16 = "H"
@@ -44,114 +43,70 @@ class Type(Enum):
   int64 = "q"
   float = "f"
   double = "d"
-  string = "str"  # null-terminated UTF-8 string
-  bytes = "byte"  # length-prefixed (uint16) byte array
-  pad = "pad"     # padding bytes (ignored on decode)
+  string = "str" # null-terminated UTF-8
+  bytes = "byte" # length-prefixed by a uint16
 
   @property
-  def size(self) -> int:
-    """Size in bytes for fixed-size types, 0 for variable-size."""
-    if self.value in ("str", "byte", "pad"): return 0
-    return calcsize(self.value)
+  def size(self) -> int|None:
+    """Size in bytes, `None` for string and bytes, as for a `Struct` of varying size."""
+    return None if self in (Type.string, Type.bytes) else calcsize(self.value)
 
   @property
   def is_integer(self) -> bool:
     """`True` for the integer types, whose values round to the nearest whole before packing."""
-    return self.value not in ("f", "d", "str", "byte", "pad")
-
-  @property
-  def is_float(self) -> bool:
-    """`True` for float and double, the types `precision` applies to."""
-    return self.value in ("f", "d")
-
-  @property
-  def c_type(self) -> str:
-    """C type name for schema export."""
-    mapping = {
-      "B": "uint8_t", "b": "int8_t",
-      "H": "uint16_t", "h": "int16_t",
-      "I": "uint32_t", "i": "int32_t",
-      "Q": "uint64_t", "q": "int64_t",
-      "f": "float", "d": "double",
-      "str": "char*", "byte": "uint8_t*", "pad": "uint8_t",
-    }
-    return mapping.get(self.value, "unknown")
-
-def type_size(ctype:Type) -> int:
-  """Size in bytes, 0 for variable-size types."""
-  return ctype.size
+    return self.name.startswith(("int", "uint"))
 
 class Endian(Enum):
-  """Byte order for binary encoding/decoding."""
+  """Byte order of a struct's numbers."""
   little = "<"
   big = ">"
-  native = "="
-  network = "!"
 
 #-------------------------------------------------------------------------------------------- Field
 
-def _float32(value:float) -> float:
-  """
-  Shortest decimal packing into the same float32 bits: 23.45, not 23.450000762939453.
-  Up to 9 digits, so a read and a rewrite keep every bit; past the float32 range, `value` as is.
-  """
-  try: bits = pack("<f", value)
-  except OverflowError: return value
-  for digits in range(1, 10):
-    short = float(f"{value:.{digits}g}")
-    try:
-      if pack("<f", short) == bits: return short
-    except OverflowError: continue # rounded past FLT_MAX, as 3.403e+38 is for 3.4028235e+38
-  return value
-
 class Field:
   """
-  Single field within a Struct.
-
-  Encode: raw = encoder((value * scale) + offset)
-  Decode: value = decoder((raw - offset) / scale)
+  One field of a `Struct`: a number, an array of them, a string, bytes or a nested struct.
+  A number travels as `value * scale + offset`.
   """
-  _auto_id = 0
-
   def __init__(
     self,
-    ctype:Type,
-    name:str = "",
+    type:"Type|Struct",
+    name:str,
     unit:str = "",
+    *,
     length:int = 1,
     scale:float = 1,
-    point_shift:int = 0,
     offset:float = 0,
-    encoder:Callable[[float], float]|None = None,
-    decoder:Callable[[float], float]|None = None,
-    precision:int|None = None,
-    optional:bool = False,
     default:Any = None,
+    doc:str = "",
   ) -> None:
     """
     Args:
-      name: Auto-generated if empty
+      type: A `Type`, or a `Struct` nested here as in C, its value a dict of its own
+      name: Key of the field in the record's dict
       unit: Documentation only, e.g. "V", "Hz"
-      length: 1 = scalar, >1 = fixed-size array, ignored by string and bytes
-      point_shift: Honored only when `scale == 1`, then `scale = 10 ** point_shift`
-      precision: Decimal places of a decoded float, `None` = all its type holds
-      optional: Missing key falls back to `default` instead of raising
+      length: 1 = scalar, >1 = fixed-size array; string and bytes size themselves
+      scale: Raw counts per unit of a number, `100` stores 23.45 as 2345
+      default: Encoded where the record lacks the field, `None` = the field is required
+      doc: Documentation only, the note of the C field
     """
-    self.type: Type = ctype
-    if not name:
-      name = f"_field_{Field._auto_id}"
-      Field._auto_id += 1
+    if not isinstance(type, (Type, Struct)):
+      raise TypeError(f"Field '{name}' takes a Type or a Struct, got {type!r}")
+    if isinstance(type, Struct) and (type.crc or type.align > 1):
+      raise ValueError(f"Struct '{type.name}' nests by its members only: no crc or align")
+    if length < 1: raise ValueError(f"Field '{name}' needs a length of 1 or more, not {length}")
+    if length > 1 and type in (Type.string, Type.bytes):
+      raise ValueError(f"Field '{name}' of {type.name} sizes itself: no length")
+    if (scale != 1 or offset) and not (isinstance(type, Type) and type.size):
+      raise ValueError(f"Field '{name}' of {type.name} holds no number to scale or shift")
+    self.type: Type|Struct = type
     self.name: str = name
     self.unit: str = unit
     self.length: int = length
-    if scale == 1 and point_shift != 0: scale = 10 ** point_shift
     self.scale: float = scale
     self.offset: float = offset
-    self.encoder: Callable[[float], float]|None = encoder
-    self.decoder: Callable[[float], float]|None = decoder
-    self.precision: int|None = precision
-    self.optional: bool = optional
     self.default: Any = default
+    self.doc: str = doc
 
   @property
   def is_array(self) -> bool:
@@ -159,603 +114,459 @@ class Field:
     return self.length > 1
 
   @property
-  def is_variable_size(self) -> bool:
-    """`True` for string and bytes, whose encoded size depends on the value."""
-    return self.type.value in ("str", "byte")
+  def size(self) -> int|None:
+    """Bytes on the wire, `None` when the value decides: string, bytes, a struct holding one."""
+    size = self.type.size
+    return None if size is None else size * self.length
 
-  def encode_value(self, value:float, for_pack:bool=True) -> float:
-    """
-    Encode transform; `for_pack` rounds integer types to the nearest whole.
-    Truncated, `2.3` at scale 100 would go out as 229: in floating point it is 229.99999999999997.
-    """
-    if self.scale != 1: value *= self.scale
-    if self.offset: value += self.offset
-    if self.encoder: value = self.encoder(value)
-    if for_pack and self.type.is_integer: value = int(round(value))
-    return value
+  def _raw(self, value:float) -> float:
+    """The number the wire holds: scaled and shifted."""
+    return value * self.scale + self.offset
 
-  def decode_value(self, value:float) -> float:
-    """
-    Decode transform, a float trimmed to `precision` places when set.
-    Unset, a float comes back as the shortest decimal of its float32 bits; a double stays whole.
-    Shortened on the raw bits, before `offset`, `scale` and `decoder`, so a rewrite keeps them.
-    """
-    if self.type == Type.float and self.precision is None: value = _float32(value)
-    if self.offset: value -= self.offset
-    if self.scale != 1: value /= self.scale
-    if self.decoder: value = self.decoder(value)
-    if self.type.is_float and self.precision is not None: value = round(value, self.precision)
-    return value
-
-  def __str__(self) -> str:
-    return f"Field {self.name}[{self.unit}]" if self.unit else f"Field {self.name}"
+  def _value(self, raw:float) -> float:
+    """The number the field means: shift and scale undone."""
+    if self.offset: raw -= self.offset
+    if self.scale != 1: raw /= self.scale
+    return raw
 
   def __repr__(self) -> str:
-    parts = [f"Field({self.type.name!r}, {self.name!r}"]
-    if self.unit: parts.append(f", unit={self.unit!r}")
-    if self.length > 1: parts.append(f", length={self.length}")
-    if self.scale != 1: parts.append(f", scale={self.scale}")
-    parts.append(")")
-    return "".join(parts)
+    unit = f", {self.unit!r}" if self.unit else ""
+    length = f", length={self.length}" if self.is_array else ""
+    return f"Field({self.type.name}, {self.name!r}{unit}{length})"
 
 #----------------------------------------------------------------------------------------- Bitfield
 
 class Bitfield:
   """
-  Named bit groups packed into a single uint8/16/32/64, first group in the lowest bits.
+  Named bit groups packed into one unsigned integer, the first group in the lowest bits.
 
   Example:
-    flags = Bitfield("status", [
-      ("enabled", 1),
-      ("error", 1),
-      ("mode", 3),
-      ("reserved", 3),
-    ]) # 8 bits total → uint8
+    status = Bitfield("status", [("enabled", 1), ("error", 1), ("mode", 3)]) # 5 bits → uint8
   """
-  def __init__(self, name:str, bits:list[tuple[str, int]], base_type:Type|None=None) -> None:
+  def __init__(self, name:str, bits:list[tuple[str, int]], type:Type|None=None) -> None:
     """
     Args:
-      bits: `(bit_name, bit_width)` pairs
-      base_type: Overrides the width picked from the total bit count
+      bits: `(bit_name, bit_width)` pairs, the lowest bits first
+      type: Unsigned integer the bits pack into, by default the narrowest that holds them
     """
-    self.name = name
-    self.bits = bits
-    self.bit_names = [b[0] for b in bits]
-    self.bit_widths = {b[0]: b[1] for b in bits}
-    total_bits = sum(b[1] for b in bits)
-    if base_type: self.base_type = base_type
-    elif total_bits <= 8: self.base_type = Type.uint8
-    elif total_bits <= 16: self.base_type = Type.uint16
-    elif total_bits <= 32: self.base_type = Type.uint32
-    else: self.base_type = Type.uint64
-    self.total_bits = total_bits
-    self._offsets = {}
-    self._masks = {}
-    pos = 0
-    for bit_name, width in bits:
-      self._offsets[bit_name] = pos
-      self._masks[bit_name] = (1 << width) - 1
-      pos += width
-
-  def encode(self, values:dict[str, int]) -> int:
-    """
-    Pack named bit values into one integer, a name missing from `values` packing as 0.
-    A name the bitfield lacks and a value outside its bits are refused:
-    a typo would pack its bit as 0 and -1 would pack as all ones, both without a word.
-    """
-    unknown = values.keys() - self.bit_widths.keys()
-    if unknown: raise KeyError(f"Bitfield '{self.name}' has no {', '.join(sorted(unknown))}")
-    result = 0
-    for bit_name in self.bit_names:
-      value = values.get(bit_name, 0)
-      mask = self._masks[bit_name]
-      if not 0 <= value <= mask:
-        raise ValueError(f"Bit '{bit_name}' value {value} outside 0 to {mask}")
-      result |= value << self._offsets[bit_name]
-    return result
-
-  def decode(self, packed:int) -> dict[str, int]:
-    """Unpack an integer into named bit values."""
-    result = {}
-    for bit_name in self.bit_names:
-      mask = self._masks[bit_name]
-      offset = self._offsets[bit_name]
-      result[bit_name] = (packed >> offset) & mask
-    return result
+    self.name: str = name
+    self.bits: dict[str, int] = dict(bits)
+    if len(self.bits) < len(bits): raise ValueError(f"Duplicate bit name in bitfield '{name}'")
+    if any(width < 1 for width in self.bits.values()):
+      raise ValueError(f"Bitfield '{name}' needs every bit group 1 wide or more")
+    total = sum(self.bits.values())
+    if total <= 8: narrowest = Type.uint8
+    elif total <= 16: narrowest = Type.uint16
+    elif total <= 32: narrowest = Type.uint32
+    else: narrowest = Type.uint64
+    self.type: Type = type or narrowest
+    if not self.type.name.startswith("uint") or total > 8 * self.size:
+      raise ValueError(f"Bitfield '{name}' needs an unsigned integer of {total} bits or more")
 
   @property
   def size(self) -> int:
-    """Size of the packed base type in bytes, not bits."""
-    return self.base_type.size
+    """Bytes of the integer the bits pack into."""
+    return calcsize(self.type.value)
 
-  def __str__(self) -> str:
-    return f"Bitfield {self.name} ({self.total_bits} bits)"
+  def encode(self, values:dict[str, int]) -> int:
+    """
+    Named bit values packed into one integer, a name missing from `values` packing as 0.
+    A name the bitfield lacks and a value outside its bits are refused:
+    a typo would pack its bit as 0 and -1 would pack as all ones, both without a word.
+    """
+    if not isinstance(values, dict):
+      raise TypeError(f"Bitfield '{self.name}' encodes a dict, got {type(values).__name__}")
+    unknown = values.keys() - self.bits.keys()
+    if unknown: raise KeyError(f"Bitfield '{self.name}' has no {', '.join(sorted(unknown))}")
+    packed = at = 0
+    for bit, width in self.bits.items():
+      value, mask = values.get(bit, 0), (1 << width) - 1
+      if not isinstance(value, Integral):
+        raise TypeError(f"Bit '{bit}' takes an integer, got {type(value).__name__}")
+      if not 0 <= value <= mask: raise ValueError(f"Bit '{bit}' value {value} outside 0 to {mask}")
+      packed |= value << at
+      at += width
+    return packed
+
+  def decode(self, packed:int) -> dict[str, int]:
+    """One integer unpacked into named bit values."""
+    values, at = {}, 0
+    for bit, width in self.bits.items():
+      values[bit] = (packed >> at) & ((1 << width) - 1)
+      at += width
+    return values
+
+  def __repr__(self) -> str:
+    return f"Bitfield({self.name!r}, {list(self.bits.items())!r})"
 
 #------------------------------------------------------------------------------------------ Padding
 
 class Padding:
-  """Fixed run of filler bytes for alignment, skipped on decode."""
-  def __init__(self, size:int, fill:int=0x00) -> None:
-    self.name = f"_pad_{size}"
-    self.size = size
-    self.fill = fill
-    self.type = Type.pad
+  """Run of zero bytes for alignment, skipped on decode."""
+  def __init__(self, size:int) -> None:
+    if size < 1: raise ValueError(f"Padding needs 1 byte or more, not {size}")
+    self.size: int = size
 
-  def encode(self) -> bytes:
-    """Filler bytes emitted in place of this padding."""
-    return bytes([self.fill] * self.size)
-
-  def __str__(self) -> str:
+  def __repr__(self) -> str:
     return f"Padding({self.size})"
-
-#------------------------------------------------------------------------------------------ Variant
-
-class Variant:
-  """
-  Tagged union: the value of the `selector` field picks which field layout is active.
-  The selector field must be added to the Struct before the variant.
-
-  Example:
-    Variant("payload", "type", {
-      0: [Field(Type.uint32, "value_a")],
-      1: [Field(Type.float, "value_b"), Field(Type.float, "extra")],
-      2: [Field(Type.string, "text")],
-    })
-  """
-  def __init__(self, name:str, selector:str, variants:dict[int, list[Field]]) -> None:
-    self.name = name
-    self.selector = selector
-    self.variants = variants
-    self.type = None
-
-  def get_fields(self, selector_value:int) -> list[Field]:
-    """Field layout for a selector value, empty for an unknown one."""
-    return self.variants.get(selector_value, [])
-
-  def __str__(self) -> str:
-    return f"Variant {self.name} (selector={self.selector}, {len(self.variants)} variants)"
 
 #------------------------------------------------------------------------------------------- Struct
 
+def _float32(value:float) -> float:
+  """
+  Shortest decimal packing into the same float32 bits: 23.45, not 23.450000762939453.
+  Nine digits keep every bit through a read and a rewrite; past the float32 range, `value` as is.
+  Six come first: `%g` drops their trailing zeros, so a shorter decimal shows through them anyway.
+  """
+  try: bits = pack("<f", value)
+  except OverflowError: return value
+  for digits in range(6, 10):
+    short = float(f"{value:.{digits}g}")
+    try:
+      if pack("<f", short) == bits: return short
+    except OverflowError: continue # rounded past FLT_MAX, as 3.403e+38 is for 3.4028235e+38
+  return value
+
 class Struct:
   """
-  Binary struct composed of Fields, usable standalone or as a block of a Message.
+  One record of the wire: fields, bitfields and padding in their order, a dict in and out.
 
+  Its byte order is its records': a nested struct shares it, a `Message` takes it.
   `crc` is the record's own tail, a `crc` member at the end of the C struct:
   it travels with the record everywhere, a block of a `Message` included.
   Integrity of a whole message is the envelope's job, see `Frame`.
   """
-  _auto_id = 0
-  _codes: dict[int, str] = {}
-
   def __init__(
     self,
-    code:int|None = None,
-    name:str|None = None,
-    endian:Endian|None = None,
+    name:str,
+    *members:Field|Bitfield|Padding,
+    endian:Endian = Endian.little,
     crc:CRC|None = None,
     align:int = 1,
   ) -> None:
     """
     Args:
-      code: Unique across all Struct instances, required for a Message block
-      name: Auto-generated if empty
-      endian: Defaults to little
+      name: Key of its blocks in a `Message`, base of its C type
+      members: In wire order; a field's or a bitfield's name is its key in the record, one each
       crc: Appended to every record, behind its alignment padding
       align: Pad each record up to this byte multiple, 1 = none
     """
-    if code is not None:
-      existing = Struct._codes.get(code)
-      if existing is not None and existing != name:
-        raise ValueError(
-          f"Code {code} already used by struct '{existing}', "
-          f"cannot assign to '{name}'",
-        )
-      if name: Struct._codes[code] = name
-    if not name:
-      name = f"_struct_{Struct._auto_id}"
-      Struct._auto_id += 1
-    self.code: int|None = code
+    if not name: raise ValueError("A struct needs a name: it keys its blocks and names its C type")
+    if not members: raise ValueError(f"Struct '{name}' needs a member: no record is empty")
+    if align < 1: raise ValueError(f"Struct '{name}' aligns to 1 byte or more, not {align}")
+    names = set()
+    for member in members:
+      if not isinstance(member, (Field, Bitfield, Padding)):
+        got = type(member).__name__
+        raise TypeError(f"Struct '{name}' takes a Field, Bitfield or Padding, got {got}")
+      if isinstance(member, Padding): continue
+      if not member.name: raise ValueError(f"Struct '{name}' has a member with no name")
+      if member.name in names:
+        raise ValueError(f"Struct '{name}' names two members '{member.name}'")
+      names.add(member.name)
+      if isinstance(member.type, Struct) and member.type.endian != endian:
+        raise ValueError(f"Struct '{member.type.name}' nests in '{name}' of another byte order")
+    if crc and "crc" in names:
+      raise ValueError(f"Struct '{name}' keeps the name 'crc' for its crc tail")
     self.name: str = name
-    self.endian: Endian|None = endian
+    self.members: tuple[Field|Bitfield|Padding, ...] = members
+    self.endian: Endian = endian
     self.crc: CRC|None = crc
     self.align: int = align
-    self.fields: list[Field] = []
-    self.fields_by_name: dict[str, Field] = {}
-    self._bitfields: dict[str, Bitfield] = {}
-    self._unions: dict[str, Variant] = {}
-    self._paddings: list[Padding] = []
-    self._members: list = [] # declaration order, drives encode/decode
 
-  def add(self, *members) -> "Struct":
-    """Add fields, bitfields, padding or variants, chainable."""
-    for member in members:
-      if isinstance(member, Field):
-        if member.name in self.fields_by_name:
-          raise ValueError(f"Duplicate field name: {member.name}")
-        self.fields.append(member)
-        self.fields_by_name[member.name] = member
-        self._members.append(member)
-      elif isinstance(member, Bitfield):
-        self._bitfields[member.name] = member
-        self._members.append(member)
-      elif isinstance(member, Padding):
-        self._paddings.append(member)
-        self._members.append(member)
-      elif isinstance(member, Variant):
-        self._unions[member.name] = member
-        self._members.append(member)
-      else:
-        raise TypeError(f"Unknown member type: {type(member)}")
-    return self
+  def _where(self, name:str) -> str:
+    """How an error names a member: `'temp' of 'state'`."""
+    return f"'{name}' of '{self.name}'"
 
-  def get_field(self, name:str) -> Field|None:
-    """Field by name."""
-    return self.fields_by_name.get(name)
+  def _pack(self, kind:Type, name:str, raw:float) -> bytes:
+    """
+    One number in the bits of `kind`, an integer rounded to the nearest whole.
+    Truncated, `2.3` at scale 100 would go out as 229: in floating point it is 229.99999999999997.
+    A number `kind` cannot hold, `inf` or `nan` for an integer among them, is refused by name.
+    """
+    try:
+      if kind.is_integer: raw = int(round(raw))
+      return pack(self.endian.value + kind.value, raw)
+    except (PackError, OverflowError, ValueError) as e:
+      raise ValueError(f"{self._where(name)}: {e}") from None
 
-  def _get_endian(self, endian:Endian|None) -> Endian:
-    """Resolve endianness: parameter > instance > default (little)."""
-    if endian is not None: return endian
-    if self.endian is not None: return self.endian
-    return Endian.little
+  def _unpack(self, kind:Type, name:str, data:bytes, at:int) -> Any:
+    """
+    The number the bits of `kind` hold at `at`, a float32 as the shortest decimal of its bits.
+    Data ending before it is refused by the name of its member.
+    """
+    if at + calcsize(kind.value) > len(data): raise ValueError(f"{self._where(name)} is cut short")
+    raw = unpack_from(self.endian.value + kind.value, data, at)[0]
+    return _float32(raw) if kind == Type.float else raw
 
-  @staticmethod
-  def _pack(field:Field, value:float, endian:Endian) -> bytes:
-    """One value as `field` holds it; past its type's range, refused by the field's name."""
-    try: return pack(endian.value + field.type.value, value)
-    except PackError as e: raise ValueError(f"Field '{field.name}': {e}") from None
-
-  def _encode_field(self, field:Field, value:Any, endian:Endian) -> bytes:
+  def _encode_field(self, field:Field, value:Any) -> bytes:
+    """One field's bytes: a string, bytes, numbers or nested records."""
     if field.type == Type.string:
       if not isinstance(value, str):
-        raise TypeError(f"Field '{field.name}' expects str, got {type(value).__name__}")
+        raise TypeError(f"{self._where(field.name)} takes str, got {type(value).__name__}")
+      if "\0" in value:
+        raise ValueError(f"{self._where(field.name)} holds a NUL, its end on the wire")
       return value.encode("utf-8") + b"\0"
     if field.type == Type.bytes:
       if not isinstance(value, (bytes, bytearray)):
-        raise TypeError(f"Field '{field.name}' expects bytes, got {type(value).__name__}")
-      return pack(endian.value + Type.uint16.value, len(value)) + value
+        raise TypeError(f"{self._where(field.name)} takes bytes, got {type(value).__name__}")
+      return self._pack(Type.uint16, field.name, len(value)) + value
     if field.is_array:
       if not isinstance(value, (list, tuple)):
-        raise TypeError(f"Field '{field.name}' expects list/tuple, got {type(value).__name__}")
+        got = type(value).__name__
+        raise TypeError(f"{self._where(field.name)} takes a list or tuple, got {got}")
       if len(value) != field.length:
-        raise ValueError(f"Field '{field.name}' expects {field.length} elements, got {len(value)}")
-      result = b""
-      for v in value:
-        result += self._pack(field, field.encode_value(v), endian)
-      return result
-    if isinstance(value, (list, tuple)):
-      raise TypeError(f"Field '{field.name}' expects scalar, got {type(value).__name__}")
-    return self._pack(field, field.encode_value(value), endian)
+        raise ValueError(f"{self._where(field.name)} takes {field.length} items, got {len(value)}")
+    elif isinstance(value, (list, tuple)):
+      raise TypeError(f"{self._where(field.name)} takes one value, got {type(value).__name__}")
+    values = value if field.is_array else [value]
+    if isinstance(field.type, Struct): return b"".join(field.type.encode(v) for v in values)
+    return b"".join(self._pack(field.type, field.name, field._raw(v)) for v in values)
 
-  def _decode_field(self, field:Field, msg:bytes, offset:int, endian:Endian) -> tuple[Any, int]:
-    """Decode one field → `(value, next_offset)`."""
+  def _decode_field(self, field:Field, data:bytes, at:int) -> tuple[Any, int]:
+    """One field at `at` → `(value, offset behind it)`."""
     if field.type == Type.string:
-      end = msg.find(0, offset)
-      if end < 0: raise ValueError(f"Unterminated string in field '{field.name}'")
-      return msg[offset:end].decode("utf-8"), end + 1
+      end = data.find(0, at)
+      if end < 0: raise ValueError(f"{self._where(field.name)} has no NUL to end it")
+      try: return data[at:end].decode("utf-8"), end + 1
+      except UnicodeDecodeError as e:
+        raise ValueError(f"{self._where(field.name)} holds no UTF-8: {e.reason}") from None
     if field.type == Type.bytes:
-      if offset + 2 > len(msg):
-        raise ValueError(f"Incomplete length prefix for field '{field.name}'")
-      size = unpack_from(endian.value + Type.uint16.value, msg, offset)[0]
-      offset += 2
-      if offset + size > len(msg): raise ValueError(f"Incomplete data for field '{field.name}'")
-      data = msg[offset:offset + size]
-      return data, offset + size
-    if field.is_array:
-      values = []
-      for _ in range(field.length):
-        if offset + field.type.size > len(msg):
-          raise ValueError(f"Incomplete array data for field '{field.name}'")
-        raw = unpack_from(endian.value + field.type.value, msg, offset)[0]
-        values.append(field.decode_value(raw))
-        offset += field.type.size
-      return values, offset
-    if offset + field.type.size > len(msg):
-      raise ValueError(f"Incomplete data for field '{field.name}'")
-    raw = unpack_from(endian.value + field.type.value, msg, offset)[0]
-    value = field.decode_value(raw)
-    return value, offset + field.type.size
-
-  def _encode_single(self, data:dict, endian:Endian|None=None) -> bytes:
-    """Encode one record: members, alignment padding, `crc`."""
-    endian = self._get_endian(endian)
-    message = b""
-    for member in self._members:
-      if isinstance(member, Field):
-        if member.name in data: value = data[member.name]
-        elif member.optional: value = member.default
-        else: raise KeyError(f"Field '{member.name}' not found in data for struct '{self.name}'")
-        message += self._encode_field(member, value, endian)
-      elif isinstance(member, Bitfield):
-        if member.name not in data:
-          raise KeyError(f"Bitfield '{member.name}' not found in data for struct '{self.name}'")
-        packed = member.encode(data[member.name])
-        message += pack(endian.value + member.base_type.value, packed)
-      elif isinstance(member, Padding):
-        message += member.encode()
-      elif isinstance(member, Variant):
-        selector_value = data.get(member.selector)
-        if selector_value is None:
-          raise KeyError(f"Variant selector '{member.selector}' not found")
-        union_fields = member.get_fields(selector_value)
-        union_data = data.get(member.name, {})
-        for field in union_fields:
-          if field.name in union_data: value = union_data[field.name]
-          elif field.optional: value = field.default
-          else: raise KeyError(f"Variant field '{field.name}' not found in '{member.name}'")
-          message += self._encode_field(field, value, endian)
-    if self.align > 1:
-      remainder = len(message) % self.align
-      if remainder: message += b"\x00" * (self.align - remainder)
-    if self.crc: message = self.crc.encode(message)
-    return message
-
-  def _decode_single(self, msg:bytes, endian:Endian|None=None) -> tuple[dict, int]:
-    """Decode one record → `(data, bytes_consumed)`, its `crc` verified."""
-    endian = self._get_endian(endian)
-    data = {}
-    offset = 0
-    for member in self._members:
-      if isinstance(member, Field):
-        value, offset = self._decode_field(member, msg, offset, endian)
-        data[member.name] = value
-      elif isinstance(member, Bitfield):
-        if offset + member.size > len(msg):
-          raise ValueError(f"Incomplete data for bitfield '{member.name}'")
-        packed = unpack_from(endian.value + member.base_type.value, msg, offset)[0]
-        data[member.name] = member.decode(packed)
-        offset += member.size
-      elif isinstance(member, Padding):
-        offset += member.size
-      elif isinstance(member, Variant):
-        selector_value = data.get(member.selector)
-        if selector_value is None:
-          raise KeyError(f"Variant selector '{member.selector}' not found")
-        union_fields = member.get_fields(selector_value)
-        union_data = {}
-        for field in union_fields:
-          value, offset = self._decode_field(field, msg, offset, endian)
-          union_data[field.name] = value
-        data[member.name] = union_data
-    # mirrors the alignment padding added by _encode_single
-    if self.align > 1:
-      remainder = offset % self.align
-      if remainder: offset += self.align - remainder
-    if offset > len(msg): # padding and alignment skip bytes without reading them
-      raise ValueError(f"Incomplete data for struct '{self.name}': {len(msg)} of {offset} bytes")
-    if self.crc:
-      n = self.crc.width // 8
-      crc = msg[offset:offset + n]
-      if len(crc) < n or self.crc.to_int(crc) != self.crc.checksum(msg[:offset]):
-        raise ValueError(f"CRC check failed for struct '{self.name}'")
-      offset += n
-    return data, offset
-
-  def encode(self, data_list:list[dict]|dict, endian:Endian|None=None) -> bytes:
-    """Encode one record or a list of records, each with its `crc`."""
-    if isinstance(data_list, dict): data_list = [data_list]
-    return b"".join(self._encode_single(data, endian) for data in data_list)
-
-  def decode(self, message:bytes, endian:Endian|None=None) -> list[dict[str, Any]]|dict[str, Any]:
-    """Decode every record in the message, a bare dict when there is exactly one."""
-    data_list = self.records(message, endian)
-    return data_list[0] if len(data_list) == 1 else data_list
-
-  def records(self, payload:bytes, endian:Endian|None=None) -> list[dict[str, Any]]:
-    """Every record of `payload`, as a list even when there is one."""
-    data_list = []
-    while payload:
-      data, offset = self._decode_single(payload, endian)
-      if offset <= 0:
-        raise ValueError(f"Struct '{self.name}' consumes no bytes, cannot decode a stream")
-      data_list.append(data)
-      payload = payload[offset:]
-    return data_list
-
-  def block(self, records:list[dict]|dict, endian:Endian|None=None) -> bytes:
-    """
-    Records behind their block header `| code u16 | size u16 |` for a `Message`.
-    `size` counts the record bytes only; `code` is required.
-    """
-    if self.code is None: raise ValueError(f"Struct '{self.name}' needs a code for a block")
-    if isinstance(records, dict): records = [records]
-    endian = self._get_endian(endian)
-    payload = b"".join(self._encode_single(record, endian) for record in records)
-    return pack(endian.value + "HH", self.code, len(payload)) + payload
-
-  def _fixed_size(self) -> int|None:
-    """Bytes of one record before padding and `crc`; `None` when a member has no fixed size."""
-    total = 0
-    for member in self._members:
-      if isinstance(member, Field):
-        if member.type.size == 0: return None
-        total += member.type.size * (member.length if member.is_array else 1)
-      elif isinstance(member, (Bitfield, Padding)):
-        total += member.size
+      size = self._unpack(Type.uint16, field.name, data, at)
+      at += 2
+      if at + size > len(data): raise ValueError(f"{self._where(field.name)} is cut short")
+      return data[at:at + size], at + size
+    values: list[Any] = []
+    for _ in range(field.length):
+      if isinstance(field.type, Struct):
+        record, at = field.type._read(data, at)
+        values.append(record)
       else:
-        return None # a variant is as long as its selected branch
-    return total
+        values.append(field._value(self._unpack(field.type, field.name, data, at)))
+        at += calcsize(field.type.value)
+    return (values if field.is_array else values[0]), at
 
-  def export_c_header(self, guard:str|None=None) -> str:
-    """
-    Export as a C header, `guard` defaulting to `_NAME_H_`.
-
-    The struct mirrors the wire: alignment padding and the `crc` tail are members too,
-    the tail as bytes because it travels big-endian whatever the struct's own order.
-    A record of variable size cannot place them, so it says so in a comment.
-    """
-    if guard is None: guard = f"_{self.name.upper()}_H_"
-    lines = [
-      f"#ifndef {guard}",
-      f"#define {guard}",
-      "",
-      "#include <stdint.h>",
-      "",
-    ]
-    for bf in self._bitfields.values():
-      lines.append("typedef struct {")
-      for bit_name, width in bf.bits:
-        lines.append(f"  {bf.base_type.c_type} {bit_name} : {width};")
-      lines.append(f"}} {self.name}_{bf.name}_t;")
-      lines.append("")
-    lines.append("typedef struct __attribute__((packed)) {")
-    for member in self._members:
+  def _read(self, data:bytes, at:int=0) -> tuple[dict[str, Any], int]:
+    """One record at `at` → `(record, offset behind it)`, its `crc` verified."""
+    start = at
+    record: dict[str, Any] = {}
+    for member in self.members:
       if isinstance(member, Field):
-        if member.is_array:
-          lines.append(f"  {member.type.c_type} {member.name}[{member.length}];")
-        elif member.type == Type.string:
-          lines.append(f"  char {member.name}[];  // null-terminated")
-        elif member.type == Type.bytes:
-          lines.append(f"  uint16_t {member.name}_len;")
-          lines.append(f"  uint8_t {member.name}[];")
-        else:
-          comment = f"  // [{member.unit}]" if member.unit else ""
-          lines.append(f"  {member.type.c_type} {member.name};{comment}")
+        record[member.name], at = self._decode_field(member, data, at)
       elif isinstance(member, Bitfield):
-        lines.append(f"  {self.name}_{member.name}_t {member.name};")
-      elif isinstance(member, Padding):
-        lines.append(f"  uint8_t _pad[{member.size}];")
-      elif isinstance(member, Variant):
-        lines.append(f"  // Variant '{member.name}' - selector: {member.selector}")
-        lines.append("  union {")
-        for variant_id, variant_fields in member.variants.items():
-          lines.append(f"    struct {{ // variant {variant_id}")
-          for field in variant_fields:
-            lines.append(f"      {field.type.c_type} {field.name};")
-          lines.append("    };")
-        lines.append(f"  }} {member.name};")
-    fixed = self._fixed_size()
-    if fixed is None:
-      if self.align > 1 or self.crc:
-        lines.append("  // variable size: alignment padding and crc follow the record on the wire")
-    else:
-      pad = -fixed % self.align
-      if pad: lines.append(f"  uint8_t _align[{pad}];")
-      if self.crc: lines.append(f"  uint8_t crc[{self.crc.width // 8}]; // big-endian")
-    lines.append(f"}} {self.name}_t;")
-    lines.append("")
-    lines.append(f"#endif // {guard}")
-    return "\n".join(lines)
+        record[member.name] = member.decode(self._unpack(member.type, member.name, data, at))
+        at += member.size
+      else:
+        at += member.size
+    at += -(at - start) % self.align # the alignment padding `encode` adds
+    if at > len(data): # padding and alignment skip bytes without reading them
+      raise ValueError(f"Struct '{self.name}' is cut short: {len(data) - start} of {at - start}B")
+    if self.crc:
+      n = self.crc.size
+      crc = data[at:at + n]
+      if len(crc) < n or self.crc.to_int(crc) != self.crc.checksum(data[start:at]):
+        raise ValueError(f"Struct '{self.name}' fails its CRC check")
+      at += n
+    return record, at
+
+  def encode(self, record:dict) -> bytes:
+    """One record on the wire: its members, the alignment padding, then its `crc`."""
+    if not isinstance(record, dict):
+      raise TypeError(f"Struct '{self.name}' encodes a dict, got {type(record).__name__}")
+    keys = {member.name for member in self.members if not isinstance(member, Padding)}
+    unknown = record.keys() - keys # a typo would leave its field at the default, without a word
+    if unknown: raise KeyError(f"Struct '{self.name}' has no {', '.join(sorted(unknown))}")
+    data = b""
+    for member in self.members:
+      if isinstance(member, Padding):
+        data += bytes(member.size)
+        continue
+      if member.name in record: value = record[member.name]
+      elif isinstance(member, Field) and member.default is not None: value = member.default
+      else: raise KeyError(f"{self._where(member.name)} is missing from the record")
+      if isinstance(member, Bitfield):
+        data += self._pack(member.type, member.name, member.encode(value))
+      else:
+        data += self._encode_field(member, value)
+    data += bytes(-len(data) % self.align)
+    return self.crc.encode(data) if self.crc else data
+
+  def decode(self, data:bytes) -> dict[str, Any]:
+    """Exactly one record; bytes left behind it are refused, `records` reads a run of them."""
+    record, end = self._read(data)
+    if end != len(data):
+      raise ValueError(f"Struct '{self.name}' leaves {len(data) - end}B behind one record")
+    return record
+
+  def records(self, data:bytes) -> list[dict[str, Any]]:
+    """Every record of `data`, back to back, as a list even when there is one."""
+    out, at = [], 0
+    while at < len(data): # every member takes a byte or more, so every record does
+      record, at = self._read(data, at)
+      out.append(record)
+    return out
+
+  @property
+  def size(self) -> int|None:
+    """Bytes of one record, alignment tail and `crc` included; `None` when it varies."""
+    total = 0
+    for member in self.members:
+      if member.size is None: return None
+      total += member.size
+    return total + -total % self.align + (self.crc.size if self.crc else 0)
+
+  def dtype(self) -> Any:
+    """
+    numpy dtype of one record, every byte of it: padding, the alignment tail and `crc` included.
+    Raw values, before `scale` and `offset`: `np.frombuffer(data, s.dtype())` reads `encode`.
+    A string or bytes varies in size, so it is refused.
+    """
+    try: import numpy as np
+    except ModuleNotFoundError as e:
+      if not absent(e, "numpy"): raise
+      raise MissingExtra("Install with: pip install xaeian[cstruct]") from e
+    names, formats, offsets, at = [], [], [], 0
+    for member in self.members:
+      if isinstance(member, Padding):
+        at += member.size # a gap of the dtype
+        continue
+      if member.size is None:
+        raise ValueError(f"{self._where(member.name)} varies in size: no dtype holds it")
+      if isinstance(member.type, Struct): kind = member.type.dtype()
+      else: kind = self.endian.value + member.type.value
+      count = member.length if isinstance(member, Field) else 1
+      names.append(member.name)
+      formats.append((kind, (count,)) if count > 1 else kind)
+      offsets.append(at)
+      at += member.size
+    at += -at % self.align
+    if self.crc:
+      names.append("crc")
+      formats.append(f">u{self.crc.size}") # big-endian whatever the record's order
+      offsets.append(at)
+      at += self.crc.size
+    return np.dtype({"names": names, "formats": formats, "offsets": offsets, "itemsize": at})
+
+  def export_c_header(self, path:str|None=None, prefix:str="", extern:dict|None=None) -> str:
+    """
+    C header mirroring this record: its typedef, nested ones first, every size and offset asserted.
+    `path` is the file's logical path, its first line and its guard.
+    `prefix` and `extern` work as in `Message.export_c_header`.
+    """
+    if self.endian == Endian.big:
+      raise ValueError(f"Struct '{self.name}' is big-endian: a C struct holds the target's order")
+    header = _CHeader(prefix, extern)
+    header.collect(self)
+    return header.render(path, _guard(path, self.name))
 
   def export_doc(self) -> str:
     """Export as a Markdown field table."""
-    lines = [f"# Struct: {self.name}", ""]
-    if self.code is not None:
-      lines.append(f"**Code:** 0x{self.code:04X}")
-      lines.append("")
-    lines.append("## Fields")
-    lines.append("")
+    lines = [f"# Struct: {self.name}", "", "## Fields", ""]
     lines.append("| Name | Type | Unit | Description |")
     lines.append("|------|------|------|-------------|")
-    for member in self._members:
+    for member in self.members:
       if isinstance(member, Field):
-        type_str = member.type.name
-        if member.is_array: type_str += f"[{member.length}]"
-        unit = member.unit or "-"
-        desc = ""
-        if member.scale != 1: desc += f"scale={member.scale} "
-        if member.offset: desc += f"offset={member.offset} "
-        if member.optional: desc += "optional "
-        lines.append(f"| {member.name} | {type_str} | {unit} | {desc.strip() or '-'} |")
+        kind = member.type.name + (f"[{member.length}]" if member.is_array else "")
+        notes = [member.doc] if member.doc else []
+        if member.scale != 1: notes.append(f"scale={member.scale}")
+        if member.offset: notes.append(f"offset={member.offset}")
+        if member.default is not None: notes.append(f"default={member.default}")
+        note = " ".join(notes) or "-"
+        lines.append(f"| {member.name} | {kind} | {member.unit or '-'} | {note} |")
       elif isinstance(member, Bitfield):
-        bits_desc = ", ".join([f"{n}:{w}" for n, w in member.bits])
-        lines.append(f"| {member.name} | bitfield | - | {bits_desc} |")
-      elif isinstance(member, Padding):
+        bits = ", ".join(f"{bit}:{width}" for bit, width in member.bits.items())
+        lines.append(f"| {member.name} | bitfield | - | {bits} |")
+      else:
         lines.append(f"| _padding_ | pad[{member.size}] | - | alignment |")
-      elif isinstance(member, Variant):
-        lines.append(f"| {member.name} | variant | - | selector={member.selector} |")
     return "\n".join(lines)
 
-  def __iter__(self) -> Iterator[Field]:
-    return iter(self.fields)
-
-  def __len__(self) -> int:
-    return len(self.fields)
-
-  def __getitem__(self, key:int|str) -> Field:
-    if isinstance(key, int): return self.fields[key]
-    return self.fields_by_name[key]
-
-  def __str__(self) -> str:
-    if self.code is not None: return f"Struct {self.code}:{self.name}"
-    return f"Struct {self.name}"
-
   def __repr__(self) -> str:
-    return f"Struct(code={self.code!r}, name={self.name!r}, fields={len(self.fields)})"
+    return f"Struct({self.name!r})"
 
 #--------------------------------------------------------------------------------------------- Wire
 
 class Message:
   """
-  Body of a frame: blocks of several structs, each one `| code u16 | size u16 | records |`.
+  Body of a frame: blocks of records under codes, each one `| code u16 | size u16 | records |`.
+  The code is the message's own: it picks the struct, so two layouts are two codes.
   A block is read out of exactly its `size` bytes, so a header that lies is refused
   rather than left to shift everything after it. Integrity belongs to `Frame`, the envelope.
+  Bytes that do not read raise `ValueError`, an unknown code included.
   """
   BLOCK_HEAD = 4 # code and size
 
-  def __init__(self, *structs:Struct, endian:Endian|None=Endian.little) -> None:
+  def __init__(self, structs:dict[int, Struct]) -> None:
     """
     Args:
-      structs: Each must have a `code` set
-      endian: Applied to block headers and to every payload, overriding per-struct endian
+      structs: Block code → its struct; names unique, one byte order for all, the message's own
     """
-    self.structs: tuple[Struct, ...] = structs
-    self.structs_by_code: dict[int, Struct] = {}
-    self.structs_by_name: dict[str, Struct] = {}
-    for struct in self.structs:
-      if struct.code is None:
-        raise ValueError(f"Struct '{struct.name}' must have a code for use in Message")
-      self.structs_by_code[struct.code] = struct
-      self.structs_by_name[struct.name] = struct
-    self.endian: Endian = endian or Endian.little
+    self.structs: dict[int, Struct] = dict(structs)
+    self._codes: dict[str, int] = {}
+    for code, struct in self.structs.items():
+      if not isinstance(code, Integral):
+        raise TypeError(f"Code {code!r} of '{struct.name}' is no integer")
+      if not 0 <= code <= 0xFFFF: raise ValueError(f"Code {code} of '{struct.name}' is no uint16")
+      if struct.name in self._codes:
+        raise ValueError(f"Two structs named '{struct.name}' in one message")
+      self._codes[struct.name] = code
+    orders = {struct.endian for struct in self.structs.values()}
+    if len(orders) > 1:
+      raise ValueError("A message has one byte order: its structs mix big and little")
+    self.endian: Endian = orders.pop() if orders else Endian.little
 
-  def encode(self, data_dict:dict[str, dict|list[dict]]) -> bytes:
-    """Encode `{struct_name: record or records}` into one body, a block per name."""
+  def encode(self, data:dict[str, list[dict]]) -> bytes:
+    """`{struct_name: [records]}` into one body, a block per name."""
+    if not isinstance(data, dict):
+      raise TypeError(f"A message encodes a dict of record lists, got {type(data).__name__}")
     body = b""
-    for struct_name, records in data_dict.items():
-      if struct_name not in self.structs_by_name: raise KeyError(f"Unknown struct: {struct_name}")
-      body += self.structs_by_name[struct_name].block(records, self.endian)
+    for name, records in data.items():
+      if name not in self._codes: raise KeyError(f"Message has no struct '{name}'")
+      if not isinstance(records, (list, tuple)):
+        raise TypeError(f"Records of '{name}' go in a list, got {type(records).__name__}")
+      code = self._codes[name]
+      payload = b"".join(self.structs[code].encode(record) for record in records)
+      if len(payload) > 0xFFFF:
+        raise ValueError(f"Block of '{name}' holds {len(payload)}B, its uint16 size counts 65535")
+      body += pack(self.endian.value + "HH", code, len(payload)) + payload
     return body
 
   def decode(self, body:bytes) -> dict[str, list[dict]]:
-    """Decode a body → `{struct_name: records}`, a list per name even where it holds one."""
-    data_dict: dict[str, list[dict]] = {}
-    while body:
-      if len(body) < self.BLOCK_HEAD: raise ValueError("Incomplete block header")
-      code, size = unpack_from(self.endian.value + "HH", body, 0)
-      body = body[self.BLOCK_HEAD:]
-      if code not in self.structs_by_code: raise KeyError(f"Unknown struct code: {code}")
-      if size > len(body):
-        raise ValueError(f"Block declares {size} bytes, {len(body)} left in the message")
-      struct = self.structs_by_code[code]
-      block, body = body[:size], body[size:]
-      data_dict.setdefault(struct.name, []).extend(struct.records(block, self.endian))
-    return data_dict
+    """A body → `{struct_name: [records]}`."""
+    data: dict[str, list[dict]] = {}
+    at = 0
+    while at < len(body):
+      if at + self.BLOCK_HEAD > len(body): raise ValueError("Block header is cut short")
+      code, size = unpack_from(self.endian.value + "HH", body, at)
+      at += self.BLOCK_HEAD
+      if code not in self.structs: raise ValueError(f"Message has no block code {code}")
+      if at + size > len(body):
+        raise ValueError(f"Block declares {size}B, {len(body) - at}B left in the message")
+      struct = self.structs[code]
+      data.setdefault(struct.name, []).extend(struct.records(body[at:at + size]))
+      at += size
+    return data
 
-  def get_struct(self, tag:int|str) -> Struct:
-    """Struct by code (int) or name (str)."""
-    if isinstance(tag, int): return self.structs_by_code[tag]
-    return self.structs_by_name[tag]
+  def export_c_header(self, path:str|None=None, prefix:str="", extern:dict|None=None) -> str:
+    """
+    C header of the whole body: block codes, the block header, every struct and its checks.
+    `prefix` names the module the C way: `REC` gives `REC_CODE_SAMPLE` and `REC_Sample_t`.
+    `extern` maps a struct to the `(type, header)` already defining it in C:
+    that header is included and the type checked, never defined twice.
+    """
+    if not prefix: raise ValueError("A message header names its codes after a module: pass prefix")
+    if self.endian == Endian.big:
+      raise ValueError("The message is big-endian: a C struct holds the target's order")
+    header = _CHeader(prefix, extern)
+    for struct in self.structs.values(): header.collect(struct)
+    return header.render(path, _guard(path, prefix), self)
 
-  def __iter__(self) -> Iterator[Struct]:
-    return iter(self.structs)
-
-  def __len__(self) -> int:
-    return len(self.structs)
-
-  def __getitem__(self, key:int|str) -> Struct:
-    return self.get_struct(key)
-
-Body = TypeVar("Body", bytes, dict)
-"""What a `Frame` carries: raw bytes, or the dict of a `Message`."""
-
-class Frame(Generic[Body]):
+class Frame:
   """
-  Envelope of one message on a raw byte link: `| AA 55 | len u16 | body | crc |`.
+  Envelope of one body on a raw byte link: `| AA 55 | len u16 | body | crc |`.
   `len` counts body and CRC, the CRC covers the body: the mirror of `FRAME_t` in C.
+  The body is bytes, a `Message`'s for one; the caller joins the two layers,
+  so a body its message cannot read stops nothing behind it.
 
-  Given a `Message`, `encode` takes its dict and `feed` yields dicts; bare, both move bytes.
-  `Body` follows: `Frame()` is a `Frame[bytes]`, `Frame(message)` a `Frame[dict]`.
   `feed` walks a stream and yields every frame that verifies.
   The sync pair can occur inside data,
   so a frame that fails is dropped from the byte behind its first sync byte
@@ -766,27 +577,8 @@ class Frame(Generic[Body]):
   SYNC = b"\xAA\x55"
   FRAME_HEAD = 4 # sync pair and length
 
-  @overload
-  def __init__(
-    self:"Frame[bytes]",
-    message:None = None,
-    *,
-    crc:CRC|None = crc32_iso,
-    limit:int = 1024,
-    endian:Endian = Endian.little,
-  ) -> None: ...
-  @overload
-  def __init__(
-    self:"Frame[dict]",
-    message:Message,
-    *,
-    crc:CRC|None = crc32_iso,
-    limit:int = 1024,
-    endian:Endian = Endian.little,
-  ) -> None: ...
   def __init__(
     self,
-    message:Message|None = None,
     *,
     crc:CRC|None = crc32_iso,
     limit:int = 1024,
@@ -794,12 +586,12 @@ class Frame(Generic[Body]):
   ) -> None:
     """
     Args:
-      message: What a body is made of; `None` carries raw bytes
       crc: Appended behind the body, `None` = none
-      limit: Longest body accepted [B], a longer `len` is structural nonsense
-      endian: Byte order of the length field
+      limit: Longest body accepted [B], at most 65535 with the crc; a longer `len` is noise
+      endian: Order of the length field, the envelope's own
     """
-    self.message: Message|None = message
+    if not 0 <= limit <= 0xFFFF - (crc.size if crc else 0):
+      raise ValueError(f"A body of {limit}B and its crc do not fit the uint16 length")
     self.crc: CRC|None = crc
     self.limit: int = limit
     self.endian: Endian = endian
@@ -808,31 +600,26 @@ class Frame(Generic[Body]):
     self._buf = bytearray()
 
   @property
-  def crc_size(self) -> int:
-    """Bytes of the CRC behind each body, 0 without one."""
-    return self.crc.width // 8 if self.crc else 0
-
-  @property
   def pending(self) -> int:
     """Bytes held back: a frame still on its way, or a sync pair split by the chunk."""
     return len(self._buf)
 
-  def encode(self, data:Body) -> bytes:
+  def encode(self, body:bytes) -> bytes:
     """
-    Frame one message, or raw bytes, for the wire.
+    One body framed for the wire.
 
     A body over `limit` raises: the far end would drop it as nonsense and count an error,
     so this is the one place that can still say what went wrong.
     """
-    body = self.message.encode(data) if self.message else data
     if len(body) > self.limit:
-      raise ValueError(f"body of {len(body)}B over the {self.limit}B limit")
+      raise ValueError(f"Body of {len(body)}B over the {self.limit}B limit")
     if self.crc: body = self.crc.encode(body)
     return self.SYNC + pack(self._len, len(body)) + body
 
-  def feed(self, data:bytes) -> Iterator[Body]:
-    """Take a stretch of the stream, yield every complete frame in it: a dict, or raw bytes."""
+  def feed(self, data:bytes) -> Iterator[bytes]:
+    """Take a stretch of the stream, yield the body of every complete frame in it."""
     self._buf += data
+    tail = self.crc.size if self.crc else 0
     while True:
       start = self._buf.find(self.SYNC)
       if start < 0:
@@ -844,32 +631,293 @@ class Frame(Generic[Body]):
       if len(self._buf) < self.FRAME_HEAD: return
       length = unpack_from(self._len, self._buf, 2)[0]
       total = self.FRAME_HEAD + length
-      if self.crc_size <= length <= self.limit + self.crc_size:
+      if tail <= length <= self.limit + tail:
         if len(self._buf) < total: return # the rest is still on the wire
-        body = self._body(bytes(self._buf[self.FRAME_HEAD:total]))
+        framed = bytes(self._buf[self.FRAME_HEAD:total])
+        body = self.crc.decode(framed) if self.crc else framed
         if body is not None:
           del self._buf[:total]
-          yield self.message.decode(body) if self.message else body
+          yield body
           continue
       self.errors += 1
       del self._buf[:1] # the pair was data, so the hunt goes on from behind its first byte
-
-  def _body(self, framed:bytes) -> bytes|None:
-    """The body of one candidate frame, `None` when its CRC says the bytes are not one."""
-    return self.crc.decode(framed) if self.crc else framed
 
   def reset(self) -> None:
     """Drop what is under assembly, the link is gone."""
     self._buf.clear()
 
+#----------------------------------------------------------------------------------------- C header
+
+_C_NAME = re.compile(r"(?!_[A-Z_])[A-Za-z_][A-Za-z0-9_]*") # `_X` and `__x` are the compiler's
+_C_KEYWORDS = frozenset(( # C11, C23 that GCC takes by default since 15, GNU `asm`
+  "alignas alignof asm auto bool break case char const constexpr continue default do double else "
+  "enum extern false float for goto if inline int long nullptr register restrict return short "
+  "signed sizeof static static_assert struct switch thread_local true typedef typeof "
+  "typeof_unqual union unsigned void volatile while"
+).split())
+_C_MACROS = re.compile( # what `<stddef.h>` and `<stdint.h>` define without arguments
+  r"NULL|(U?INT(_LEAST|_FAST)?(8|16|32|64)|U?INT(PTR|MAX)"
+  r"|PTRDIFF|SIZE|SIG_ATOMIC|WCHAR|WINT)_(MIN|MAX|WIDTH)",
+)
+_C_TYPES = re.compile( # the types they define, so a struct of the same name is a second one
+  r"(u?int(_least|_fast)?(8|16|32|64)|u?int(ptr|max)|size|ptrdiff|wchar|max_align|nullptr)_t",
+)
+
+def _c_name(name:str) -> bool:
+  """`True` for an identifier C takes as written: no keyword, nothing reserved or defined."""
+  if name in _C_KEYWORDS or _C_MACROS.fullmatch(name): return False
+  return bool(_C_NAME.fullmatch(name))
+
+def _separator(name:str="") -> str:
+  """A `cstyle` separator: 99 characters, the name at its end."""
+  label = f" {name}" if name else ""
+  return "//" + "-" * (97 - len(label)) + label
+
+def _guard(path:str|None, name:str) -> str:
+  """Include guard from the file's name, else from `name`: `diag/rec_wire.h` → `REC_WIRE_H_`."""
+  file = path.replace("\\", "/").rsplit("/", 1)[-1] if path else f"{name}.h"
+  guard = re.sub(r"[^A-Za-z0-9]", "_", file).upper() + "_"
+  if not _c_name(guard): raise ValueError(f"No include guard comes from '{file}'")
+  return guard
+
+def _assert(test:str, says:str) -> str:
+  """
+  One `_Static_assert`, its message saying what the wire holds.
+  Past the 99 characters of `cstyle` the message goes on a line of its own.
+  """
+  line = f'_Static_assert({test}, "{says} on the wire");'
+  if len(line) <= 99: return line
+  return f'_Static_assert({test},\n  "{says} on the wire");'
+
+class _Row(NamedTuple):
+  """One member of a C struct: its declaration and note, its name, and where it sits."""
+  decl: str
+  note: str
+  name: str
+  offset: int
+  align: int
+
+class _CHeader:
+  """
+  C mirror of the wire: a typedef per struct, nested ones first, every size and offset asserted.
+
+  `prefix` names the module the C way: `REC` gives `REC_Sample_t` and `REC_CODE_SAMPLE`.
+  `extern` maps a struct to the `(type, header)` already defining it in C:
+  that header is included and the type checked, never defined twice.
+  """
+  def __init__(self, prefix:str, extern:dict|None) -> None:
+    self.prefix = prefix
+    self.extern: dict[Struct, tuple[str, str]] = extern or {}
+    self.block_type = f"{prefix}_Block_t" # header of every block of a `Message`
+    self.defined: list[Struct] = [] # typedefs written here, a nested one before its user
+    self.included: list[Struct] = [] # from `extern`, checked only
+    names = [kind for kind, _ in self.extern.values()] + ([prefix] if prefix else [])
+    bad = [name for name in names if not _c_name(name)]
+    if bad: raise ValueError(f"No C names: {', '.join(bad)}")
+
+  def collect(self, struct:Struct) -> None:
+    """Take `struct` and the structs nested in it, each once."""
+    if struct in self.defined or struct in self.included: return
+    self._refuse(struct)
+    if struct in self.extern:
+      self.included.append(struct)
+      return
+    for member in struct.members:
+      if isinstance(member, Field) and isinstance(member.type, Struct): self.collect(member.type)
+    self.defined.append(struct)
+
+  def _refuse(self, struct:Struct) -> None:
+    """Refuse what no C struct can mirror, before a line is written."""
+    names = [struct.name]
+    for member in struct.members:
+      if isinstance(member, Field): names.append(member.name)
+      elif isinstance(member, Bitfield): names += [member.name, *member.bits]
+    bad = [name for name in names if not _c_name(name)]
+    if bad: raise ValueError(f"No C names in '{struct.name}': {', '.join(bad)}")
+    last = len(struct.members) - 1
+    for i, member in enumerate(struct.members):
+      if not isinstance(member, Field) or member.size is not None: continue
+      where = struct._where(member.name)
+      if i < last or isinstance(member.type, Struct):
+        raise ValueError(f"{where} varies in size: C takes only a last string or bytes")
+      if i == 0 and member.type == Type.string:
+        raise ValueError(f"{where} stands alone: C wants a member before a flexible array")
+    members = [row.name for row in self.members(struct)] # padding and lengths named here too
+    twice = sorted({name for name in members if members.count(name) > 1})
+    if twice: raise ValueError(f"C members of '{struct.name}' share a name: {', '.join(twice)}")
+
+  def code(self, struct:Struct) -> str:
+    """Define of the block code of `struct`: `REC_CODE_SAMPLE`."""
+    return f"{self.prefix}_CODE_{struct.name.upper()}"
+
+  @staticmethod
+  def c_type(kind:Type) -> str:
+    """C type of a number: `uint16` is `uint16_t`, `float` and `double` keep their names."""
+    return f"{kind.name}_t" if kind.is_integer else kind.name
+
+  def name(self, struct:Struct, bitfield:str="") -> str:
+    """C type of `struct` or its bitfield: `REC_State_t`, `REC_StateFlags_t`, `state_flags_t`."""
+    if struct in self.extern and not bitfield: return self.extern[struct][0]
+    words = f"{struct.name}_{bitfield}" if bitfield else struct.name
+    if not self.prefix: return f"{words}_t"
+    # an acronym keeps its capitals: `FOC_dump` is `FOCDump`, never `FocDump`
+    camel = "".join(word[:1].upper() + word[1:] for word in words.split("_"))
+    return f"{self.prefix}_{camel}_t"
+
+  @staticmethod
+  def note(field:Field) -> str:
+    """`doc`, then `[unit]` only where C holds the value in it: scaled, it holds raw counts."""
+    raw = field.scale == 1 and not field.offset
+    unit = f"[{field.unit}]" if field.unit and raw else ""
+    return " ".join(part for part in (field.doc, unit) if part)
+
+  def members(self, struct:Struct) -> list[_Row]:
+    """A row per C member: fields, bitfields and padding, then the alignment tail and `crc`."""
+    rows: list[_Row] = []
+    at = pads = 0
+    for member in struct.members:
+      if isinstance(member, Bitfield):
+        kind = self.name(struct, member.name)
+        rows.append(_Row(f"{kind} {member.name};", "", member.name, at, member.size))
+        at += member.size
+      elif isinstance(member, Padding):
+        pads += 1
+        rows.append(_Row(f"uint8_t _pad{pads}[{member.size}];", "", f"_pad{pads}", at, 1))
+        at += member.size
+      elif member.type == Type.string:
+        rows.append(_Row(f"char {member.name}[];", member.doc, member.name, at, 1))
+      elif member.type == Type.bytes:
+        rows.append(_Row(f"uint16_t {member.name}_len;", "", f"{member.name}_len", at, 2))
+        rows.append(_Row(f"uint8_t {member.name}[];", member.doc, member.name, at + 2, 1))
+      else:
+        if isinstance(member.type, Struct): kind = self.name(member.type)
+        else: kind = self.c_type(member.type)
+        dims = f"[{member.length}]" if member.is_array else ""
+        note, align = self.note(member), self.alignment(member.type)
+        rows.append(_Row(f"{kind} {member.name}{dims};", note, member.name, at, align))
+        at += member.size or 0
+    if struct.size is not None:
+      tail = -at % struct.align
+      if tail: rows.append(_Row(f"uint8_t _align[{tail}];", "", "_align", at, 1))
+      if struct.crc:
+        rows.append(_Row(f"uint8_t crc[{struct.crc.size}];", "big-endian", "crc", at + tail, 1))
+    return rows
+
+  def alignment(self, kind:Type|Struct) -> int:
+    """C alignment of `kind`: a number its size, a natural struct its strictest member, else 1."""
+    if isinstance(kind, Type): return kind.size or 1
+    if not self.natural(kind): return 1
+    return max((row.align for row in self.members(kind)), default=1)
+
+  def natural(self, struct:Struct) -> bool:
+    """Every member at a multiple of its alignment, the record at a multiple of the strictest."""
+    rows = self.members(struct)
+    if any(row.offset % row.align for row in rows): return False
+    strictest = max((row.align for row in rows), default=1)
+    return struct.size is None or struct.size % strictest == 0
+
+  def bitfields(self, struct:Struct) -> list[str]:
+    """A typedef per bitfield, one base type each, so every compiler lays it out alike."""
+    lines = []
+    for member in struct.members:
+      if not isinstance(member, Bitfield): continue
+      kind = self.c_type(member.type)
+      lines.append("typedef struct {")
+      lines += [f"  {kind} {bit} : {width};" for bit, width in member.bits.items()]
+      lines += [f"}} {self.name(struct, member.name)};", ""]
+    return lines
+
+  def typedef(self, struct:Struct) -> list[str]:
+    """The struct itself, packed only where its layout is not the natural one."""
+    rows = self.members(struct)
+    column = 4 + max((len(row.decl) for row in rows), default=0) # a run of notes, one column
+    packed = "" if self.natural(struct) else " __attribute__((packed))"
+    lines = [f"typedef struct{packed} {{"]
+    for row in rows:
+      decl = f"  {row.decl}"
+      lines.append(f"{decl.ljust(column)}// {row.note}" if row.note else decl)
+    if struct.size is None and (struct.align > 1 or struct.crc):
+      lines.append("  // variable size: alignment padding and crc follow the record on the wire")
+    lines.append(f"}} {self.name(struct)};")
+    return lines
+
+  def checks(self, struct:Struct) -> list[str]:
+    """
+    `_Static_assert` on the size of `struct` and its bitfields, and on every member's offset.
+    A type from `extern` is checked by the names the schema gives it: its filler is its own.
+    """
+    name, extern = self.name(struct), struct in self.extern
+    given = {member.name for member in struct.members if not isinstance(member, Padding)}
+    lines = []
+    if not extern:
+      for member in struct.members:
+        if not isinstance(member, Bitfield): continue
+        kind = self.name(struct, member.name)
+        lines.append(_assert(f"sizeof({kind}) == {member.size}", f"{kind} is {member.size}B"))
+    if struct.size is not None:
+      lines.append(_assert(f"sizeof({name}) == {struct.size}", f"{name} is {struct.size}B"))
+    for row in self.members(struct):
+      if extern and row.name not in given: continue
+      test = f"offsetof({name}, {row.name}) == {row.offset}"
+      lines.append(_assert(test, f"{name}.{row.name} at {row.offset}"))
+    return lines
+
+  def block(self) -> list[str]:
+    """Header in front of every block of a `Message`."""
+    return [
+      "typedef struct {",
+      f"  uint16_t code;  // `{self.prefix}_CODE_*` of the records behind",
+      "  uint16_t size;  // bytes of the records, the header not counted",
+      f"}} {self.block_type};",
+    ]
+
+  def defines(self, message:Message|None) -> list[str]:
+    """Every name the header defines or checks: codes, the block, struct and bitfield types."""
+    names = [self.name(struct) for struct in self.included]
+    if message:
+      names.append(self.block_type)
+      names += [self.code(struct) for struct in message.structs.values()]
+    for struct in self.defined:
+      names.append(self.name(struct))
+      for member in struct.members:
+        if isinstance(member, Bitfield): names.append(self.name(struct, member.name))
+    return names
+
+  def render(self, path:str|None, guard:str, message:Message|None=None) -> str:
+    """The header in `cstyle` order: path, guard, includes, constants, types, structs, checks."""
+    names = self.defines(message) # the includes have defined their own types once already
+    twice = sorted({name for name in names if names.count(name) > 1 or _C_TYPES.fullmatch(name)})
+    if twice: raise ValueError(f"The header would define {', '.join(twice)} twice")
+    out = [f"// {path}", ""] if path else []
+    out += ["// Generated by `xaeian.cstruct`: edit the schema, not this file", ""]
+    out += [f"#ifndef {guard}", f"#define {guard}", ""]
+    out += ["#include <stddef.h>", "#include <stdint.h>", ""]
+    headers = sorted({self.extern[struct][1] for struct in self.included})
+    if headers: out += [f'#include "{header}"' for header in headers] + [""]
+    checks = []
+    if message:
+      out += [_separator("Constants"), ""]
+      out += [f"#define {self.code(struct)} {code}" for code, struct in message.structs.items()]
+      out.append("")
+      block, size = self.block_type, Message.BLOCK_HEAD
+      checks.append(_assert(f"sizeof({block}) == {size}", f"{block} is {size}B"))
+    types = [*self.block(), ""] if message else []
+    for struct in self.defined: types += self.bitfields(struct)
+    if types: out += [_separator("Types"), "", *types]
+    out += [_separator("Structure"), ""]
+    for struct in self.defined: out += [*self.typedef(struct), ""]
+    for struct in self.included + self.defined: checks += self.checks(struct)
+    out += [_separator("Checks"), "", *checks, "", _separator(), "#endif", ""]
+    return "\n".join(out)
+
 #-------------------------------------------------------------------------------------------- Tests
 
 if __name__ == "__main__":
-  sensor = Struct(name="sensor", endian=Endian.little, crc=crc32_iso)
-  sensor.add(
+  sensor = Struct("sensor",
     Field(Type.uint32, "timestamp", "s"),
     Bitfield("flags", [("enabled", 1), ("error", 1), ("mode", 6)]),
     Field(Type.float, "temperature", "°C"),
+    crc=crc32_iso,
   )
   data = {
     "timestamp": 1234567890,

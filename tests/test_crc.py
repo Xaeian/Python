@@ -62,7 +62,7 @@ def bytes_int_round_trip(crc):
 
 @pytest.mark.parametrize("crc, n", [(crc8_smbus, 1), (crc16_kermit, 2), (crc32_iso, 4)])
 def to_bytes_length_follows_width(crc, n):
-  assert len(crc.to_bytes(crc.checksum(CHECK))) == n
+  assert len(crc.to_bytes(crc.checksum(CHECK))) == crc.size == n
 
 def to_bytes_is_big_endian():
   assert crc16_kermit.to_bytes(0x1234) == b"\x12\x34"
@@ -105,7 +105,7 @@ def decode_rejects_corrupted_crc():
 @pytest.mark.parametrize("crc", [crc8_smbus, crc16_kermit, crc32_iso])
 def decode_rejects_frame_shorter_than_crc(crc):
   assert crc.decode(b"") is None
-  assert crc.decode(b"\x00" * (crc.width // 8 - 1)) is None
+  assert crc.decode(b"\x00" * (crc.size - 1)) is None
 
 #-------------------------------------------------------------------------------- parameter effects
 
@@ -132,9 +132,10 @@ def custom_crc_from_docstring_example():
 #------------------------------------------------------------------------------- real-world vectors
 
 @pytest.mark.parametrize("data", [b"", b"The quick brown fox", bytes(range(256))])
-def crc32_iso_equals_zlib(data):
-  # `crc32_iso` is the standard CRC-32 - it must agree with the stdlib bit-for-bit
-  assert crc32_iso.checksum(data) == zlib.crc32(data)
+def crc32_iso_computes_in_c_what_the_table_computes(data):
+  """`crc32_iso` takes its value from `zlib`; the table with the same parameters must agree."""
+  table = CRC(32, 0x04C11DB7, 0xFFFFFFFF, True, True, 0xFFFFFFFF, False)
+  assert crc32_iso.checksum(data) == table.checksum(data) == zlib.crc32(data)
 
 def modbus_rtu_request_frame():
   # "read 10 holding registers from slave 1" - the canonical Modbus textbook frame

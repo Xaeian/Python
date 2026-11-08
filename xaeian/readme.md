@@ -141,53 +141,65 @@ my_crc = CRC(16, 0x8005, 0xFFFF, True, True, 0x0000, False)
 Binary struct serialization _(C-like)_.
 
 ```py
-from xaeian.cstruct import Struct, Field, Bitfield, Padding, Type, Endian
-from xaeian.crc import crc32_iso
+from xaeian.cstruct import Struct, Field, Bitfield, Padding, Type
 
-sensor = Struct(name="sensor", endian=Endian.little, crc=crc32_iso) # crc: the record's tail
-sensor.add(
-  Field(Type.uint32, "timestamp", "s"),
-  Bitfield("flags", [("enabled", 1), ("error", 1), ("mode", 6)]),
-  Padding(3),
-  Field(Type.float, "temperature", "°C"),
+point = Struct("point", Field(Type.int16, "x", "mm"), Field(Type.int16, "y", "mm"))
+sample = Struct("sample",
+  Field(Type.uint32, "time", "us"),
+  Field(point, "pos", length=2, doc="start and end"),
+  Field(Type.int16, "temp", "°C", scale=10, doc="board temperature"),
+  Bitfield("flags", [("mode", 4), ("fault", 4)]),
+  Padding(1),
 )
-
-data = {
-  "timestamp": 1234567890,
-  "flags": {"enabled": 1, "error": 0, "mode": 5},
-  "temperature": 23.5,
-}
-encoded = sensor.encode(data)
-decoded = sensor.decode(encoded)
-sensor.export_c_header()
-sensor.export_doc()
+data = sample.encode({
+  "time": 1200,
+  "pos": [{"x": 1, "y": -2}, {"x": 3, "y": 4}],
+  "temp": 23.4,
+  "flags": {"mode": 3, "fault": 9},
+})
+sample.decode(data)       # the dict back, bytes behind it refused
+sample.records(data * 2)  # a run of records, always a list
+sample.size               # 16, None when a string or bytes makes it vary
+sample.dtype()            # numpy, raw values: np.frombuffer(data, sample.dtype())
+sample.export_doc()       # Markdown table
 ```
 
-On a wire, three layers, each with one `crc` that is its own tail:
-`Struct` is one record, `Message` puts blocks of several structs into one body
-(`| code u16 | size u16 | records |` each),
-`Frame` is the envelope (`| AA 55 | len u16 | body | crc |`) that gives a byte stream
-its boundaries and integrity.
-The mirror of `FRAME_t` on the C side.
+The C header mirrors the wire byte for byte, every size and offset under `_Static_assert`.
+Names of the C side come at export: the module prefix, and `extern` for a type C already defines.
 
-A stream, serial or TCP, takes the envelope; a transport with boundaries, UDP or MQTT,
-takes the message alone.
+```py
+from xaeian import FILE
+from xaeian.cstruct import Message
+
+path = "dev/link_wire.h"
+message = Message({1: sample})
+FILE.save(path, message.export_c_header(path, prefix="LINK", extern={point: ("GEO_Point_t", "geo.h")}))
+```
+
+On a wire, three layers, joined by you:
+`Struct` is one record, its `crc` a tail that travels with it,
+`Message` puts blocks of records under codes into one body (`| code u16 | size u16 | records |` each),
+`Frame` is the envelope (`| AA 55 | len u16 | body | crc |`) that gives a byte stream its boundaries and integrity,
+the mirror of `FRAME_t` on the C side.
+Byte order of the records belongs to `Struct`, and a message takes it; the frame orders its length itself.
+
+A stream, serial or TCP, takes the envelope; a transport with boundaries, UDP or MQTT, takes the message alone.
 
 ```py
 from xaeian.cstruct import Struct, Field, Type, Message, Frame
 
-pos = Struct(code=1, name="pos").add(Field(Type.int16, "x"), Field(Type.int16, "y"))
-temp = Struct(code=2, name="temp").add(Field(Type.float, "t"))
-link = Frame(Message(pos, temp), limit=256)
+pos = Struct("pos", Field(Type.int16, "x"), Field(Type.int16, "y"))
+temp = Struct("temp", Field(Type.float, "t"))
+message = Message({1: pos, 2: temp})
+link = Frame(limit=256)
 
-wire = link.encode({"pos": [{"x": 1, "y": 2}, {"x": 3, "y": 4}], "temp": {"t": 21.5}})
-for data in link.feed(wire): # any stretch of the stream, frames cut anywhere
-  data # {"pos": [...], "temp": [{"t": 21.5}]}, a list per name
-link.errors # frames dropped on length or CRC
-link.pending # bytes held back, a frame still arriving
+wire = link.encode(message.encode({"pos": [{"x": 1, "y": 2}], "temp": [{"t": 21.5}]}))
+for body in link.feed(wire):  # any stretch of the stream, frames cut anywhere
+  message.decode(body)        # {"pos": [...], "temp": [{"t": 21.5}]}, ValueError for a foreign one
+link.errors                   # frames dropped on length or CRC
+link.pending                  # bytes held back, a frame still arriving
 
-Message(pos, temp).encode({...}) # a body on its own, for a transport that keeps boundaries
-Frame().encode(b"...") # an envelope around anything
+message.encode({...})  # a body on its own, for a transport that keeps boundaries
 ```
 
 ## `cmd`

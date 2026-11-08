@@ -20,7 +20,7 @@ from datetime import timedelta
 from typing import Any, Iterator, assert_type
 from xaeian import CRC, CSV, DIR, FILE, INI, JSON, PATH, Files, Logger, Print, Time
 from xaeian import generate_token, logger, replace_map, split_sql
-from xaeian.cstruct import Field, Frame, Message, Struct, Type
+from xaeian.cstruct import Bitfield, Field, Frame, Message, Padding, Struct, Type
 from xaeian.db import AbstractAsyncDatabase, AbstractDatabase, AsyncDatabase, Database, KeyValue
 import xaeian.table as tbl
 
@@ -46,16 +46,17 @@ assert_type(crc.checksum(b"x"), int)
 assert_type(crc.encode(b"x"), bytes)
 assert_type(crc.decode(b"x"), bytes|None)
 
-st = Struct(1, "sensor").add(Field(Type.uint16, "mv", scale=0.1))
+st = Struct("sensor", Field(Type.uint16, "mv", scale=0.1))
 assert_type(st, Struct)
-assert_type(st["mv"], Field)
+assert_type(st.members, tuple[Field|Bitfield|Padding, ...])
+assert_type(st.size, int|None)
 assert_type(st.encode({"mv": 3.3}), bytes)
-assert_type(st.decode(b""), list[dict[str, Any]]|dict[str, Any])
-assert_type(Message(st).decode(b""), dict[str, list[dict[Any, Any]]])
+assert_type(st.decode(b""), dict[str, Any])
+assert_type(st.records(b""), list[dict[str, Any]])
+message = Message({1: st})
+assert_type(message.decode(b""), dict[str, list[dict[Any, Any]]])
 assert_type(Frame().encode(b""), bytes)
-assert_type(next(Frame().feed(Frame().encode(b"x"))), bytes)
-assert_type(Frame(Message(st)).encode({}), bytes)
-assert_type(next(Frame(Message(st)).feed(b"")), dict[Any, Any])
+assert_type(next(Frame().feed(Frame().encode(message.encode({})))), bytes)
 
 #------------------------------------------------------------------------------------ Log and table
 

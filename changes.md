@@ -1,5 +1,12 @@
 # Changes `xaeian`
 
+## `1.2.2` Struct
+
+- `cstruct`: `Struct("name", *members)`, block codes in `Message`
+- `cstruct`: `decode` reads one record, `records` many, `Frame` carries bytes
+- `cstruct`: nested structs, numpy `dtype()`, a C header the compiler checks
+- `crc`: `crc32_iso` computed in C
+
 ## `1.2.1` Filters
 
 - `dsp`: filters keep the `order` and -3dB edges asked for, NaN as a gap

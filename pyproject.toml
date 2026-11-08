@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xaeian"
-version = "1.2.1"
+version = "1.2.2"
 description = "Simple Python utilities: files, time, serial, binary structs, databases, network, media, electronics, plotting and signals"
 readme = "readme.md"
 license = "MIT"
@@ -15,6 +15,7 @@ keywords = ["utilities", "files", "database", "serial", "crc", "struct", "media"
 dependencies = []
 
 [project.optional-dependencies]
+cstruct = ["numpy"]
 db = ["psycopg2-binary", "pymysql"]
 db-async = ["aiomysql", "aiosqlite", "asyncpg"]
 dsp = ["numpy", "scipy"]

@@ -2,86 +2,108 @@
 
 """Binary (de)serialization: round-trips, transforms, messages, frames and what gets refused."""
 
-import random
+import random, subprocess
+from pathlib import Path
 
 import pytest
-from xaeian.cstruct import Struct, Field, Type, Bitfield, Variant, Endian, Message, Frame, Padding
+from xaeian.cstruct import Struct, Field, Type, Bitfield, Endian, Message, Frame, Padding
 from xaeian.crc import crc32_iso
 
-def scalars():
-  s = Struct(name="scalars").add(
-    Field(Type.uint8, "a"), Field(Type.int16, "b"), Field(Type.uint32, "c"),
-  )
+# The example of the readme
+POINT = Struct("point", Field(Type.int16, "x", "mm"), Field(Type.int16, "y", "mm"))
+SAMPLE = Struct("sample",
+  Field(Type.uint32, "time", "us"),
+  Field(POINT, "pos", length=2, doc="start and end"),
+  Field(Type.int16, "temp", "°C", scale=10, doc="board temperature"),
+  Bitfield("flags", [("mode", 4), ("fault", 4)]),
+  Padding(1),
+)
+RECORD = {
+  "time": 1200,
+  "pos": [{"x": 1, "y": -2}, {"x": 3, "y": 4}],
+  "temp": 23.4,
+  "flags": {"mode": 3, "fault": 9},
+}
+
+#------------------------------------------------------------------------------------------ records
+
+def the_readme_sample_round_trips():
+  data = SAMPLE.encode(RECORD)
+  assert SAMPLE.decode(data) == RECORD and SAMPLE.records(data * 2) == [RECORD, RECORD]
+  assert SAMPLE.size == len(data) == 16
+
+def integers_keep_value():
+  s = Struct("integers", Field(Type.uint8, "a"), Field(Type.int16, "b"), Field(Type.uint32, "c"))
   data = {"a": 7, "b": -1234, "c": 100_000}
   assert s.decode(s.encode(data)) == data
 
-def decode_returns_dict_for_one_list_for_many():
-  s = Struct(name="rec").add(Field(Type.uint8, "n"))
+def decode_reads_one_record_and_records_a_run():
+  """One shape per call: `decode` a dict, `records` a list, whatever the count."""
+  s = Struct("rec", Field(Type.uint8, "n"))
   assert s.decode(s.encode({"n": 1})) == {"n": 1}
-  assert s.decode(s.encode([{"n": 1}, {"n": 2}])) == [{"n": 1}, {"n": 2}]
+  assert s.records(s.encode({"n": 1})) == [{"n": 1}]
+  assert s.records(s.encode({"n": 1}) + s.encode({"n": 2})) == [{"n": 1}, {"n": 2}]
+  with pytest.raises(ValueError):
+    s.decode(s.encode({"n": 1}) + s.encode({"n": 2})) # a second record is no part of the first
 
 def floats_keep_value():
-  s = Struct(name="floats").add(Field(Type.float, "x"), Field(Type.double, "y"))
+  s = Struct("floats", Field(Type.float, "x"), Field(Type.double, "y"))
   data = {"x": 1.5, "y": 0.25} # exact in IEEE-754, no rounding slack needed
   assert s.decode(s.encode(data)) == data
 
 def a_float_decodes_to_what_its_type_holds():
   """At 3 decimals 0.000123A would decode as 0.0; at 7 digits 12345678 would come back 12345680."""
-  s = Struct(name="meter").add(
+  s = Struct("meter",
     Field(Type.float, "a"), Field(Type.float, "v"), Field(Type.float, "n"),
     Field(Type.float, "k"), Field(Type.double, "wh"),
   )
   data = {"a": 0.000123, "v": 3.2999, "n": 12345678.0, "k": 1.2345678, "wh": 12345.678901}
   assert s.decode(s.encode(data)) == data
-  shown = Struct(name="shown").add(Field(Type.float, "v", precision=1))
-  assert shown.decode(shown.encode({"v": 3.2999})) == {"v": 3.3}
-  top = Struct(name="top").add(Field(Type.float, "v"))
+  top = Struct("top", Field(Type.float, "v"))
   assert top.decode(top.encode({"v": 3.4028235e38})) == {"v": 3.4028235e38} # FLT_MAX, no reading
 
 def a_float_read_and_written_back_keeps_its_bits():
   """A config read, one field changed and saved again must leave every other float as it was."""
-  s = Struct(name="cfg").add(Field(Type.float, "x"), Field(Type.float, "k", scale=1000))
+  s = Struct("cfg", Field(Type.float, "x"), Field(Type.float, "k", scale=1000))
   rng = random.Random(1)
   for _ in range(2000):
     wire = s.encode({"x": rng.uniform(-1e4, 1e4), "k": rng.uniform(-10, 10)})
     assert s.encode(s.decode(wire)) == wire
 
 def scale_stores_fixed_point():
-  s = Struct(name="scaled").add(Field(Type.uint16, "mv", scale=1000))
+  s = Struct("scaled", Field(Type.uint16, "mv", scale=1000))
   assert s.encode({"mv": 1.5}) == (1500).to_bytes(2, "little")
   assert s.decode(s.encode({"mv": 1.5})) == {"mv": 1.5}
 
 @pytest.mark.parametrize("sp, lim", [(2.3, 33.3), (19.99, 1.1), (-1.15, 0.3), (4.35, 99.9)])
 def fixed_point_rounds_to_its_step(sp, lim):
   """`2.3 * 100` is 229.99999999999997 in floating point: truncated, the device would get 2.29."""
-  s = Struct(name="setpoint").add(
-    Field(Type.int16, "sp", scale=100), Field(Type.uint16, "lim", point_shift=1),
-  )
+  s = Struct("setpoint", Field(Type.int16, "sp", scale=100), Field(Type.uint16, "lim", scale=10))
   assert s.decode(s.encode({"sp": sp, "lim": lim})) == {"sp": sp, "lim": lim}
 
-def array_field():
-  s = Struct(name="arr").add(Field(Type.uint8, "xs", length=4))
+def an_array_is_a_list():
+  s = Struct("arr", Field(Type.uint8, "xs", length=4))
   data = {"xs": [10, 20, 30, 40]}
   assert s.decode(s.encode(data)) == data
 
-def string_and_bytes():
-  s = Struct(name="blob").add(Field(Type.string, "name"), Field(Type.bytes, "data"))
+def a_string_and_bytes_keep_value():
+  s = Struct("blob", Field(Type.string, "name"), Field(Type.bytes, "data"))
   data = {"name": "xaeian", "data": b"\x01\x02\x03"}
   assert s.decode(s.encode(data)) == data
 
-def string_utf8_roundtrip():
-  s = Struct(name="txt").add(Field(Type.string, "t"))
+def a_string_keeps_its_utf8():
+  s = Struct("txt", Field(Type.string, "t"))
   data = {"t": "żółw → OK"}
   assert s.decode(s.encode(data)) == data
 
 def crc_travels_with_every_record():
-  s = Struct(name="cf", crc=crc32_iso).add(Field(Type.uint16, "x"))
-  assert s.decode(s.encode({"x": 7})) == {"x": 7}
-  assert s.decode(s.encode([{"x": 1}, {"x": 2}])) == [{"x": 1}, {"x": 2}]
-  assert len(s.encode([{"x": 1}, {"x": 2}])) == 2 * (2 + 4) # a crc behind each, not one at the end
+  s = Struct("cf", Field(Type.uint16, "x"), crc=crc32_iso)
+  run = s.encode({"x": 1}) + s.encode({"x": 2})
+  assert s.records(run) == [{"x": 1}, {"x": 2}]
+  assert len(run) == 2 * (2 + 4) # a crc behind each record, not one at the end
 
-def bitfield():
-  s = Struct(name="flags").add(Bitfield("st", [("on", 1), ("err", 1), ("mode", 6)]))
+def a_bitfield_is_a_dict_of_bits():
+  s = Struct("flags", Bitfield("st", [("on", 1), ("err", 1), ("mode", 6)]))
   data = {"st": {"on": 1, "err": 0, "mode": 42}}
   assert s.decode(s.encode(data)) == data
 
@@ -93,49 +115,181 @@ def a_bitfield_refuses_a_name_it_lacks_and_a_value_outside_its_bits():
   for mode in (-1, 64):
     with pytest.raises(ValueError, match="mode"):
       st.encode({"mode": mode})
+  with pytest.raises(TypeError, match="mode"):
+    st.encode({"mode": 1.0}) # bits are counted, never measured
 
-def optional_field_uses_default():
-  s = Struct(name="opt").add(
-    Field(Type.uint8, "a"), Field(Type.uint8, "b", optional=True, default=9),
-  )
+def a_bitfield_refuses_a_layout_it_cannot_pack():
+  """A repeated name would fold two groups into one; bits past the integer would be lost."""
+  with pytest.raises(ValueError):
+    Bitfield("twice", [("mode", 4), ("mode", 4)])
+  for kind in (Type.uint8, Type.int16): # too narrow, signed
+    with pytest.raises(ValueError):
+      Bitfield("wide", [("count", 12)], type=kind)
+  assert Bitfield("reg", [("on", 1)], type=Type.uint16).size == 2 # a 16-bit register, one bit used
+
+def a_default_stands_in_for_a_missing_field():
+  s = Struct("opt", Field(Type.uint8, "a"), Field(Type.uint8, "b", default=9))
   assert s.decode(s.encode({"a": 1})) == {"a": 1, "b": 9}
+
+def a_record_key_the_struct_lacks_is_refused():
+  """A typo would leave its field at the default and go out without a word."""
+  s = Struct("modes", Field(Type.uint8, "a"), Field(Type.uint8, "mode", default=0))
+  with pytest.raises(KeyError, match="mdoe"):
+    s.encode({"a": 1, "mdoe": 3})
+
+def a_string_holding_a_nul_is_refused():
+  """The NUL ends a string on the wire, so what follows it would read as the next record."""
+  with pytest.raises(ValueError, match="'t' of 'txt'"):
+    Struct("txt", Field(Type.string, "t")).encode({"t": "a\0b"})
+
+def a_string_that_is_no_utf8_is_refused_by_its_name():
+  """Every read error names its field and struct, a byte that is no UTF-8 included."""
+  with pytest.raises(ValueError, match="'t' of 'txt'"):
+    Struct("txt", Field(Type.uint8, "kind"), Field(Type.string, "t")).decode(b"\x01\xff\x00")
 
 @pytest.mark.parametrize("endian, order", [(Endian.little, "little"), (Endian.big, "big")])
 def endian_mirrors_bytes(endian, order):
-  s = Struct(name=f"e_{order}", endian=endian).add(Field(Type.uint16, "n"))
+  s = Struct(f"e_{order}", Field(Type.uint16, "n"), endian=endian)
   assert s.encode({"n": 258}) == (258).to_bytes(2, order) # 258 == 0x0102
   assert s.decode(s.encode({"n": 258})) == {"n": 258}
 
-@pytest.mark.parametrize("kind, body", [(0, {"a": 99}), (1, {"b": 1.5, "c": 2.5})])
-def variant_selects_layout(kind, body):
-  s = Struct(name="msg").add(
-    Field(Type.uint8, "kind"),
-    Variant("body", "kind", {
-      0: [Field(Type.uint32, "a")],
-      1: [Field(Type.float, "b"), Field(Type.float, "c")],
-    }),
+def size_counts_every_byte_of_a_record():
+  s = Struct("sized", Field(Type.uint8, "a"), crc=crc32_iso, align=4)
+  assert s.size == len(s.encode({"a": 1})) == 8 # 1 byte, 3 of alignment, 4 of CRC
+  assert Struct("loose", Field(Type.string, "t")).size is None
+
+def alignment_padding_roundtrips_each_record():
+  # `records` consumes the padding `encode` appends behind each record
+  s = Struct("aligned", Field(Type.uint8, "a"), Field(Type.uint16, "b"), align=4)
+  recs = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
+  assert s.records(b"".join(s.encode(rec) for rec in recs)) == recs
+
+def members_keep_wire_order():
+  """Padding and bitfields are members too: a walk over a struct meets the owner of every byte."""
+  s = Struct("row",
+    Field(Type.uint8, "a", "V", length=2), Padding(1), Bitfield("flags", [("on", 1)]),
   )
-  msg = {"kind": kind, "body": body}
-  assert s.decode(s.encode(msg)) == msg
+  assert [repr(member) for member in s.members] == [
+    "Field(uint8, 'a', 'V', length=2)", "Padding(1)", "Bitfield('flags', [('on', 1)])",
+  ]
+  assert sum(member.size for member in s.members) == s.size == 4
 
-@pytest.mark.usefixtures("registry")
+#------------------------------------------------------------------------------------------ nesting
+
+def a_struct_nests_as_a_field_byte_for_byte():
+  """A nested struct is its members, as in C: the bytes of the flat record."""
+  foc = Struct("foc", Field(Type.uint16, "seq"), Field(Type.int16, "iq"))
+  nested = Struct("sample", Field(foc, "foc"), Field(Type.int16, "w"))
+  flat = Struct("flat", Field(Type.uint16, "seq"), Field(Type.int16, "iq"), Field(Type.int16, "w"))
+  record = {"foc": {"seq": 7, "iq": -3}, "w": 12}
+  assert nested.encode(record) == flat.encode({"seq": 7, "iq": -3, "w": 12})
+  assert nested.decode(nested.encode(record)) == record
+
+def an_array_of_structs_is_a_list_of_dicts():
+  xy = Struct("xy", Field(Type.int16, "x"), Field(Type.int16, "y"))
+  path = Struct("path", Field(xy, "points", length=2))
+  data = {"points": [{"x": 1, "y": 2}, {"x": -3, "y": 4}]}
+  assert path.decode(path.encode(data)) == data
+
+@pytest.mark.parametrize("tail", [{"crc": crc32_iso}, {"align": 4}])
+def a_struct_with_a_tail_does_not_nest(tail):
+  """A CRC inside a record checks nothing, and `align` pads a whole record."""
+  with pytest.raises(ValueError):
+    Field(Struct("inner", Field(Type.uint8, "a"), **tail), "inner")
+
+def a_nested_struct_shares_its_hosts_byte_order():
+  """Its bytes go out in the host's order, so a struct of another order would lie about itself."""
+  big = Struct("big", Field(Type.uint16, "n"), endian=Endian.big)
+  with pytest.raises(ValueError):
+    Struct("host", Field(big, "inner"))
+  host = Struct("host", Field(big, "inner"), endian=Endian.big)
+  assert host.encode({"inner": {"n": 258}}) == b"\x01\x02"
+
+#--------------------------------------------------------------------------------------------- wire
+
 def message_routes_by_code():
-  pos = Struct(code=1, name="pos").add(Field(Type.int16, "x"), Field(Type.int16, "y"))
-  temp = Struct(code=2, name="temp").add(Field(Type.float, "t"))
-  message = Message(pos, temp)
-  body = message.encode({"pos": {"x": -3, "y": 7}, "temp": [{"t": 21.5}]}) # one record either way
+  pos = Struct("pos", Field(Type.int16, "x"), Field(Type.int16, "y"))
+  temp = Struct("temp", Field(Type.float, "t"))
+  message = Message({1: pos, 2: temp})
+  body = message.encode({"pos": [{"x": -3, "y": 7}], "temp": [{"t": 21.5}]})
   assert message.decode(body) == {"pos": [{"x": -3, "y": 7}], "temp": [{"t": 21.5}]}
+  assert message.structs[1] is pos
 
-@pytest.mark.usefixtures("registry")
-def frame_carries_a_message_end_to_end():
-  """The envelope around the blocks: dicts in, dicts out, the wire cut anywhere between."""
-  pos = Struct(code=1, name="pos").add(Field(Type.int16, "x"), Field(Type.int16, "y"))
-  temp = Struct(code=2, name="temp").add(Field(Type.float, "t"))
-  link = Frame(Message(pos, temp), limit=64)
+def a_message_takes_lists_of_records_only():
+  """One shape: a lone dict would read either as a record or as a dict of records."""
+  message = Message({1: Struct("pos", Field(Type.int16, "x"))})
+  with pytest.raises(TypeError):
+    message.encode({"pos": {"x": 1}})
+
+def block_header_is_code_then_size():
+  pair = Struct("pair", Field(Type.uint16, "a"), Field(Type.uint16, "b"))
+  block = Message({1: pair}).encode({"pair": [{"a": 0x1234, "b": 0x5678}]})
+  assert block == bytes.fromhex("0100 0400 3412 7856")
+  assert pair.records(block[4:]) == [{"a": 0x1234, "b": 0x5678}]
+
+def a_block_is_read_out_of_its_declared_size():
+  """A lying size header must not walk into the next block and desynchronise the stream."""
+  temp = Struct("block_temp", Field(Type.uint16, "v"))
+  hum = Struct("block_hum", Field(Type.uint16, "v"))
+  message = Message({71: temp, 72: hum})
+  good = message.encode({"block_temp": [{"v": 11}, {"v": 22}], "block_hum": [{"v": 33}]})
+  assert message.decode(good) == {"block_temp": [{"v": 11}, {"v": 22}], "block_hum": [{"v": 33}]}
+
+  over = bytearray(good); over[2] = 200
+  with pytest.raises(ValueError, match="Block declares"):
+    message.decode(bytes(over))
+
+  partial = bytearray(good); partial[2] = 5
+  with pytest.raises(ValueError):
+    message.decode(bytes(partial))
+
+def a_code_belongs_to_its_message():
+  """Two protocols may both use code 1; bytes of a code a message lacks raise `ValueError`."""
+  first = Struct("first", Field(Type.uint8, "a"))
+  second = Struct("second", Field(Type.uint8, "b"))
+  one, two = Message({1: first}), Message({1: second})
+  assert one.decode(one.encode({"first": [{"a": 1}]})) == {"first": [{"a": 1}]}
+  assert two.decode(two.encode({"second": [{"b": 2}]})) == {"second": [{"b": 2}]}
+  with pytest.raises(ValueError):
+    Message({1: first, 2: first}) # one name, two codes: `encode` could not tell which
+  with pytest.raises(ValueError):
+    Message({9: second}).decode(one.encode({"first": [{"a": 1}]}))
+
+def a_message_takes_the_byte_order_of_its_structs():
+  """The order belongs to the structs; mixed, one of them would go out in the other's order."""
+  big = Struct("big", Field(Type.uint16, "n"), endian=Endian.big)
+  little = Struct("little", Field(Type.uint16, "n"))
+  with pytest.raises(ValueError):
+    Message({1: big, 2: little})
+  assert Message({1: big}).encode({"big": [{"n": 258}]}) == bytes.fromhex("0001 0002 0102")
+
+def a_frame_orders_its_length_itself():
+  """The length belongs to the envelope, little as in `FRAME_t` unless its link says otherwise."""
+  assert Frame().encode(b"ab")[2:4] == b"\x06\x00" # 2 bytes of body, 4 of crc
+  assert Frame(endian=Endian.big).encode(b"ab")[2:4] == b"\x00\x06"
+
+def a_frame_carries_a_message_the_caller_joins():
+  """Envelope and body are two pieces: dicts in and out, the wire cut anywhere between."""
+  pos = Struct("pos", Field(Type.int16, "x"), Field(Type.int16, "y"))
+  temp = Struct("temp", Field(Type.float, "t"))
+  message, link = Message({1: pos, 2: temp}), Frame(limit=64)
   data = {"pos": [{"x": 1, "y": 2}, {"x": 3, "y": 4}], "temp": [{"t": 21.5}]}
-  wire = link.encode(data) * 2
-  assert list(link.feed(wire[:7])) + list(link.feed(wire[7:])) == [data, data]
-  assert link.errors == 0
+  wire = link.encode(message.encode(data)) * 2
+  bodies = list(link.feed(wire[:7])) + list(link.feed(wire[7:]))
+  assert [message.decode(body) for body in bodies] == [data, data] and link.errors == 0
+
+def a_body_its_message_cannot_read_stops_nothing_behind_it():
+  """A sender of another layout: the caller refuses its body, the frames behind still come."""
+  mine = Message({1: Struct("mine", Field(Type.uint8, "v"))})
+  other = Message({9: Struct("other", Field(Type.uint8, "v"))})
+  link = Frame()
+  sent = [(mine, "mine", 1), (other, "other", 2), (mine, "mine", 3)]
+  wire = b"".join(link.encode(message.encode({name: [{"v": v}]})) for message, name, v in sent)
+  read, refused = [], 0
+  for body in link.feed(wire):
+    try: read.append(mine.decode(body))
+    except ValueError: refused += 1
+  assert read == [{"mine": [{"v": 1}]}, {"mine": [{"v": 3}]}] and refused == 1 and link.errors == 0
 
 def a_body_over_the_limit_is_refused_at_the_sender():
   """The receiver drops it as structural nonsense, so the sender is the one left to say so."""
@@ -149,40 +303,6 @@ def an_empty_body_is_a_frame():
   link = Frame(limit=8)
   assert list(link.feed(link.encode(b""))) == [b""]
   assert link.errors == 0
-
-def the_header_mirrors_the_wire():
-  """Padding and the crc tail are bytes on the wire, so they are members in C."""
-  s = Struct(name="hdr", crc=crc32_iso, align=4).add(
-    Field(Type.uint16, "a"), Field(Type.uint8, "b"))
-  assert len(s.encode({"a": 1, "b": 2})) == 8
-  header = s.export_c_header()
-  assert "uint8_t _align[1];" in header and "uint8_t crc[4];" in header
-  loose = Struct(name="txt", crc=crc32_iso).add(Field(Type.string, "t"))
-  assert "_align" not in loose.export_c_header() and "variable size" in loose.export_c_header()
-
-@pytest.mark.usefixtures("registry")
-def block_header_is_code_then_size():
-  pair = Struct(code=1, name="pair").add(Field(Type.uint16, "a"), Field(Type.uint16, "b"))
-  block = pair.block({"a": 0x1234, "b": 0x5678})
-  assert block == bytes.fromhex("0100 0400 3412 7856")
-  assert pair.records(block[4:]) == [{"a": 0x1234, "b": 0x5678}]
-
-@pytest.mark.usefixtures("registry")
-def a_block_is_read_out_of_its_declared_size():
-  """A lying size header must not walk into the next block and desynchronise the stream."""
-  temp = Struct(code=71, name="block_temp").add(Field(Type.uint16, "v"))
-  hum = Struct(code=72, name="block_hum").add(Field(Type.uint16, "v"))
-  message = Message(temp, hum)
-  good = message.encode({"block_temp": [{"v": 11}, {"v": 22}], "block_hum": {"v": 33}})
-  assert message.decode(good) == {"block_temp": [{"v": 11}, {"v": 22}], "block_hum": [{"v": 33}]}
-
-  over = bytearray(good); over[2] = 200
-  with pytest.raises(ValueError, match="Block declares"):
-    message.decode(bytes(over))
-
-  partial = bytearray(good); partial[2] = 5
-  with pytest.raises(ValueError):
-    message.decode(bytes(partial))
 
 def frame_matches_the_c_layer():
   # Captured from `FRAME_Send` of `demo/com/frame` built on the host,
@@ -224,26 +344,294 @@ def frame_pending_closes_the_byte_count():
   assert len(wire) - len(good) - frame.pending == len(bad)
   assert frame.errors == 1
 
-def alignment_padding_roundtrips_each_record():
-  # decode consumes the padding encode appends after each record
-  s = Struct(name="aligned", align=4).add(Field(Type.uint8, "a"), Field(Type.uint16, "b"))
-  recs = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
-  assert s.decode(s.encode(recs)) == recs
+#----------------------------------------------------------------------------------------- C header
+
+def the_header_mirrors_the_wire():
+  """Padding and the crc tail are bytes on the wire, so they are members in C."""
+  s = Struct("hdr", Field(Type.uint16, "a"), Field(Type.uint8, "b"), crc=crc32_iso, align=4)
+  assert len(s.encode({"a": 1, "b": 2})) == 8
+  header = s.export_c_header()
+  assert "uint8_t _align[1];" in header and "uint8_t crc[4];" in header
+  loose = Struct("txt", Field(Type.uint8, "kind"), Field(Type.string, "t"), crc=crc32_iso)
+  assert "_align" not in loose.export_c_header() and "variable size" in loose.export_c_header()
+
+def a_natural_layout_is_not_packed_and_every_offset_is_asserted():
+  """Only a layout C would pad is packed; the asserts hold either way."""
+  natural = Struct("nat",
+    Field(Type.uint16, "a"), Field(Type.uint16, "b"), Field(Type.uint32, "c"),
+  )
+  header = natural.export_c_header()
+  assert "packed" not in header
+  assert '_Static_assert(sizeof(nat_t) == 8, "nat_t is 8B on the wire");' in header
+  assert '_Static_assert(offsetof(nat_t, c) == 4, "nat_t.c at 4 on the wire");' in header
+  odd = Struct("odd", Field(Type.uint8, "a"), Field(Type.uint32, "b"))
+  assert "typedef struct __attribute__((packed)) {" in odd.export_c_header()
+
+def a_message_header_names_codes_block_and_types_after_its_module():
+  foc = Struct("foc_dump", Field(Type.uint16, "seq"), Field(Type.int16, "iq"))
+  sample = Struct("sample", Field(foc, "foc"), Field(Type.int16, "w_hat"))
+  state = Struct("state", Bitfield("flags", [("mode", 4), ("exit", 4)]))
+  extern = {foc: ("FOC_Dump_t", "foc.h")}
+  message = Message({1: sample, 2: state})
+  lines = message.export_c_header("diag/rec_wire.h", "REC", extern).splitlines()
+  assert lines[0] == "// diag/rec_wire.h" and "#ifndef REC_WIRE_H_" in lines
+  assert "#define REC_CODE_SAMPLE 1" in lines and "} REC_Block_t;" in lines
+  assert "} REC_Sample_t;" in lines and "} REC_StateFlags_t;" in lines
+  assert '#include "foc.h"' in lines and "} FOC_Dump_t;" not in lines # defined in `foc.h` alone
+  assert '_Static_assert(sizeof(FOC_Dump_t) == 4, "FOC_Dump_t is 4B on the wire");' in lines
+  assert all(len(line) == 99 for line in lines if line.startswith("//--"))
+
+def a_check_past_99_characters_puts_its_message_on_a_line_of_its_own():
+  """`cstyle` keeps a line to 99: a long member name would push its offset check past it."""
+  s = Struct("drive", Field(Type.uint16, "entry_timeout_s_of_the_closing_gate"))
+  lines = s.export_c_header("dev/drive.h").splitlines()
+  assert all(len(line) <= 99 for line in lines)
+  at = lines.index("_Static_assert(offsetof(drive_t, entry_timeout_s_of_the_closing_gate) == 0,")
+  assert lines[at + 1] == '  "drive_t.entry_timeout_s_of_the_closing_gate at 0 on the wire");'
+
+def a_c_type_keeps_an_acronym_in_capitals():
+  for name, kind in (("foc_dump", "REC_FocDump_t"), ("FOC_dump", "REC_FOCDump_t")):
+    assert f"}} {kind};" in Struct(name, Field(Type.uint8, "a")).export_c_header(prefix="REC")
+
+def a_note_gives_the_unit_only_where_c_holds_the_value_in_it():
+  """A scaled field holds raw counts in C: its unit belongs to the decoded value."""
+  s = Struct("meter",
+    Field(Type.uint16, "ms", "ms"), Field(Type.int16, "bus", "V", scale=10, doc="raw DC bus"),
+  )
+  header = s.export_c_header()
+  assert "// [ms]" in header and "// raw DC bus" in header and "[V]" not in header
+
+GEO_H = """\
+// geo.h
+
+#ifndef GEO_H_
+#define GEO_H_
+
+#include <stdint.h>
+
+typedef struct {
+  int16_t x;
+  int16_t y;
+} GEO_Point_t;
+
+typedef struct {
+  uint8_t kind;
+  uint8_t spare;
+  uint16_t code;
+} GEO_Item_t;
+
+#endif
+"""
+
+ITEM = Struct("item", Field(Type.uint8, "kind"), Padding(1), Field(Type.uint16, "code"))
+EDGES = Message({ # every layout the exporter writes its own way
+  1: Struct("held", Field(ITEM, "item"), Field(Type.uint32, "stamp")), # a type from `extern` naming its filler itself
+  2: Struct("odd", Field(Type.uint8, "kind"), Field(Type.uint32, "stamp"), align=4, crc=crc32_iso), # packed, an alignment tail, a crc
+  3: Struct("blob", Field(Type.uint8, "kind"), Field(Type.bytes, "data")), # a length before a flexible array
+  4: Struct("note", Field(Type.uint8, "kind"), Field(Type.string, "text")), # a string behind a member
+})
+
+MAIN_C = """\
+#include <stdio.h>
+#include <string.h>
+
+#include "edge_wire.h"
+#include "link_wire.h"
+
+static const unsigned char wire[] = {WIRE};
+
+int main(void)
+{
+  LINK_Block_t block;
+  LINK_Sample_t s;
+  memcpy(&block, wire, sizeof block);
+  memcpy(&s, wire + sizeof block, sizeof s);
+  printf("%d %u %u ", block.code == LINK_CODE_SAMPLE, block.size, (unsigned)s.time);
+  printf("%d %d %d %d ", s.pos[0].x, s.pos[0].y, s.pos[1].x, s.pos[1].y);
+  printf("%d %u %u", s.temp, s.flags.mode, s.flags.fault);
+  return 0;
+}
+"""
+
+C_FLAGS = ["-std=c11", "-Wall", "-Wextra", "-Werror"]
+COMPILERS = { # the three of the plan, each test skipping where its compiler is missing
+  "gcc": ["gcc"],
+  "cortex-m4": ["arm-none-eabi-gcc", "-mcpu=cortex-m4", "-mthumb"],
+  "wsl": ["wsl", "-e", "gcc"],
+}
+
+class CSide:
+  """The headers in C, kept out of reach of `python_functions = ["*"]` collection."""
+  @staticmethod
+  def build(folder:Path, compiler:str, *args:str) -> None:
+    """Write the readme's header, the edges' and a `main.c` into `folder`; a warning fails."""
+    command = COMPILERS[compiler]
+    try: found = subprocess.run([*command, "--version"], capture_output=True).returncode == 0
+    except FileNotFoundError: found = False
+    if not found: pytest.skip(f"no {compiler} compiler")
+    link = Message({1: SAMPLE})
+    header = link.export_c_header("dev/link_wire.h", "LINK", {POINT: ("GEO_Point_t", "geo.h")})
+    edges = EDGES.export_c_header("dev/edge_wire.h", "EDGE", {ITEM: ("GEO_Item_t", "geo.h")})
+    wire = ", ".join(str(byte) for byte in link.encode({"sample": [RECORD]}))
+    (folder / "geo.h").write_text(GEO_H, encoding="utf-8")
+    (folder / "link_wire.h").write_text(header, encoding="utf-8")
+    (folder / "edge_wire.h").write_text(edges, encoding="utf-8")
+    (folder / "main.c").write_text(MAIN_C.replace("WIRE", wire), encoding="utf-8")
+    build = subprocess.run([*command, *C_FLAGS, *args], cwd=folder, capture_output=True)
+    assert build.returncode == 0, build.stderr.decode(errors="replace")
+
+@pytest.mark.parametrize("compiler", COMPILERS)
+def the_headers_compile_without_a_warning(compiler, tmp_path):
+  CSide.build(tmp_path, compiler, "-c", "main.c", "-o", "main.o")
+
+def a_type_from_extern_is_checked_by_the_names_the_schema_gives_it():
+  """A C type of its own names its filler itself: `GEO_Item_t` has `spare`, not `_pad1`."""
+  header = EDGES.export_c_header(prefix="EDGE", extern={ITEM: ("GEO_Item_t", "geo.h")})
+  assert "offsetof(GEO_Item_t, code) == 2" in header and "_pad1" not in header
+
+def c_reads_the_bytes_python_wrote(tmp_path):
+  """A shared vector: C copies the encoded block into the generated types and prints the fields."""
+  CSide.build(tmp_path, "gcc", "main.c", "-o", "main")
+  run = subprocess.run([str(tmp_path / "main")], capture_output=True, text=True)
+  assert run.stdout == "1 16 1200 1 -2 3 4 234 3 9"
+
+#-------------------------------------------------------------------------------------------- numpy
+
+def dtype_reads_encoded_records_as_their_raw_values():
+  """Every byte of a record is in the dtype, so rows read in bulk land on the right fields."""
+  np = pytest.importorskip("numpy")
+  xy = Struct("xy", Field(Type.int16, "x"), Field(Type.int16, "y"))
+  s = Struct("row",
+    Field(Type.uint16, "seq"), Field(Type.int16, "bus", "V", scale=10),
+    Bitfield("flags", [("mode", 4), ("fault", 4)]), Padding(1), Field(Type.float, "temp"),
+    Field(xy, "path", length=2),
+    align=4, crc=crc32_iso,
+  )
+  records = [{"seq": i, "bus": 24.1, "flags": {"mode": 3, "fault": i}, "temp": 21.5,
+    "path": [{"x": i, "y": -i}] * 2} for i in range(3)]
+  rows = np.frombuffer(b"".join(s.encode(record) for record in records), s.dtype())
+  assert s.dtype().itemsize == s.size == len(s.encode(records[0]))
+  assert rows["seq"].tolist() == [0, 1, 2] and rows["bus"].tolist() == [241] * 3 # raw, ×10
+  assert rows["flags"].tolist() == [3, 19, 35] and rows["path"]["y"][:, 1].tolist() == [0, -1, -2]
+  assert rows["crc"][0] == crc32_iso.checksum(s.encode(records[0])[:-4])
+
+def dtype_refuses_a_record_of_varying_size():
+  pytest.importorskip("numpy")
+  with pytest.raises(ValueError):
+    Struct("txt", Field(Type.string, "t")).dtype()
+
+#----------------------------------------------------------------------------------------- refusals
+
+@pytest.mark.parametrize("struct", [
+  Struct("text_first", Field(Type.string, "t"), Field(Type.uint8, "a")), # C takes it only last
+  Struct("spaced", Field(Type.uint8, "two words")), # no name C can take
+  Struct("keyword", Field(Type.uint8, "default")), # a keyword
+  Struct("c23", Field(Type.uint8, "bool")), # a keyword since C23, GCC's default
+  Struct("reserved", Field(Type.uint8, "_Mode")), # `_X` is the compiler's
+  Struct("length", Field(Type.uint8, "data_len"), Field(Type.bytes, "data")), # the length of `data`
+  Struct("filler", Field(Type.uint8, "_pad1"), Padding(1)), # the name of the padding
+  Struct("log", Field(Type.string, "text")), # a flexible array needs a member before it
+  Struct("null", Field(Type.uint8, "NULL")), # `<stddef.h>` makes it `((void*)0)`
+  Struct("limit", Field(Type.uint8, "INT8_MAX")), # `<stdint.h>` makes it a number
+  Struct("big", Field(Type.uint16, "a"), endian=Endian.big), # C holds the target's order
+])
+def what_no_c_struct_can_mirror_is_refused(struct):
+  with pytest.raises(ValueError):
+    struct.export_c_header()
+
+def a_path_must_give_an_include_guard():
+  """The guard comes from the file's name, and no C macro is named `2D_H_`."""
+  with pytest.raises(ValueError):
+    Struct("one", Field(Type.uint8, "a")).export_c_header("dev/2d.h")
+
+@pytest.mark.parametrize("structs", [
+  {1: Struct("state", Field(Struct("state", Field(Type.uint8, "a")), "inner"))}, # `REC_State_t` for both
+  {1: Struct("state", Bitfield("flags", [("on", 1)])), 2: Struct("state_flags", Field(Type.uint8, "a"))}, # `REC_StateFlags_t`
+  {1: Struct("state", Field(Type.uint8, "a")), 2: Struct("State", Field(Type.uint8, "a"))}, # `REC_CODE_STATE`
+  {1: Struct("block", Field(Type.uint8, "a"))}, # `REC_Block_t`, the header of every block
+])
+def a_header_never_defines_a_name_twice(structs):
+  with pytest.raises(ValueError, match="twice"):
+    Message(structs).export_c_header(prefix="REC")
+
+@pytest.mark.parametrize("name", ["size", "int16", "uint_least8"])
+def a_type_the_includes_define_is_never_defined_again(name):
+  """Without a prefix, a struct `size` would be a second `size_t` beside that of `<stddef.h>`."""
+  with pytest.raises(ValueError, match="twice"):
+    Struct(name, Field(Type.uint8, "a")).export_c_header()
+
+def a_message_header_needs_its_module_prefix():
+  """Codes and the block type are module defines in C, named after the module."""
+  with pytest.raises(ValueError):
+    Message({1: Struct("one", Field(Type.uint8, "a"))}).export_c_header()
+
+def a_prefix_and_an_extern_type_are_c_names():
+  """Both go into the header as they are given."""
+  message = Message({1: Struct("one", Field(POINT, "p"))})
+  for prefix, extern in (("REC-X", None), ("REC", {POINT: ("geo point", "geo.h")})):
+    with pytest.raises(ValueError):
+      message.export_c_header(prefix=prefix, extern=extern)
+
+def a_field_takes_a_type_or_a_struct():
+  """A type named in a string would pass every check and fail at the first record."""
+  with pytest.raises(TypeError):
+    Field("uint8", "a")
+
+def a_member_and_a_struct_need_a_name():
+  """A member's name is its key in the record; a struct's keys its blocks and names its C type."""
+  for member in (Field(Type.uint8, ""), Bitfield("", [("on", 1)])):
+    with pytest.raises(ValueError):
+      Struct("named", member)
+  with pytest.raises(ValueError):
+    Struct("")
+
+def a_member_name_stands_for_one_member():
+  """One name, one key: a field and a bitfield cannot share it, nor a field and the crc tail."""
+  with pytest.raises(ValueError):
+    Struct("dup", Field(Type.uint8, "flags"), Bitfield("flags", [("on", 1)]))
+  with pytest.raises(ValueError):
+    Struct("tail", Field(Type.uint8, "crc"), crc=crc32_iso) # the tail is `crc` in C and numpy
+  assert Struct("free", Field(Type.uint8, "crc")).size == 1 # without a tail the name is free
+
+def what_a_uint16_length_cannot_count_is_refused():
+  """A block, a bytes field and a frame each count their bytes in 16 bits."""
+  big = Struct("big", Field(Type.uint32, "a", length=16384))
+  with pytest.raises(ValueError, match="'big'"):
+    Message({1: big}).encode({"big": [{"a": [0] * 16384}]})
+  with pytest.raises(ValueError, match="'data'"):
+    Struct("blob", Field(Type.bytes, "data")).encode({"data": bytes(65536)})
+  with pytest.raises(ValueError):
+    Frame(limit=65532) # with the 4 bytes of its crc, one past 65535
+  assert Frame(limit=65531).limit == 65531
 
 def decoding_a_struct_short_of_its_padding_raises():
   """Padding and alignment skip bytes without reading them, so a short record would decode fine."""
-  s = Struct(name="short_pad").add(Field(Type.uint8, "a"), Padding(3))
-  with pytest.raises(ValueError, match="Incomplete data"):
+  s = Struct("short_pad", Field(Type.uint8, "a"), Padding(3))
+  with pytest.raises(ValueError, match="cut short"):
     s.decode(b"\x01")
   assert s.decode(b"\x01\x00\x00\x00") == {"a": 1}
 
-def decoding_a_struct_that_consumes_nothing_raises():
-  """An empty struct would keep `decode` appending `{}` without ever reaching the end."""
-  with pytest.raises(ValueError, match="consumes no bytes"):
-    Struct(name="empty").decode(b"\x00")
+@pytest.mark.parametrize("make", [
+  lambda: Struct("empty"), # C has no empty struct, and no run of empty records ends
+  lambda: Struct("unaligned", Field(Type.uint8, "a"), align=0),
+  lambda: Padding(0), # C has no zero-length array
+  lambda: Bitfield("zero", [("a", 0)]), # nor a named bit group of no width
+  lambda: Field(Type.uint8, "none", length=0), # no bytes, yet one value would go out
+  lambda: Field(Type.string, "text", length=2), # a string sizes itself
+  lambda: Field(Type.bytes, "data", scale=10), # no number to scale
+  lambda: Field(POINT, "pos", offset=1), # nor in a struct
+])
+def a_layout_the_bytes_would_contradict_is_refused_where_it_is_made(make):
+  with pytest.raises(ValueError):
+    make()
+
+def a_block_code_is_an_integer():
+  """Keys read from JSON are strings, and the code "1" would never meet a 1 on the wire."""
+  with pytest.raises(TypeError):
+    Message({"1": Struct("one", Field(Type.uint8, "a"))})
 
 def crc_detects_corruption():
-  s = Struct(name="guarded", crc=crc32_iso).add(Field(Type.uint16, "n"))
+  s = Struct("guarded", Field(Type.uint16, "n"), crc=crc32_iso)
   frame = s.encode({"n": 0xBEEF})
   assert s.decode(frame) == {"n": 0xBEEF}
   for at in (0, -1): # a flipped payload byte, a flipped crc byte
@@ -252,26 +640,17 @@ def crc_detects_corruption():
       s.decode(bytes(corrupt))
 
 def missing_required_field_raises():
-  s = Struct(name="req").add(Field(Type.uint8, "a"))
+  s = Struct("req", Field(Type.uint8, "a"))
   with pytest.raises(KeyError):
     s.encode({})
 
-def a_value_past_its_type_is_refused_by_the_field_name():
-  s = Struct(name="range").add(Field(Type.uint8, "ok"), Field(Type.int16, "temp", scale=100))
+@pytest.mark.parametrize("kind, value", [
+  (Type.int16, 400), # 40000 is past int16
+  (Type.int16, float("inf")), # no integer holds it
+  (Type.int16, float("nan")),
+  (Type.float, 1e39), # past FLT_MAX
+])
+def a_value_its_type_cannot_hold_is_refused_by_the_field_name(kind, value):
+  s = Struct("range", Field(Type.uint8, "ok"), Field(kind, "temp", scale=100))
   with pytest.raises(ValueError, match="temp"):
-    s.encode({"ok": 1, "temp": 400}) # 40000 is past int16
-
-@pytest.fixture
-def registry():
-  saved = dict(Struct._codes)
-  Struct._codes.clear()
-  yield
-  Struct._codes.clear()
-  Struct._codes.update(saved)
-
-@pytest.mark.usefixtures("registry")
-def code_registry_is_idempotent():
-  Struct(code=0xA1, name="Frame")
-  Struct(code=0xA1, name="Frame") # same code + name: allowed
-  with pytest.raises(ValueError):
-    Struct(code=0xA1, name="Other") # same code, new name: rejected
+    s.encode({"ok": 1, "temp": value})
