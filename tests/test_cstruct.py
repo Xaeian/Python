@@ -411,7 +411,7 @@ def a_note_gives_the_unit_only_where_c_holds_the_value_in_it():
 
 def a_bitfield_note_reaches_c():
   s = Struct("state", Bitfield("flags", [("mode", 4)], doc="`mode` as the drive numbers it"))
-  assert "  state_flags_t flags;  // `mode` as the drive numbers it" in s.export_c_header()
+  assert "  state_flags_t flags; // `mode` as the drive numbers it" in s.export_c_header()
 
 def a_note_of_lines_or_too_long_to_trail_goes_above_its_member():
   """
@@ -428,7 +428,7 @@ def a_note_of_lines_or_too_long_to_trail_goes_above_its_member():
   )
   lines = s.export_c_header().splitlines()
   assert all(len(line) <= 99 for line in lines)
-  assert "  uint16_t seq;  // first sample of the frame, its clock on the wire" in lines
+  assert "  uint16_t seq; // first sample of the frame, its clock on the wire" in lines # alone
   at = lines.index(f"  uint16_t {gate};")
   assert lines[at - 1] == "  // gate timeout"
   at = lines.index("  int16_t bus;")
@@ -442,6 +442,12 @@ def notes_line_up_two_spaces_past_the_longest_line_of_their_run():
   lines = s.export_c_header().splitlines()
   noted = [line for line in lines if line.startswith(("  uint16_t seq;", "  int8_t hand;"))]
   assert [line.index("//") for line in noted] == [len("  state_flags_t flags;") + 2] * 2
+
+def a_note_standing_alone_takes_one_space():
+  """A column of one is padding: a lone note sits one space behind its line."""
+  s = Struct("state", Field(Type.uint8, "b", doc="the only note"),
+    Bitfield("flags_of_the_whole_drive", [("mode", 4)]))
+  assert "  uint8_t b; // the only note" in s.export_c_header().splitlines()
 
 GEO_H = """\
 // geo.h

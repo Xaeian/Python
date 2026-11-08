@@ -286,7 +286,7 @@ class _Run:
 
   @staticmethod
   def _reader(field:Field) -> Callable|None:
-    """Raw → value of `field`: a float32 first the shortest decimal of its bits, then the field's."""
+    """Raw → value: a float32 first the shortest decimal of its bits, then the field's own."""
     if field.type != Type.float: return None if field._plain else field._value
     return _float32 if field._plain else lambda raw: field._value(_float32(raw))
 
@@ -446,7 +446,7 @@ class Struct:
     return data[at:at + size], at + size
 
   def _cut(self, members:tuple, have:int) -> ValueError|None:
-    """The error naming the member that `have` bytes of `members` end inside, `None` in padding."""
+    """The error naming the first member `have` bytes of `members` cut short, else `None`."""
     end = 0
     for member in members:
       size = member.size
@@ -765,6 +765,7 @@ _C_MACROS = re.compile( # what `<stddef.h>` and `<stdint.h>` define without argu
 _C_TYPES = re.compile( # the types they define, so a struct of the same name is a second one
   r"(u?int(_least|_fast)?(8|16|32|64)|u?int(ptr|max)|size|ptrdiff|wchar|max_align|nullptr)_t",
 )
+_WIDTH = 99 # the longest line `cstyle` takes
 
 def _c_name(name:str) -> bool:
   """`True` for an identifier C takes as written: no keyword, nothing reserved or defined."""
@@ -772,9 +773,9 @@ def _c_name(name:str) -> bool:
   return bool(_C_NAME.fullmatch(name))
 
 def _separator(name:str="") -> str:
-  """A `cstyle` separator: 99 characters, the name at its end."""
+  """A `cstyle` separator: a whole line, the name at its end."""
   label = f" {name}" if name else ""
-  return "//" + "-" * (97 - len(label)) + label
+  return "//" + "-" * (_WIDTH - 2 - len(label)) + label
 
 def _guard(path:str|None, name:str) -> str:
   """Include guard from the file's name, else from `name`: `diag/rec_wire.h` → `REC_WIRE_H_`."""
@@ -786,13 +787,13 @@ def _guard(path:str|None, name:str) -> str:
 def _assert(test:str, says:str) -> str:
   """
   One `_Static_assert`, its message saying what the wire holds.
-  Past the 99 characters of `cstyle` the message goes on a line of its own, and the test too
-  when its own line runs past them.
+  Past the width of `cstyle` the message goes on a line of its own, and the test too
+  when its own line runs past it.
   """
   line = f'_Static_assert({test}, "{says} on the wire");'
-  if len(line) <= 99: return line
+  if len(line) <= _WIDTH: return line
   head = f"_Static_assert({test},"
-  if len(head) <= 99: return f'{head}\n  "{says} on the wire");'
+  if len(head) <= _WIDTH: return f'{head}\n  "{says} on the wire");'
   return f'_Static_assert(\n  {test},\n  "{says} on the wire");'
 
 class _Row(NamedTuple):
@@ -853,9 +854,9 @@ class _CHeader:
     twice = sorted({name for name in members if members.count(name) > 1})
     if twice: raise ValueError(f"C members of '{struct.name}' share a name: {', '.join(twice)}")
     for row in rows: # a note breaks where its author breaks it, so a line too long is theirs
-      if any(len(f"  // {line}") > 99 for line in row.note.splitlines()):
+      if any(len(f"  // {line}") > _WIDTH for line in row.note.splitlines()):
         where = struct._where(row.name)
-        raise ValueError(f"{where} has a note line past 99 in C: break it with \\n")
+        raise ValueError(f"{where} has a note line past {_WIDTH} in C: break it with \\n")
 
   def code(self, struct:Struct) -> str:
     """Define of the block code of `struct`: `REC_CODE_SAMPLE`."""
@@ -878,8 +879,7 @@ class _CHeader:
   @staticmethod
   def note(field:Field) -> str:
     """`doc`, then `[unit]` only where C holds the value in it: scaled, it holds raw counts."""
-    raw = field.scale == 1 and not field.offset
-    unit = f"[{field.unit}]" if field.unit and raw else ""
+    unit = f"[{field.unit}]" if field.unit and field._plain else ""
     return " ".join(part for part in (field.doc, unit) if part)
 
   def members(self, struct:Struct) -> list[_Row]:
@@ -942,22 +942,24 @@ class _CHeader:
     """The struct itself, packed only where its layout is not the natural one."""
     rows = self.members(struct)
     # A run of declarations shares one note column, two spaces past its longest line, noted or not.
-    # One too long for a column that keeps every note within 99 gives it up and pushes no one right;
-    # a note of several lines, or one that cannot trail at all, goes above its member.
+    # A line too long for a column that keeps every note in the width gives it up, pushing no one;
+    # a note of several lines, or one that cannot trail at all, goes above its member,
+    # and a note standing alone takes one space: a column of one is padding.
     fits = {row.name for row in rows
-      if row.note and "\n" not in row.note and 4 + len(row.decl) + 3 + len(row.note) <= 99}
+      if row.note and "\n" not in row.note and 4 + len(row.decl) + 3 + len(row.note) <= _WIDTH}
     shaping = list(rows)
     while shaping:
       column = 4 + max(len(row.decl) for row in shaping)
-      if all(column + 3 + len(row.note) <= 99 for row in shaping if row.name in fits): break
+      if all(column + 3 + len(row.note) <= _WIDTH for row in shaping if row.name in fits): break
       shaping.remove(max(shaping, key=lambda row: len(row.decl)))
     trailing = {row.name for row in shaping if row.name in fits}
+    alone = len(trailing) == 1
     packed = "" if self.natural(struct) else " __attribute__((packed))"
     lines = [f"typedef struct{packed} {{"]
     for row in rows:
       decl = f"  {row.decl}"
       if row.name in trailing:
-        lines.append(f"{decl.ljust(column)}// {row.note}")
+        lines.append(f"{decl} // {row.note}" if alone else f"{decl.ljust(column)}// {row.note}")
         continue
       lines += [f"  // {line}".rstrip() for line in row.note.splitlines()] # the author's breaks
       lines.append(decl)
