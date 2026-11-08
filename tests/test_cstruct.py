@@ -119,9 +119,14 @@ def a_bitfield_refuses_a_name_it_lacks_and_a_value_outside_its_bits():
     st.encode({"mode": 1.0}) # bits are counted, never measured
 
 def a_bitfield_refuses_a_layout_it_cannot_pack():
-  """A repeated name would fold two groups into one; bits past the integer would be lost."""
+  """
+  A repeated name would fold two groups into one; bits past the integer would be lost;
+  no group at all would be a byte on the wire that carries nothing.
+  """
   with pytest.raises(ValueError):
     Bitfield("twice", [("mode", 4), ("mode", 4)])
+  with pytest.raises(ValueError, match="bit group"):
+    Bitfield("empty", [])
   for kind in (Type.uint8, Type.int16): # too narrow, signed
     with pytest.raises(ValueError):
       Bitfield("wide", [("count", 12)], type=kind)
@@ -146,6 +151,9 @@ def a_string_that_is_no_utf8_is_refused_by_its_name():
   """Every read error names its field and struct, a byte that is no UTF-8 included."""
   with pytest.raises(ValueError, match="'t' of 'txt'"):
     Struct("txt", Field(Type.uint8, "kind"), Field(Type.string, "t")).decode(b"\x01\xff\x00")
+  text = Struct("txt", Field(Type.uint8, "kind"), Field(Type.string, "t"))
+  with pytest.raises(ValueError, match="'t' of 'txt'"):
+    text.encode({"kind": 1, "t": "\ud800"}) # a lone surrogate, no UTF-8 either
 
 @pytest.mark.parametrize("endian, order", [(Endian.little, "little"), (Endian.big, "big")])
 def endian_mirrors_bytes(endian, order):
@@ -401,6 +409,40 @@ def a_note_gives_the_unit_only_where_c_holds_the_value_in_it():
   header = s.export_c_header()
   assert "// [ms]" in header and "// raw DC bus" in header and "[V]" not in header
 
+def a_bitfield_note_reaches_c():
+  s = Struct("state", Bitfield("flags", [("mode", 4)], doc="`mode` as the drive numbers it"))
+  assert "  state_flags_t flags;  // `mode` as the drive numbers it" in s.export_c_header()
+
+def a_note_of_lines_or_too_long_to_trail_goes_above_its_member():
+  """
+  `cstyle` Placement keeps a line to 99: a note past it goes above its member,
+  a declaration whose column would push the other notes past it gives the column up,
+  and a note of several lines keeps the breaks its author put where the sentence pauses.
+  """
+  gate = "closing_gate_entry_timeout_at_the_far_end_of_the_drive_run_s"
+  bus = "raw counts of the drive's own ADC,\nnever scaled on the wire"
+  s = Struct("drive",
+    Field(Type.uint16, "seq", doc="first sample of the frame, its clock on the wire"),
+    Field(Type.uint16, gate, doc="gate timeout"),
+    Field(Type.int16, "bus", doc=bus),
+  )
+  lines = s.export_c_header().splitlines()
+  assert all(len(line) <= 99 for line in lines)
+  assert "  uint16_t seq;  // first sample of the frame, its clock on the wire" in lines
+  at = lines.index(f"  uint16_t {gate};")
+  assert lines[at - 1] == "  // gate timeout"
+  at = lines.index("  int16_t bus;")
+  above = ["  // raw counts of the drive's own ADC,", "  // never scaled on the wire"]
+  assert lines[at - 2:at] == above
+
+def notes_line_up_two_spaces_past_the_longest_line_of_their_run():
+  """`cstyle` Placement: a member without a note is a line of the run, as in a Python block."""
+  s = Struct("state", Field(Type.uint16, "seq", doc="first sample"),
+    Bitfield("flags", [("mode", 4)]), Field(Type.int8, "hand", "ticks"))
+  lines = s.export_c_header().splitlines()
+  noted = [line for line in lines if line.startswith(("  uint16_t seq;", "  int8_t hand;"))]
+  assert [line.index("//") for line in noted] == [len("  state_flags_t flags;") + 2] * 2
+
 GEO_H = """\
 // geo.h
 
@@ -428,7 +470,7 @@ EDGES = Message({ # every layout the exporter writes its own way
   1: Struct("held", Field(ITEM, "item"), Field(Type.uint32, "stamp")), # a type from `extern` naming its filler itself
   2: Struct("odd", Field(Type.uint8, "kind"), Field(Type.uint32, "stamp"), align=4, crc=crc32_iso), # packed, an alignment tail, a crc
   3: Struct("blob", Field(Type.uint8, "kind"), Field(Type.bytes, "data")), # a length before a flexible array
-  4: Struct("note", Field(Type.uint8, "kind"), Field(Type.string, "text")), # a string behind a member
+  4: Struct("note", Field(Type.uint8, "kind", doc="a note of two lines,\nas its author broke it"), Field(Type.string, "text")), # a string behind a member
 })
 
 MAIN_C = """\
@@ -531,6 +573,8 @@ def dtype_refuses_a_record_of_varying_size():
   Struct("length", Field(Type.uint8, "data_len"), Field(Type.bytes, "data")), # the length of `data`
   Struct("filler", Field(Type.uint8, "_pad1"), Padding(1)), # the name of the padding
   Struct("log", Field(Type.string, "text")), # a flexible array needs a member before it
+  Struct("noted", Field(Type.uint8, "a", doc="n" * 95)), # a note line past 99 in C
+  Struct("broken", Field(Type.uint8, "a", doc="short\n" + "n" * 95)), # one its author broke too
   Struct("null", Field(Type.uint8, "NULL")), # `<stddef.h>` makes it `((void*)0)`
   Struct("limit", Field(Type.uint8, "INT8_MAX")), # `<stdint.h>` makes it a number
   Struct("big", Field(Type.uint16, "a"), endian=Endian.big), # C holds the target's order
@@ -620,9 +664,34 @@ def decoding_a_struct_short_of_its_padding_raises():
   lambda: Field(Type.string, "text", length=2), # a string sizes itself
   lambda: Field(Type.bytes, "data", scale=10), # no number to scale
   lambda: Field(POINT, "pos", offset=1), # nor in a struct
+  lambda: Field(Type.int16, "flat", scale=0), # a read would divide by it
+  lambda: Field(Type.int16, "text", scale="10"), # a string repeats instead of scaling
+  lambda: Field(Type.int16, "shift", offset="1"),
+  lambda: Field(Type.int16, "half", length=2.0), # `a[2.0]` in C
+  lambda: Field(Type.int16, "flag", length=True),
+  lambda: Padding(1.5),
+  lambda: Struct("half", Field(Type.uint8, "a"), align=1.5),
+  lambda: Bitfield("half", [("a", 1.5)]),
+  lambda: Field(Type.uint8, "pair", length=2, default=0), # one value where two go out
+  lambda: Field(Type.uint8, "wide", default=300), # past its type
 ])
 def a_layout_the_bytes_would_contradict_is_refused_where_it_is_made(make):
-  with pytest.raises(ValueError):
+  """A default is checked against its own field: in a struct it is encoded once, as it is made."""
+  with pytest.raises((ValueError, TypeError)):
+    made = make()
+    if isinstance(made, Field): Struct("host", made)
+
+@pytest.mark.parametrize("make", [
+  lambda: Struct("order", Field(Type.uint8, "a"), endian="<"),
+  lambda: Struct("guard", Field(Type.uint8, "a"), crc=32),
+  lambda: Bitfield("kind", [("a", 1)], type="uint8"),
+  lambda: Frame(crc="crc32"),
+  lambda: Frame(endian=">"),
+  lambda: Message({1: "sample"}), # a struct's name, not the struct
+])
+def a_part_of_the_wrong_kind_is_refused_where_it_is_made(make):
+  """A plain string or number in its place would fail only at the first record, unnamed."""
+  with pytest.raises(TypeError):
     make()
 
 def a_block_code_is_an_integer():
@@ -654,3 +723,93 @@ def a_value_its_type_cannot_hold_is_refused_by_the_field_name(kind, value):
   s = Struct("range", Field(Type.uint8, "ok"), Field(kind, "temp", scale=100))
   with pytest.raises(ValueError, match="temp"):
     s.encode({"ok": 1, "temp": value})
+
+@pytest.mark.parametrize("value", ["7", None, b"\x07", [7]])
+def a_number_field_refuses_what_is_no_number_by_its_name(value):
+  """Arithmetic on the scale would raise first, naming an operand instead of the field."""
+  s = Struct("state", Field(Type.uint16, "seq"), Field(Type.int16, "bus", "V", scale=10))
+  with pytest.raises(TypeError, match="'bus' of 'state'"):
+    s.encode({"seq": 1, "bus": value})
+
+MIXED = Struct("mixed", # every member of fixed size in one record, its tail included
+  Field(Type.uint16, "seq"),
+  Field(Type.int16, "temp", "°C", scale=10, offset=-5, default=20.0),
+  Field(Type.float, "gain", length=2),
+  Field(Type.double, "ratio"),
+  Field(POINT, "pos", length=2),
+  Bitfield("flags", [("mode", 4), ("fault", 12)]),
+  Padding(2),
+  crc=crc32_iso, align=8,
+)
+MIXED_RECORD = {"seq": 1, "gain": [1.0, 2.0], "ratio": 0.5, "pos": [{"x": 1, "y": 2}] * 2,
+  "flags": {"mode": 1, "fault": 2}}
+
+def a_record_of_every_kind_reads_back_as_it_was_written():
+  rng = random.Random(7)
+  for _ in range(200):
+    record = {
+      "seq": rng.randrange(65536), "temp": rng.randrange(-3000, 3000) / 10,
+      "gain": [rng.uniform(-1e3, 1e3), rng.uniform(-1, 1)], "ratio": rng.uniform(-1e9, 1e9),
+      "pos": [{"x": rng.randrange(-99, 99), "y": rng.randrange(-99, 99)} for _ in range(2)],
+      "flags": {"mode": rng.randrange(16), "fault": rng.randrange(4096)},
+    }
+    if rng.random() < 0.3: del record["temp"] # the default stands in
+    data = MIXED.encode(record)
+    read = MIXED.decode(data)
+    assert read["temp"] == record.get("temp", 20.0) and read["pos"] == record["pos"]
+    assert MIXED.encode(read) == data and MIXED.records(data * 3) == [read] * 3
+
+@pytest.mark.parametrize("change, name", [
+  ({"seq": "7"}, "'seq' of 'mixed'"), # no number
+  ({"seq": None}, "'seq' of 'mixed'"),
+  ({"seq": [7]}, "'seq' of 'mixed'"), # one value, not a list
+  ({"seq": 70000}, "'seq' of 'mixed'"), # past uint16
+  ({"seq": float("nan")}, "'seq' of 'mixed'"),
+  ({"gain": [1.0]}, "'gain' of 'mixed'"), # two items
+  ({"gain": (1.0, 2.0, 3.0)}, "'gain' of 'mixed'"),
+  ({"gain": b"\x00\x00"}, "'gain' of 'mixed'"),
+  ({"pos": {"x": 1, "y": 2}}, "'pos' of 'mixed'"), # a list of two points
+  ({"pos": [{"x": 1, "z": 2}] * 2}, "'point' has no z"), # a key the point lacks
+  ({"flags": {"mode": 16}}, "'mode'"), # past its 4 bits
+  ({"flags": {"mod": 1}}, "'flags' has no mod"),
+  ({"sequence": 1}, "'mixed' has no sequence"), # a key the record lacks
+])
+def a_record_off_its_layout_is_refused_by_the_name_of_what_is_off(change, name):
+  with pytest.raises((TypeError, ValueError, KeyError), match=name):
+    MIXED.encode({**MIXED_RECORD, **change})
+
+def a_record_cut_short_is_refused_by_the_member_it_cuts():
+  data = MIXED.encode(MIXED_RECORD)
+  with pytest.raises(ValueError, match="'gain' of 'mixed' is cut short"):
+    MIXED.decode(data[:5])
+  with pytest.raises(ValueError, match="'y' of 'point' is cut short"):
+    MIXED.decode(data[:22]) # inside the first of the two points
+  with pytest.raises(ValueError, match="CRC"):
+    MIXED.decode(data[:-1]) # the crc short of a byte
+
+def a_cut_in_padding_says_so_by_the_nearest_name():
+  """Padding names no member: the record says so, or the field of a host that holds it."""
+  s = Struct("text", Field(Type.string, "t"), Field(Type.uint8, "a"), Padding(3))
+  with pytest.raises(ValueError, match="'text' is cut short in its padding"):
+    s.decode(s.encode({"t": "ab", "a": 1})[:5])
+  inner = Struct("inner", Field(Type.uint8, "a"), Padding(1))
+  host = Struct("host", Field(inner, "in"), Field(Type.uint8, "b"))
+  with pytest.raises(ValueError, match="'in' of 'host' is cut short"):
+    host.decode(host.encode({"in": {"a": 1}, "b": 2})[:1]) # in the padding of `inner`
+
+def a_blank_line_of_a_note_leaves_nothing_behind_its_slashes():
+  header = Struct("noted", Field(Type.uint8, "a", doc="first\n\nthird")).export_c_header()
+  assert "  //\n" in header and all(line == line.rstrip() for line in header.splitlines())
+
+def raw_reads_the_numbers_the_wire_holds():
+  """A database of raw counts takes them as the wire has them, a bitfield as one integer."""
+  s = Struct("state",
+    Field(Type.int16, "bus", "V", scale=10), Bitfield("flags", [("mode", 4), ("fault", 4)]),
+    Field(POINT, "pos"), Field(Type.float, "temp"),
+  )
+  record = {"bus": 24.1, "flags": {"mode": 3, "fault": 1}, "pos": {"x": 1, "y": -2}, "temp": 0.1}
+  wire = {"bus": 241, "flags": 19, "pos": {"x": 1, "y": -2}, "temp": 0.10000000149011612}
+  data = s.encode(record)
+  assert s.decode(data, raw=True) == wire and s.records(data * 2, raw=True) == [wire] * 2
+  message = Message({1: s})
+  assert message.decode(message.encode({"state": [record]}), raw=True) == {"state": [wire]}

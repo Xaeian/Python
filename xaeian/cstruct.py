@@ -5,8 +5,7 @@ Binary records described once, for Python, numpy and C.
 
 Numeric, string and byte fields, fixed arrays, nested structs, bitfields and padding,
 a scale and an offset per number, a CRC per record.
-A record exports as a C header that mirrors the wire byte for byte, as a numpy `dtype()`,
-or as a Markdown table.
+A record exports as a C header that mirrors the wire byte for byte, or as a numpy `dtype()`.
 
 Three layers put records on a wire, joined by the caller:
 `Struct` is one record, `Message` puts blocks of records under codes into one body,
@@ -21,10 +20,10 @@ Example:
 """
 
 import re
-from numbers import Integral
-from struct import pack, unpack_from, calcsize, error as PackError
+from numbers import Integral, Real
+from struct import pack, unpack_from, calcsize, error as PackError, Struct as Packer
 from enum import Enum
-from typing import Any, Iterator, NamedTuple
+from typing import Any, Callable, Iterator, NamedTuple, cast
 
 from .crc import CRC, crc32_iso
 from .extras import MissingExtra, absent
@@ -61,6 +60,27 @@ class Endian(Enum):
   little = "<"
   big = ">"
 
+def _check_count(value:Any, what:str) -> None:
+  """Refuse `value` as `what` unless it is a whole number of 1 or more."""
+  if isinstance(value, bool) or not isinstance(value, Integral):
+    raise TypeError(f"{what} is a whole number, not {value!r}")
+  if value < 1: raise ValueError(f"{what} is 1 or more, not {value}")
+
+def _float32(value:float) -> float:
+  """
+  Shortest decimal packing into the same float32 bits: 23.45, not 23.450000762939453.
+  Nine digits keep every bit through a read and a rewrite; past the float32 range, `value` as is.
+  Six come first: `%g` drops their trailing zeros, so a shorter decimal shows through them anyway.
+  """
+  try: bits = pack("<f", value)
+  except OverflowError: return value
+  for digits in range(6, 10):
+    short = float(f"{value:.{digits}g}")
+    try:
+      if pack("<f", short) == bits: return short
+    except OverflowError: continue # rounded past FLT_MAX, as 3.403e+38 is for 3.4028235e+38
+  return value
+
 #-------------------------------------------------------------------------------------------- Field
 
 class Field:
@@ -94,7 +114,12 @@ class Field:
       raise TypeError(f"Field '{name}' takes a Type or a Struct, got {type!r}")
     if isinstance(type, Struct) and (type.crc or type.align > 1):
       raise ValueError(f"Struct '{type.name}' nests by its members only: no crc or align")
-    if length < 1: raise ValueError(f"Field '{name}' needs a length of 1 or more, not {length}")
+    _check_count(length, f"Length of field '{name}'")
+    if not isinstance(scale, Real):
+      raise TypeError(f"Field '{name}' scales by a number, not {scale!r}")
+    if not scale: raise ValueError(f"Field '{name}' cannot scale by 0: a read divides by it")
+    if not isinstance(offset, Real):
+      raise TypeError(f"Field '{name}' shifts by a number, not {offset!r}")
     if length > 1 and type in (Type.string, Type.bytes):
       raise ValueError(f"Field '{name}' of {type.name} sizes itself: no length")
     if (scale != 1 or offset) and not (isinstance(type, Type) and type.size):
@@ -120,7 +145,7 @@ class Field:
     return None if size is None else size * self.length
 
   def _raw(self, value:float) -> float:
-    """The number the wire holds: scaled and shifted."""
+    """The number the wire holds, before its bits: scaled and shifted."""
     return value * self.scale + self.offset
 
   def _value(self, raw:float) -> float:
@@ -128,6 +153,11 @@ class Field:
     if self.offset: raw -= self.offset
     if self.scale != 1: raw /= self.scale
     return raw
+
+  @property
+  def _plain(self) -> bool:
+    """`True` where `_value` gives the raw number back as it is, so a read can skip it."""
+    return not self.offset and self.scale == 1
 
   def __repr__(self) -> str:
     unit = f", {self.unit!r}" if self.unit else ""
@@ -143,25 +173,38 @@ class Bitfield:
   Example:
     status = Bitfield("status", [("enabled", 1), ("error", 1), ("mode", 3)]) # 5 bits → uint8
   """
-  def __init__(self, name:str, bits:list[tuple[str, int]], type:Type|None=None) -> None:
+  def __init__(
+    self,
+    name:str,
+    bits:list[tuple[str, int]],
+    type:Type|None = None,
+    *,
+    doc:str = "",
+  ) -> None:
     """
     Args:
       bits: `(bit_name, bit_width)` pairs, the lowest bits first
       type: Unsigned integer the bits pack into, by default the narrowest that holds them
+      doc: Documentation only, the note of the C member
     """
-    self.name: str = name
-    self.bits: dict[str, int] = dict(bits)
-    if len(self.bits) < len(bits): raise ValueError(f"Duplicate bit name in bitfield '{name}'")
-    if any(width < 1 for width in self.bits.values()):
-      raise ValueError(f"Bitfield '{name}' needs every bit group 1 wide or more")
-    total = sum(self.bits.values())
+    groups = dict(bits)
+    if not groups: raise ValueError(f"Bitfield '{name}' needs a bit group")
+    if len(groups) < len(bits): raise ValueError(f"Duplicate bit name in bitfield '{name}'")
+    for bit, width in groups.items(): _check_count(width, f"Width of '{bit}' in bitfield '{name}'")
+    if type is not None and not isinstance(type, Type):
+      raise TypeError(f"Bitfield '{name}' packs into a Type, got {type!r}")
+    total = sum(groups.values())
     if total <= 8: narrowest = Type.uint8
     elif total <= 16: narrowest = Type.uint16
     elif total <= 32: narrowest = Type.uint32
     else: narrowest = Type.uint64
-    self.type: Type = type or narrowest
-    if not self.type.name.startswith("uint") or total > 8 * self.size:
+    kind = type or narrowest
+    if not kind.name.startswith("uint") or total > 8 * calcsize(kind.value):
       raise ValueError(f"Bitfield '{name}' needs an unsigned integer of {total} bits or more")
+    self.name: str = name
+    self.bits: dict[str, int] = groups
+    self.type: Type = kind
+    self.doc: str = doc
 
   @property
   def size(self) -> int:
@@ -204,7 +247,7 @@ class Bitfield:
 class Padding:
   """Run of zero bytes for alignment, skipped on decode."""
   def __init__(self, size:int) -> None:
-    if size < 1: raise ValueError(f"Padding needs 1 byte or more, not {size}")
+    _check_count(size, "Size of a padding")
     self.size: int = size
 
   def __repr__(self) -> str:
@@ -212,20 +255,56 @@ class Padding:
 
 #------------------------------------------------------------------------------------------- Struct
 
-def _float32(value:float) -> float:
-  """
-  Shortest decimal packing into the same float32 bits: 23.45, not 23.450000762939453.
-  Nine digits keep every bit through a read and a rewrite; past the float32 range, `value` as is.
-  Six come first: `%g` drops their trailing zeros, so a shorter decimal shows through them anyway.
-  """
-  try: bits = pack("<f", value)
-  except OverflowError: return value
-  for digits in range(6, 10):
-    short = float(f"{value:.{digits}g}")
-    try:
-      if pack("<f", short) == bits: return short
-    except OverflowError: continue # rounded past FLT_MAX, as 3.403e+38 is for 3.4028235e+38
-  return value
+class _Step(NamedTuple):
+  """A member of a run: how many of the run's values it takes, and how they become its value."""
+  name: str
+  length: int # an array's length, else 1
+  value: Callable|None # raw → value, `None` where they are one
+  inner: "_Run|None" # a nested struct's run, which takes its values
+
+class _Run:
+  """Members of fixed size side by side: one `struct` call reads them, `build` lays them out."""
+  def __init__(self, members:list, endian:Endian) -> None:
+    fmt, steps = "", []
+    for member in members:
+      if isinstance(member, Padding):
+        fmt += f"{member.size}x"
+      elif isinstance(member, Bitfield):
+        fmt += member.type.value
+        steps.append(_Step(member.name, 1, member.decode, None))
+      elif isinstance(member.type, Struct):
+        inner = cast(_Run, member.type._parts[0]) # a struct of fixed size is one run
+        fmt += inner.format * member.length
+        steps.append(_Step(member.name, member.length, None, inner))
+      else:
+        fmt += f"{member.length}{member.type.value}"
+        steps.append(_Step(member.name, member.length, self._reader(member), None))
+    self.members: tuple = tuple(members) # in wire order, padding included
+    self.steps: tuple[_Step, ...] = tuple(steps)
+    self.format: str = fmt # without the byte order, so a host struct can take it in
+    self.packer: Packer = Packer(endian.value + fmt)
+
+  @staticmethod
+  def _reader(field:Field) -> Callable|None:
+    """Raw → value of `field`: a float32 first the shortest decimal of its bits, then the field's."""
+    if field.type != Type.float: return None if field._plain else field._value
+    return _float32 if field._plain else lambda raw: field._value(_float32(raw))
+
+  def build(self, values:tuple, at:int, record:dict, raw:bool) -> int:
+    """The run's values from `values[at:]` into `record` → the index behind them."""
+    for step in self.steps:
+      if step.inner:
+        items: list = []
+        for _ in range(step.length):
+          item: dict[str, Any] = {}
+          at = step.inner.build(values, at, item, raw)
+          items.append(item)
+      else:
+        items = list(values[at:at + step.length])
+        if step.value and not raw: items = [step.value(value) for value in items]
+        at += step.length
+      record[step.name] = items if step.length > 1 else items[0]
+    return at
 
 class Struct:
   """
@@ -253,7 +332,11 @@ class Struct:
     """
     if not name: raise ValueError("A struct needs a name: it keys its blocks and names its C type")
     if not members: raise ValueError(f"Struct '{name}' needs a member: no record is empty")
-    if align < 1: raise ValueError(f"Struct '{name}' aligns to 1 byte or more, not {align}")
+    _check_count(align, f"Alignment of struct '{name}'")
+    if not isinstance(endian, Endian):
+      raise TypeError(f"Struct '{name}' takes its byte order as an Endian, got {endian!r}")
+    if crc is not None and not isinstance(crc, CRC):
+      raise TypeError(f"Struct '{name}' takes a CRC, got {crc!r}")
     names = set()
     for member in members:
       if not isinstance(member, (Field, Bitfield, Padding)):
@@ -273,6 +356,25 @@ class Struct:
     self.endian: Endian = endian
     self.crc: CRC|None = crc
     self.align: int = align
+    self._keys: frozenset = frozenset(names)
+    self._parts: list[_Run|Field] = self._compile()
+    for member in members: # a default the field cannot hold fails here, not when it is missed
+      if isinstance(member, Field) and member.default is not None:
+        self._encode_field(member, member.default)
+
+  def _compile(self) -> list[_Run|Field]:
+    """The members in parts: a run of fixed size read in one call, each varying field alone."""
+    parts: list[_Run|Field] = []
+    run: list = []
+    for member in self.members:
+      if member.size is not None:
+        run.append(member)
+        continue
+      if run: parts.append(_Run(run, self.endian))
+      parts.append(member)
+      run = []
+    if run: parts.append(_Run(run, self.endian))
+    return parts
 
   def _where(self, name:str) -> str:
     """How an error names a member: `'temp' of 'state'`."""
@@ -280,7 +382,7 @@ class Struct:
 
   def _pack(self, kind:Type, name:str, raw:float) -> bytes:
     """
-    One number in the bits of `kind`, an integer rounded to the nearest whole.
+    One raw number in the bits of `kind`, an integer rounded to the nearest whole.
     Truncated, `2.3` at scale 100 would go out as 229: in floating point it is 229.99999999999997.
     A number `kind` cannot hold, `inf` or `nan` for an integer among them, is refused by name.
     """
@@ -290,15 +392,6 @@ class Struct:
     except (PackError, OverflowError, ValueError) as e:
       raise ValueError(f"{self._where(name)}: {e}") from None
 
-  def _unpack(self, kind:Type, name:str, data:bytes, at:int) -> Any:
-    """
-    The number the bits of `kind` hold at `at`, a float32 as the shortest decimal of its bits.
-    Data ending before it is refused by the name of its member.
-    """
-    if at + calcsize(kind.value) > len(data): raise ValueError(f"{self._where(name)} is cut short")
-    raw = unpack_from(self.endian.value + kind.value, data, at)[0]
-    return _float32(raw) if kind == Type.float else raw
-
   def _encode_field(self, field:Field, value:Any) -> bytes:
     """One field's bytes: a string, bytes, numbers or nested records."""
     if field.type == Type.string:
@@ -306,7 +399,9 @@ class Struct:
         raise TypeError(f"{self._where(field.name)} takes str, got {type(value).__name__}")
       if "\0" in value:
         raise ValueError(f"{self._where(field.name)} holds a NUL, its end on the wire")
-      return value.encode("utf-8") + b"\0"
+      try: return value.encode("utf-8") + b"\0"
+      except UnicodeEncodeError as e:
+        raise ValueError(f"{self._where(field.name)} holds no UTF-8: {e.reason}") from None
     if field.type == Type.bytes:
       if not isinstance(value, (bytes, bytearray)):
         raise TypeError(f"{self._where(field.name)} takes bytes, got {type(value).__name__}")
@@ -321,46 +416,64 @@ class Struct:
       raise TypeError(f"{self._where(field.name)} takes one value, got {type(value).__name__}")
     values = value if field.is_array else [value]
     if isinstance(field.type, Struct): return b"".join(field.type.encode(v) for v in values)
-    return b"".join(self._pack(field.type, field.name, field._raw(v)) for v in values)
+    data = b""
+    for v in values:
+      try: raw = field._raw(v)
+      except TypeError: # what the scale cannot multiply is no number
+        got = type(v).__name__
+        raise TypeError(f"{self._where(field.name)} takes a number, got {got}") from None
+      data += self._pack(field.type, field.name, raw)
+    return data
 
-  def _decode_field(self, field:Field, data:bytes, at:int) -> tuple[Any, int]:
-    """One field at `at` → `(value, offset behind it)`."""
+  def _decode_field(self, field:Field, data:bytes, at:int, raw:bool) -> tuple[Any, int]:
+    """A field of varying size at `at` → `(value, offset behind it)`."""
+    if isinstance(field.type, Struct): # one holding a string or bytes
+      items = []
+      for _ in range(field.length):
+        item, at = field.type._read(data, at, raw)
+        items.append(item)
+      return (items if field.is_array else items[0]), at
     if field.type == Type.string:
       end = data.find(0, at)
       if end < 0: raise ValueError(f"{self._where(field.name)} has no NUL to end it")
       try: return data[at:end].decode("utf-8"), end + 1
       except UnicodeDecodeError as e:
         raise ValueError(f"{self._where(field.name)} holds no UTF-8: {e.reason}") from None
-    if field.type == Type.bytes:
-      size = self._unpack(Type.uint16, field.name, data, at)
-      at += 2
-      if at + size > len(data): raise ValueError(f"{self._where(field.name)} is cut short")
-      return data[at:at + size], at + size
-    values: list[Any] = []
-    for _ in range(field.length):
-      if isinstance(field.type, Struct):
-        record, at = field.type._read(data, at)
-        values.append(record)
-      else:
-        values.append(field._value(self._unpack(field.type, field.name, data, at)))
-        at += calcsize(field.type.value)
-    return (values if field.is_array else values[0]), at
+    if at + 2 > len(data): raise ValueError(f"{self._where(field.name)} is cut short")
+    size = unpack_from(self.endian.value + "H", data, at)[0]
+    at += 2
+    if at + size > len(data): raise ValueError(f"{self._where(field.name)} is cut short")
+    return data[at:at + size], at + size
 
-  def _read(self, data:bytes, at:int=0) -> tuple[dict[str, Any], int]:
+  def _cut(self, members:tuple, have:int) -> ValueError|None:
+    """The error naming the member that `have` bytes of `members` end inside, `None` in padding."""
+    end = 0
+    for member in members:
+      size = member.size
+      if end + size > have and not isinstance(member, Padding):
+        cut = ValueError(f"{self._where(member.name)} is cut short")
+        if isinstance(member, Field) and isinstance(member.type, Struct): # inside one of its items
+          inner = member.type._cut(member.type.members, (have - end) % (size // member.length))
+          return inner or cut
+        return cut
+      end += size
+    return None
+
+  def _read(self, data:bytes, at:int, raw:bool) -> tuple[dict[str, Any], int]:
     """One record at `at` → `(record, offset behind it)`, its `crc` verified."""
     start = at
     record: dict[str, Any] = {}
-    for member in self.members:
-      if isinstance(member, Field):
-        record[member.name], at = self._decode_field(member, data, at)
-      elif isinstance(member, Bitfield):
-        record[member.name] = member.decode(self._unpack(member.type, member.name, data, at))
-        at += member.size
+    for part in self._parts:
+      if isinstance(part, _Run):
+        if at + part.packer.size > len(data):
+          cut = self._cut(part.members, len(data) - at)
+          raise cut or ValueError(f"Struct '{self.name}' is cut short in its padding")
+        part.build(part.packer.unpack_from(data, at), 0, record, raw)
+        at += part.packer.size
       else:
-        at += member.size
+        record[part.name], at = self._decode_field(part, data, at, raw)
     at += -(at - start) % self.align # the alignment padding `encode` adds
-    if at > len(data): # padding and alignment skip bytes without reading them
-      raise ValueError(f"Struct '{self.name}' is cut short: {len(data) - start} of {at - start}B")
+    if at > len(data): raise ValueError(f"Struct '{self.name}' is cut short in its padding")
     if self.crc:
       n = self.crc.size
       crc = data[at:at + n]
@@ -373,8 +486,7 @@ class Struct:
     """One record on the wire: its members, the alignment padding, then its `crc`."""
     if not isinstance(record, dict):
       raise TypeError(f"Struct '{self.name}' encodes a dict, got {type(record).__name__}")
-    keys = {member.name for member in self.members if not isinstance(member, Padding)}
-    unknown = record.keys() - keys # a typo would leave its field at the default, without a word
+    unknown = record.keys() - self._keys # a typo would leave its field at the default, unsaid
     if unknown: raise KeyError(f"Struct '{self.name}' has no {', '.join(sorted(unknown))}")
     data = b""
     for member in self.members:
@@ -391,18 +503,24 @@ class Struct:
     data += bytes(-len(data) % self.align)
     return self.crc.encode(data) if self.crc else data
 
-  def decode(self, data:bytes) -> dict[str, Any]:
-    """Exactly one record; bytes left behind it are refused, `records` reads a run of them."""
-    record, end = self._read(data)
+  def decode(self, data:bytes, raw:bool=False) -> dict[str, Any]:
+    """
+    Exactly one record; bytes left behind it are refused, `records` reads a run of them.
+    `raw` gives the numbers the wire holds: before `scale` and `offset`, a bitfield as one integer.
+    """
+    record, end = self._read(data, 0, raw)
     if end != len(data):
       raise ValueError(f"Struct '{self.name}' leaves {len(data) - end}B behind one record")
     return record
 
-  def records(self, data:bytes) -> list[dict[str, Any]]:
-    """Every record of `data`, back to back, as a list even when there is one."""
+  def records(self, data:bytes, raw:bool=False) -> list[dict[str, Any]]:
+    """
+    Every record of `data`, back to back, as a list even when there is one.
+    `raw` as in `decode`.
+    """
     out, at = [], 0
     while at < len(data): # every member takes a byte or more, so every record does
-      record, at = self._read(data, at)
+      record, at = self._read(data, at, raw)
       out.append(record)
     return out
 
@@ -459,27 +577,6 @@ class Struct:
     header.collect(self)
     return header.render(path, _guard(path, self.name))
 
-  def export_doc(self) -> str:
-    """Export as a Markdown field table."""
-    lines = [f"# Struct: {self.name}", "", "## Fields", ""]
-    lines.append("| Name | Type | Unit | Description |")
-    lines.append("|------|------|------|-------------|")
-    for member in self.members:
-      if isinstance(member, Field):
-        kind = member.type.name + (f"[{member.length}]" if member.is_array else "")
-        notes = [member.doc] if member.doc else []
-        if member.scale != 1: notes.append(f"scale={member.scale}")
-        if member.offset: notes.append(f"offset={member.offset}")
-        if member.default is not None: notes.append(f"default={member.default}")
-        note = " ".join(notes) or "-"
-        lines.append(f"| {member.name} | {kind} | {member.unit or '-'} | {note} |")
-      elif isinstance(member, Bitfield):
-        bits = ", ".join(f"{bit}:{width}" for bit, width in member.bits.items())
-        lines.append(f"| {member.name} | bitfield | - | {bits} |")
-      else:
-        lines.append(f"| _padding_ | pad[{member.size}] | - | alignment |")
-    return "\n".join(lines)
-
   def __repr__(self) -> str:
     return f"Struct({self.name!r})"
 
@@ -503,6 +600,8 @@ class Message:
     self.structs: dict[int, Struct] = dict(structs)
     self._codes: dict[str, int] = {}
     for code, struct in self.structs.items():
+      if not isinstance(struct, Struct):
+        raise TypeError(f"Message takes a Struct for code {code!r}, got {struct!r}")
       if not isinstance(code, Integral):
         raise TypeError(f"Code {code!r} of '{struct.name}' is no integer")
       if not 0 <= code <= 0xFFFF: raise ValueError(f"Code {code} of '{struct.name}' is no uint16")
@@ -530,8 +629,8 @@ class Message:
       body += pack(self.endian.value + "HH", code, len(payload)) + payload
     return body
 
-  def decode(self, body:bytes) -> dict[str, list[dict]]:
-    """A body → `{struct_name: [records]}`."""
+  def decode(self, body:bytes, raw:bool=False) -> dict[str, list[dict]]:
+    """A body → `{struct_name: [records]}`; `raw` as in `Struct.decode`."""
     data: dict[str, list[dict]] = {}
     at = 0
     while at < len(body):
@@ -542,7 +641,7 @@ class Message:
       if at + size > len(body):
         raise ValueError(f"Block declares {size}B, {len(body) - at}B left in the message")
       struct = self.structs[code]
-      data.setdefault(struct.name, []).extend(struct.records(body[at:at + size]))
+      data.setdefault(struct.name, []).extend(struct.records(body[at:at + size], raw))
       at += size
     return data
 
@@ -590,6 +689,10 @@ class Frame:
       limit: Longest body accepted [B], at most 65535 with the crc; a longer `len` is noise
       endian: Order of the length field, the envelope's own
     """
+    if crc is not None and not isinstance(crc, CRC):
+      raise TypeError(f"A frame takes a CRC, got {crc!r}")
+    if not isinstance(endian, Endian):
+      raise TypeError(f"A frame takes its byte order as an Endian, got {endian!r}")
     if not 0 <= limit <= 0xFFFF - (crc.size if crc else 0):
       raise ValueError(f"A body of {limit}B and its crc do not fit the uint16 length")
     self.crc: CRC|None = crc
@@ -683,11 +786,14 @@ def _guard(path:str|None, name:str) -> str:
 def _assert(test:str, says:str) -> str:
   """
   One `_Static_assert`, its message saying what the wire holds.
-  Past the 99 characters of `cstyle` the message goes on a line of its own.
+  Past the 99 characters of `cstyle` the message goes on a line of its own, and the test too
+  when its own line runs past them.
   """
   line = f'_Static_assert({test}, "{says} on the wire");'
   if len(line) <= 99: return line
-  return f'_Static_assert({test},\n  "{says} on the wire");'
+  head = f"_Static_assert({test},"
+  if len(head) <= 99: return f'{head}\n  "{says} on the wire");'
+  return f'_Static_assert(\n  {test},\n  "{says} on the wire");'
 
 class _Row(NamedTuple):
   """One member of a C struct: its declaration and note, its name, and where it sits."""
@@ -742,9 +848,14 @@ class _CHeader:
         raise ValueError(f"{where} varies in size: C takes only a last string or bytes")
       if i == 0 and member.type == Type.string:
         raise ValueError(f"{where} stands alone: C wants a member before a flexible array")
-    members = [row.name for row in self.members(struct)] # padding and lengths named here too
+    rows = self.members(struct)
+    members = [row.name for row in rows] # padding and lengths named here too
     twice = sorted({name for name in members if members.count(name) > 1})
     if twice: raise ValueError(f"C members of '{struct.name}' share a name: {', '.join(twice)}")
+    for row in rows: # a note breaks where its author breaks it, so a line too long is theirs
+      if any(len(f"  // {line}") > 99 for line in row.note.splitlines()):
+        where = struct._where(row.name)
+        raise ValueError(f"{where} has a note line past 99 in C: break it with \\n")
 
   def code(self, struct:Struct) -> str:
     """Define of the block code of `struct`: `REC_CODE_SAMPLE`."""
@@ -778,7 +889,7 @@ class _CHeader:
     for member in struct.members:
       if isinstance(member, Bitfield):
         kind = self.name(struct, member.name)
-        rows.append(_Row(f"{kind} {member.name};", "", member.name, at, member.size))
+        rows.append(_Row(f"{kind} {member.name};", member.doc, member.name, at, member.size))
         at += member.size
       elif isinstance(member, Padding):
         pads += 1
@@ -830,12 +941,26 @@ class _CHeader:
   def typedef(self, struct:Struct) -> list[str]:
     """The struct itself, packed only where its layout is not the natural one."""
     rows = self.members(struct)
-    column = 4 + max((len(row.decl) for row in rows), default=0) # a run of notes, one column
+    # A run of declarations shares one note column, two spaces past its longest line, noted or not.
+    # One too long for a column that keeps every note within 99 gives it up and pushes no one right;
+    # a note of several lines, or one that cannot trail at all, goes above its member.
+    fits = {row.name for row in rows
+      if row.note and "\n" not in row.note and 4 + len(row.decl) + 3 + len(row.note) <= 99}
+    shaping = list(rows)
+    while shaping:
+      column = 4 + max(len(row.decl) for row in shaping)
+      if all(column + 3 + len(row.note) <= 99 for row in shaping if row.name in fits): break
+      shaping.remove(max(shaping, key=lambda row: len(row.decl)))
+    trailing = {row.name for row in shaping if row.name in fits}
     packed = "" if self.natural(struct) else " __attribute__((packed))"
     lines = [f"typedef struct{packed} {{"]
     for row in rows:
       decl = f"  {row.decl}"
-      lines.append(f"{decl.ljust(column)}// {row.note}" if row.note else decl)
+      if row.name in trailing:
+        lines.append(f"{decl.ljust(column)}// {row.note}")
+        continue
+      lines += [f"  // {line}".rstrip() for line in row.note.splitlines()] # the author's breaks
+      lines.append(decl)
     if struct.size is None and (struct.align > 1 or struct.crc):
       lines.append("  // variable size: alignment padding and crc follow the record on the wire")
     lines.append(f"}} {self.name(struct)};")

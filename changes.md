@@ -2,9 +2,10 @@
 
 ## `1.2.2` Struct
 
-- `cstruct`: `Struct("name", *members)`, block codes in `Message`
-- `cstruct`: `decode` reads one record, `records` many, `Frame` carries bytes
+- `cstruct`: `Struct("name", *members)`, block codes in `Message`, `Frame` carries bytes
+- `cstruct`: `decode` reads one record, `records` many, `raw=True` the wire's numbers
 - `cstruct`: nested structs, numpy `dtype()`, a C header the compiler checks
+- `cstruct`: records of fixed size decode several times faster
 - `crc`: `crc32_iso` computed in C
 
 ## `1.2.1` Filters

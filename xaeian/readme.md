@@ -157,11 +157,11 @@ data = sample.encode({
   "temp": 23.4,
   "flags": {"mode": 3, "fault": 9},
 })
-sample.decode(data)       # the dict back, bytes behind it refused
-sample.records(data * 2)  # a run of records, always a list
-sample.size               # 16, None when a string or bytes makes it vary
-sample.dtype()            # numpy, raw values: np.frombuffer(data, sample.dtype())
-sample.export_doc()       # Markdown table
+sample.decode(data)            # the dict back, bytes behind it refused
+sample.decode(data, raw=True)  # the numbers the wire holds, a bitfield as one integer
+sample.records(data * 2)       # a run of records, always a list
+sample.size                    # 16, None when a string or bytes makes it vary
+sample.dtype()                 # numpy, raw values: np.frombuffer(data, sample.dtype())
 ```
 
 The C header mirrors the wire byte for byte, every size and offset under `_Static_assert`.
