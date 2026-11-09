@@ -941,18 +941,17 @@ class _CHeader:
   def typedef(self, struct:Struct) -> list[str]:
     """The struct itself, packed only where its layout is not the natural one."""
     rows = self.members(struct)
-    # A run of declarations shares one note column, two spaces past its longest line, noted or not.
-    # A line too long for a column that keeps every note in the width gives it up, pushing no one;
-    # a note of several lines, or one that cannot trail at all, goes above its member,
+    # A run of notes shares one column, two spaces past the longest line that carries one;
+    # a line without a note never pushes it, nor one too long for every note to fit the width.
+    # A note of several lines, or one that cannot trail at all, goes above its member,
     # and a note standing alone takes one space: a column of one is padding.
-    fits = {row.name for row in rows
-      if row.note and "\n" not in row.note and 4 + len(row.decl) + 3 + len(row.note) <= _WIDTH}
-    shaping = list(rows)
-    while shaping:
-      column = 4 + max(len(row.decl) for row in shaping)
-      if all(column + 3 + len(row.note) <= _WIDTH for row in shaping if row.name in fits): break
-      shaping.remove(max(shaping, key=lambda row: len(row.decl)))
-    trailing = {row.name for row in shaping if row.name in fits}
+    trail = [row for row in rows
+      if row.note and "\n" not in row.note and 4 + len(row.decl) + 3 + len(row.note) <= _WIDTH]
+    while trail:
+      column = 4 + max(len(row.decl) for row in trail)
+      if all(column + 3 + len(row.note) <= _WIDTH for row in trail): break
+      trail.remove(max(trail, key=lambda row: len(row.decl)))
+    trailing = {row.name for row in trail}
     alone = len(trailing) == 1
     packed = "" if self.natural(struct) else " __attribute__((packed))"
     lines = [f"typedef struct{packed} {{"]

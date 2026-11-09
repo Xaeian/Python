@@ -435,13 +435,13 @@ def a_note_of_lines_or_too_long_to_trail_goes_above_its_member():
   above = ["  // raw counts of the drive's own ADC,", "  // never scaled on the wire"]
   assert lines[at - 2:at] == above
 
-def notes_line_up_two_spaces_past_the_longest_line_of_their_run():
-  """`cstyle` Placement: a member without a note is a line of the run, as in a Python block."""
+def notes_line_up_two_spaces_past_the_longest_line_that_has_one():
+  """`cstyle` Placement: a line without a note, however long, does not push the column."""
   s = Struct("state", Field(Type.uint16, "seq", doc="first sample"),
     Bitfield("flags", [("mode", 4)]), Field(Type.int8, "hand", "ticks"))
   lines = s.export_c_header().splitlines()
   noted = [line for line in lines if line.startswith(("  uint16_t seq;", "  int8_t hand;"))]
-  assert [line.index("//") for line in noted] == [len("  state_flags_t flags;") + 2] * 2
+  assert [line.index("//") for line in noted] == [len("  uint16_t seq;") + 2] * 2
 
 def a_note_standing_alone_takes_one_space():
   """A column of one is padding: a lone note sits one space behind its line."""
