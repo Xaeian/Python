@@ -3,11 +3,18 @@
 """Binary (de)serialization: round-trips, transforms, messages, frames and what gets refused."""
 
 import random, subprocess
+from enum import IntEnum
 from pathlib import Path
 
 import pytest
 from xaeian.cstruct import Struct, Field, Type, Bitfield, Endian, Message, Frame, Padding
 from xaeian.crc import crc32_iso
+
+class State(IntEnum):
+  """Names of the numbers of a deck's state, sparse as a firmware's codes often are."""
+  Idle = 0
+  Run = 1
+  Fault = 7
 
 # The example of the readme
 POINT = Struct("point", Field(Type.int16, "x", "mm"), Field(Type.int16, "y", "mm"))
@@ -96,6 +103,28 @@ def a_string_keeps_its_utf8():
   data = {"t": "żółw → OK"}
   assert s.decode(s.encode(data)) == data
 
+def a_char_text_keeps_its_record_of_fixed_size():
+  """`length` counts bytes of UTF-8 and the NUL that C reads up to; a full one still reads."""
+  s = Struct("dev", Field(Type.char, "model", length=8), Field(Type.uint8, "rev"))
+  record = {"model": "żółw", "rev": 1} # 7 bytes of UTF-8, the NUL the 8th
+  assert s.size == 9 and s.decode(s.encode(record)) == record
+  full = b"abcdefgh\x02" # as a writer that leaves no NUL puts it
+  assert s.decode(full)["model"] == "abcdefgh" and s.decode(full, raw=True)["model"] == b"abcdefgh"
+
+@pytest.mark.parametrize("value, error", [
+  ("abcdefgh", ValueError), # 8 bytes leave its NUL no room
+  ("żółwik", ValueError), # 6 letters, 9 bytes of UTF-8
+  ("ab\0c", ValueError), # the NUL that ends it
+  (7, TypeError),
+])
+def a_char_text_refuses_what_its_bytes_cannot_hold_by_name(value, error):
+  with pytest.raises(error, match="'model' of 'dev'"):
+    Struct("dev", Field(Type.char, "model", length=8)).encode({"model": value})
+
+def a_char_text_that_is_no_utf8_is_refused_by_name():
+  with pytest.raises(ValueError, match="'model' of 'dev' holds no UTF-8"):
+    Struct("dev", Field(Type.char, "model", length=8)).decode(b"\xff" + bytes(7))
+
 def crc_travels_with_every_record():
   s = Struct("cf", Field(Type.uint16, "x"), crc=crc32_iso)
   run = s.encode({"x": 1}) + s.encode({"x": 2})
@@ -136,6 +165,24 @@ def a_default_stands_in_for_a_missing_field():
   s = Struct("opt", Field(Type.uint8, "a"), Field(Type.uint8, "b", default=9))
   assert s.decode(s.encode({"a": 1})) == {"a": 1, "b": 9}
 
+DECK = Struct("deck", Field(Type.uint8, "state", values=State),
+  Bitfield("flags", [("mode", 4), ("fault", 4)], values={"mode": State}))
+
+def an_enum_reads_its_members_and_keeps_a_number_it_lacks():
+  """Members are numbers too; a newer firmware's state comes back as a number, never refused."""
+  read = DECK.decode(DECK.encode({"state": State.Run, "flags": {"mode": 7, "fault": 2}}))
+  assert read == {"state": 1, "flags": {"mode": 7, "fault": 2}}
+  assert read["state"] is State.Run and read["flags"]["mode"] is State.Fault
+  newer = DECK.decode(b"\x05\x05")
+  assert newer == {"state": 5, "flags": {"mode": 5, "fault": 0}} and type(newer["state"]) is int
+  assert DECK.decode(DECK.encode({"state": 1, "flags": {}}), raw=True) == {"state": 1, "flags": 0}
+
+def an_enum_refuses_a_number_it_lacks_on_the_way_out():
+  with pytest.raises(ValueError, match="'state' of 'deck' holds 5, not a State"):
+    DECK.encode({"state": 5, "flags": {}})
+  with pytest.raises(ValueError, match="'mode' holds 5, not a State"):
+    DECK.encode({"state": 0, "flags": {"mode": 5}})
+
 def a_record_key_the_struct_lacks_is_refused():
   """A typo would leave its field at the default and go out without a word."""
   s = Struct("modes", Field(Type.uint8, "a"), Field(Type.uint8, "mode", default=0))
@@ -165,6 +212,34 @@ def size_counts_every_byte_of_a_record():
   s = Struct("sized", Field(Type.uint8, "a"), crc=crc32_iso, align=4)
   assert s.size == len(s.encode({"a": 1})) == 8 # 1 byte, 3 of alignment, 4 of CRC
   assert Struct("loose", Field(Type.string, "t")).size is None
+
+PRINTED = Struct("rec",
+  Field(Type.int16, "t", "C", scale=10), Bitfield("f", [("a", 4)]), Padding(1))
+
+@pytest.mark.parametrize("other", [
+  Struct("rec", Field(Type.int16, "t", "C", scale=100), Bitfield("f", [("a", 4)]), Padding(1)), # scale
+  Struct("rec", Field(Type.int16, "t", "C", scale=10, offset=1), Bitfield("f", [("a", 4)]), Padding(1)), # offset
+  Struct("rec", Field(Type.int16, "t", "C", scale=10), Bitfield("f", [("a", 5)]), Padding(1)), # a bit width
+  Struct("rec", Field(Type.int16, "t", "C", scale=10), Bitfield("f", [("a", 4)]), Padding(3)), # padding
+  Struct("rec", Field(Type.int16, "t", "C", scale=10), Bitfield("f", [("a", 4)]), Padding(1), endian=Endian.big), # byte order
+  Struct("rec", Field(Type.int16, "t", "C", scale=10), Bitfield("f", [("a", 4)]), Padding(1), crc=crc32_iso), # a crc
+  Struct("rec", Field(Type.int16, "t", "C", scale=10), Bitfield("f", [("a", 4)]), Padding(1), align=4), # alignment
+  Struct("rec", Field(Type.int16, "v", "C", scale=10), Bitfield("f", [("a", 4)]), Padding(1)), # a name
+  Struct("rec", Field(Type.int16, "t", "C", scale=10), Bitfield("f", [("a", 4)], values={"a": State}), Padding(1)), # an enum
+])
+def a_fingerprint_moves_with_what_the_bytes_mean(other):
+  assert other.fingerprint != PRINTED.fingerprint
+
+def a_fingerprint_stays_with_the_words_around_the_bytes():
+  """`doc`, `unit` and `default` leave it be, and `scale=10.0` is `scale=10`."""
+  same = Struct("rec",
+    Field(Type.int16, "t", "°C", scale=10.0, default=0, doc="board temperature"),
+    Bitfield("f", [("a", 4)], doc="flags"), Padding(1), doc="one record")
+  assert same.fingerprint == PRINTED.fingerprint
+  assert Message({1: PRINTED, 2: POINT}).fingerprint == Message({2: POINT, 1: same}).fingerprint
+  message = Message({1: PRINTED})
+  define = f"#define REC_SCHEMA 0x{message.fingerprint:08X}u"
+  assert define in message.export_c_header(prefix="REC")
 
 def alignment_padding_roundtrips_each_record():
   # `records` consumes the padding `encode` appends behind each record
@@ -449,6 +524,38 @@ def a_note_standing_alone_takes_one_space():
     Bitfield("flags_of_the_whole_drive", [("mode", 4)]))
   assert "  uint8_t b; // the only note" in s.export_c_header().splitlines()
 
+def a_struct_doc_stands_above_its_c_type():
+  s = Struct("deck", Field(Type.uint8, "a"), doc="one deck of the set,\nwhat it plays")
+  lines = s.export_c_header().splitlines()
+  at = lines.index("typedef struct {")
+  assert lines[at - 2:at] == ["// one deck of the set,", "// what it plays"]
+
+def a_char_text_is_char_in_c_and_bytes_in_numpy():
+  """C learns the text ends in a NUL, so its string functions take it as it is."""
+  np = pytest.importorskip("numpy")
+  s = Struct("dev", Field(Type.char, "model", length=8, doc="model"), Field(Type.uint8, "rev"))
+  assert "  char model[8]; // model [UTF-8, NUL-terminated]" in s.export_c_header()
+  rows = np.frombuffer(s.encode({"model": "ab", "rev": 1}), s.dtype())
+  assert rows["model"][0] == b"ab" and s.dtype().itemsize == s.size
+
+def an_enum_gives_c_its_constants_and_the_field_keeps_its_width():
+  """A C `enum` is as wide as its compiler likes, so the field stays `uint8_t`."""
+  lines = Message({1: DECK}).export_c_header(prefix="DECKS").splitlines()
+  assert ["  DECKS_State_Idle = 0,", "  DECKS_State_Run = 1,", "  DECKS_State_Fault = 7,"] == [
+    line for line in lines if line.startswith("  DECKS_State_")]
+  assert lines.count("} DECKS_State_t;") == 1 and "  uint8_t state;" in lines # once for both
+
+class Mode(IntEnum):
+  """Names as Python writes them, one of them a C keyword."""
+  manual = 0
+  auto = 1
+
+def an_enum_takes_its_c_names_as_a_struct_does():
+  """PascalCase behind the module: `auto` is a keyword alone, never as `REC_Mode_Auto`."""
+  header = Struct("switch", Field(Type.uint8, "mode", values=Mode)).export_c_header(prefix="REC")
+  assert "  REC_Mode_Auto = 1," in header and "} REC_Mode_t;" in header
+  assert "} REC_Switch_t;" in header # a struct named like a keyword as well
+
 GEO_H = """\
 // geo.h
 
@@ -477,6 +584,7 @@ EDGES = Message({ # every layout the exporter writes its own way
   2: Struct("odd", Field(Type.uint8, "kind"), Field(Type.uint32, "stamp"), align=4, crc=crc32_iso), # packed, an alignment tail, a crc
   3: Struct("blob", Field(Type.uint8, "kind"), Field(Type.bytes, "data")), # a length before a flexible array
   4: Struct("note", Field(Type.uint8, "kind", doc="a note of two lines,\nas its author broke it"), Field(Type.string, "text")), # a string behind a member
+  5: Struct("deck", Field(Type.char, "label", length=6), Field(Type.uint8, "state", values=State), Bitfield("flags", [("mode", 4)], values={"mode": State}), doc="one deck of the set"), # a text, one enum twice, a doc
 })
 
 MAIN_C = """\
@@ -543,6 +651,10 @@ def c_reads_the_bytes_python_wrote(tmp_path):
   run = subprocess.run([str(tmp_path / "main")], capture_output=True, text=True)
   assert run.stdout == "1 16 1200 1 -2 3 4 234 3 9"
 
+def a_fingerprint_is_the_same_number_release_after_release():
+  """Firmware keeps it as `PREFIX_SCHEMA`: a rework of `_shape` that moves it shows here."""
+  assert SAMPLE.fingerprint == 0x7E71EB4E and EDGES.fingerprint == 0x93750228
+
 #-------------------------------------------------------------------------------------------- numpy
 
 def dtype_reads_encoded_records_as_their_raw_values():
@@ -581,9 +693,12 @@ def dtype_refuses_a_record_of_varying_size():
   Struct("log", Field(Type.string, "text")), # a flexible array needs a member before it
   Struct("noted", Field(Type.uint8, "a", doc="n" * 95)), # a note line past 99 in C
   Struct("broken", Field(Type.uint8, "a", doc="short\n" + "n" * 95)), # one its author broke too
+  Struct("described", Field(Type.uint8, "a"), doc="d" * 97), # a doc line of the type past 99
   Struct("null", Field(Type.uint8, "NULL")), # `<stddef.h>` makes it `((void*)0)`
   Struct("limit", Field(Type.uint8, "INT8_MAX")), # `<stdint.h>` makes it a number
   Struct("big", Field(Type.uint16, "a"), endian=Endian.big), # C holds the target's order
+  Struct("deck-a", Field(Type.uint8, "a")), # no C type comes of the name
+  Struct("moded", Field(Type.uint8, "state", values=State)), # enum constants of no module
 ])
 def what_no_c_struct_can_mirror_is_refused(struct):
   with pytest.raises(ValueError):
@@ -599,6 +714,7 @@ def a_path_must_give_an_include_guard():
   {1: Struct("state", Bitfield("flags", [("on", 1)])), 2: Struct("state_flags", Field(Type.uint8, "a"))}, # `REC_StateFlags_t`
   {1: Struct("state", Field(Type.uint8, "a")), 2: Struct("State", Field(Type.uint8, "a"))}, # `REC_CODE_STATE`
   {1: Struct("block", Field(Type.uint8, "a"))}, # `REC_Block_t`, the header of every block
+  {1: Struct("deck", Field(Type.uint8, "mode", values=IntEnum("Twin", {"off": 0, "Off": 1})))}, # `REC_Twin_Off`
 ])
 def a_header_never_defines_a_name_twice(structs):
   with pytest.raises(ValueError, match="twice"):
@@ -643,6 +759,23 @@ def a_member_name_stands_for_one_member():
     Struct("tail", Field(Type.uint8, "crc"), crc=crc32_iso) # the tail is `crc` in C and numpy
   assert Struct("free", Field(Type.uint8, "crc")).size == 1 # without a tail the name is free
 
+class Wide(IntEnum):
+  """Names whose numbers a `uint8` cannot hold."""
+  Small = 1
+  Huge = 300
+
+@pytest.mark.parametrize("make, error", [
+  (lambda: Field(Type.uint8, "state", values=dict), TypeError), # no IntEnum
+  (lambda: Field(Type.float, "state", values=State), ValueError), # an enum names whole numbers
+  (lambda: Field(Type.uint8, "state", values=State, scale=10), ValueError), # raw ones, unscaled
+  (lambda: Field(Type.uint8, "state", values=Wide), ValueError), # 300 is past uint8
+  (lambda: Bitfield("flags", [("mode", 2)], values={"mode": State}), ValueError), # 7 is past 2 bits
+  (lambda: Bitfield("flags", [("mode", 4)], values={"mod": State}), KeyError), # no such group
+])
+def an_enum_that_cannot_name_its_numbers_is_refused_where_it_is_made(make, error):
+  with pytest.raises(error):
+    make()
+
 def what_a_uint16_length_cannot_count_is_refused():
   """A block, a bytes field and a frame each count their bytes in 16 bits."""
   big = Struct("big", Field(Type.uint32, "a", length=16384))
@@ -670,6 +803,8 @@ def decoding_a_struct_short_of_its_padding_raises():
   lambda: Field(Type.string, "text", length=2), # a string sizes itself
   lambda: Field(Type.bytes, "data", scale=10), # no number to scale
   lambda: Field(POINT, "pos", offset=1), # nor in a struct
+  lambda: Field(Type.char, "text", length=8, scale=10), # nor in a text
+  lambda: Field(Type.char, "letter"), # a text and its NUL take 2 bytes at least
   lambda: Field(Type.int16, "flat", scale=0), # a read would divide by it
   lambda: Field(Type.int16, "text", scale="10"), # a string repeats instead of scaling
   lambda: Field(Type.int16, "shift", offset="1"),

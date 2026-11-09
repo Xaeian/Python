@@ -4,7 +4,7 @@
 
 import sys
 from ..log import Print
-from ..colors import Color as c
+from ..colors import Color as c, grey, fmt_path
 from ..files import PATH
 from ..media.min import compress
 from .args import make_parser, add_help
@@ -60,32 +60,32 @@ def main() -> None:
       recursive=not args.no_recursive,
     )
   except FileNotFoundError:
-    p.err(f"File {c.ORANGE}{name}{c.END} not found")
+    p.err(f"File {fmt_path(name, c.ORANGE)} not found")
     sys.exit(1)
   except ValueError:
     p.err(f"Format {c.BLUE}{ext}{c.END} not supported "
-      f"{c.GREY}(PDF, image, or directory expected){c.END}")
+      f"{grey('(PDF, image, or directory expected)')}")
     sys.exit(1)
   except Exception as e:
-    p.err(f"Failed to compress {c.ORANGE}{name}{c.END} | {e}")
+    p.err(f"Failed to compress {fmt_path(name, c.ORANGE)} | {e}")
     sys.exit(1)
   if not result:
-    p.wrn(f"Nothing compressed in {c.ORANGE}{name}{c.END}")
+    p.wrn(f"Nothing compressed in {fmt_path(name, c.ORANGE)}")
     sys.exit(0)
   total_orig, total_new = 0, 0
   for r in result:
     src_name = PATH.basename(r["src"])
     dst_name = PATH.basename(r["dst"])
     ratio = (r["new_kB"] / r["orig_kB"] * 100) if r["orig_kB"] else 0
-    p.ok(f"{c.ORANGE}{src_name}{c.END} → {c.BLUE}{dst_name}{c.END} "
+    p.ok(f"{fmt_path(src_name, c.ORANGE)} → {fmt_path(dst_name)} "
       f"{c.CYAN}{r['orig_kB']:.0f}{c.END}→{c.CYAN}{r['new_kB']:.0f}{c.END}kB "
-      f"{c.GREY}({ratio:.0f}%){c.END}")
+      f"{grey(f'({ratio:.0f}%)')}")
     total_orig += r["orig_kB"]
     total_new += r["new_kB"]
   if len(result) > 1:
     total_ratio = (total_new / total_orig * 100) if total_orig else 0
     p.inf(f"Total: {c.CYAN}{total_orig:.0f}{c.END} → {c.CYAN}{total_new:.0f}{c.END}kB "
-      f"{c.GREY}({total_ratio:.0f}%, {len(result)} files){c.END}")
+      f"{grey(f'({total_ratio:.0f}%, {len(result)} files)')}")
 
 if __name__ == "__main__":
   main()

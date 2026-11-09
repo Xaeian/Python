@@ -4,7 +4,7 @@
 
 import sys
 from ..log import Print
-from ..colors import Color as c
+from ..colors import Color as c, grey, fmt_cmd, fmt_count
 from .args import make_parser, add_help
 
 p = Print()
@@ -23,11 +23,11 @@ def _list() -> int:
   from ..net.sftp import SFTP, _known_hosts
   hosts = SFTP.known()
   if not hosts:
-    p.inf(f"No hosts recorded yet {c.GREY}({_known_hosts()}){c.END}")
+    p.inf(f"No hosts recorded yet {grey(f'({_known_hosts()})')}")
     return 0
-  p.inf(f"Recorded {c.LIME}{len(hosts)}{c.END} hosts {c.GREY}({_known_hosts()}){c.END}")
+  p.inf(f"Recorded {fmt_count(len(hosts), 'host', color=c.LIME)} {grey(f'({_known_hosts()})')}")
   for host, kind in hosts:
-    p.dot(f"{c.TURQUS}{host}{c.END} {c.GREY}{kind}{c.END}")
+    p.dot(f"{c.TURQUS}{host}{c.END} {grey(kind)}")
   return 0
 
 #--------------------------------------------------------------------------------------------- Show
@@ -39,8 +39,8 @@ def _show(host:str, port:int) -> int:
   if not kind:
     p.wrn(f"Not recorded: {c.TURQUS}{host}{c.END}")
     return 1
-  p.inf(f"{c.TURQUS}{host}{c.END} {c.GREY}{kind}{c.END}")
-  p.tip(f"Drop it with: {c.YELLOW}xn{c.END} host {host} {c.GREY}--drop{c.END}")
+  p.inf(f"{c.TURQUS}{host}{c.END} {grey(kind)}")
+  p.tip(f"Drop it with: {fmt_cmd(f'xn host {host} --drop')}")
   return 0
 
 #----------------------------------------------------------------------------------------- Commands

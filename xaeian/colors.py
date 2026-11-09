@@ -4,7 +4,7 @@
 ANSI color codes for terminal output, and the look of a value in a message.
 
 `Color` holds 256-color escape sequences, `Ico` pre-formatted log level tags.
-The `fmt_*` functions colour a value by its role, so every tool's lines read alike:
+The `fmt_*` functions color a value by its role, so every tool's lines read alike:
 an item's `#id` cream, a path's folder grey, a command as a console shows it.
 
 Example:
@@ -13,7 +13,8 @@ Example:
   >>> print(f"{fmt_id(3, 12)} {fmt_path('out/a.svg')} → {fmt_count(2, 'file')}")
 """
 
-from typing import Sequence
+import re
+from typing import Iterable, Sequence
 from .files import PATH
 
 class Color:
@@ -57,11 +58,7 @@ class Ico:
 
 #--------------------------------------------------------------------------------------------- Look
 
-# a command reads as a console shows it: the program is the one highlight,
-# flags and <placeholders> the grey syntax around it; after an operator a new command starts
-CMD_OPS = {"|", "||", "&&", ";", "&", ">", ">>"}
-
-def grey(text) -> str:
+def grey(text:object) -> str:
   """`text` as the ground of a line: a folder, a flag, a note, what did not change."""
   return f"{Color.GREY}{text}{Color.END}"
 
@@ -70,25 +67,32 @@ def fmt_id(n:int, total:int=0) -> str:
   return f"{Color.CREAM}#{n}{Color.END}" + " " * (len(str(total)) - len(str(n)))
 
 def fmt_path(path:str, color:str=Color.BLUE) -> str:
-  """A path, relative inside the working folder: its folder grey, its name in `color`."""
+  """
+  A path, relative inside the working folder: its folder grey, its name in `color`.
+  A folder written with its slash keeps it, and the working folder itself is `./`.
+  """
   folder, _, name = PATH.local(path).rstrip("/").rpartition("/")
+  if not name or path.endswith(("/", "\\")): name = f"{name or '.'}/"
   shown = f"{color}{name}{Color.END}"
   return f"{grey(folder + '/')}{shown}" if folder else shown
 
+# A command reads as a console shows it: the program is the one highlight, the syntax around it
+# grey. A quoted part is one word, a redirect's file no program; after a separator one starts.
+_WORDS = re.compile(r"""(?:"[^"]*"|'[^']*'|\S)+""") # a quote left open is a mere character
+_SEPARATORS = {"|", "||", "&&", ";", "&"}
+
 def fmt_cmd(cmd:str, ours:Sequence[str]=("xn",)) -> str:
-  """A shell command: each program yellow, `ours` gold, flags and <placeholders> grey."""
-  out, at_cmd = [], True
-  for tok in cmd.split():
-    if tok in CMD_OPS:
-      out.append(grey(tok))
-      at_cmd = True
-    elif tok.startswith(("-", "<", "[")):
-      out.append(grey(tok))
-    elif at_cmd:
-      out.append(f"{Color.GOLD if tok in ours else Color.YELLOW}{tok}{Color.END}")
-      at_cmd = False
+  """A shell command: each program yellow, `ours` gold; flags, redirects, <placeholders> grey."""
+  out, at_program = [], True
+  for word in _WORDS.findall(cmd):
+    if word in _SEPARATORS or word.startswith(("-", "<", ">", "[")):
+      out.append(grey(word))
+      if word in _SEPARATORS: at_program = True
+    elif at_program:
+      out.append(f"{Color.GOLD if word in ours else Color.YELLOW}{word}{Color.END}")
+      at_program = False
     else:
-      out.append(tok)
+      out.append(word)
   return " ".join(out)
 
 def fmt_count(n:int, one:str, many:str|None=None, color:str=Color.BLUE) -> str:
@@ -96,7 +100,7 @@ def fmt_count(n:int, one:str, many:str|None=None, color:str=Color.BLUE) -> str:
   number = f"{color}{n}{Color.END}" if color else str(n)
   return f"{number} {one if n == 1 else many or one + 's'}"
 
-def fmt_list(names, color:str=Color.SKY) -> str:
+def fmt_list(names:Iterable[object], color:str=Color.SKY) -> str:
   """Names in `color`, joined by commas."""
   return ", ".join(f"{color}{n}{Color.END}" for n in names)
 

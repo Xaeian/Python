@@ -7,7 +7,7 @@ from typing import Any
 from ..files import PATH, DIR, JSON
 from ..files.dir import _linked # a link is shown, never entered
 from ..log import Print
-from ..colors import Color as c
+from ..colors import Color as c, grey, fmt_path, fmt_count
 from .args import fmt_size, make_parser, add_help
 
 p = Print()
@@ -142,7 +142,7 @@ def main() -> None:
   args = parser.parse_args()
   root = PATH.resolve(args.root)
   if not DIR.exists(root):
-    p.err(f"Directory {c.ORANGE}{root}{c.END} not found")
+    p.err(f"Directory {fmt_path(root, c.ORANGE)} not found")
     sys.exit(1)
   ignore = DEFAULT_IGNORE.copy()
   if args.ignore:
@@ -159,7 +159,7 @@ def main() -> None:
       color=not args.no_color,
     )
   except PermissionError:
-    p.err(f"No read permission for {c.ORANGE}{root}{c.END}")
+    p.err(f"No read permission for {fmt_path(root, c.ORANGE)}")
     sys.exit(1)
   except Exception as e:
     p.err(f"Tree failed | {e}")
@@ -167,9 +167,9 @@ def main() -> None:
   for line in result["lines"]:
     print(line)
   print()
-  p.inf(f"{c.TEAL}{result['dirs']}{c.END} directories, "
-    f"{c.CYAN}{result['files']}{c.END} files, "
-    f"{c.GREY}{_fmt_size(result['size'])}{c.END} total")
+  p.inf(f"{fmt_count(result['dirs'], 'directory', 'directories', c.TEAL)}, "
+    f"{fmt_count(result['files'], 'file', color=c.CYAN)}, "
+    f"{grey(_fmt_size(result['size']))} total")
   if args.output:
     JSON.save_pretty(args.output, {
       "root": root,
@@ -177,7 +177,7 @@ def main() -> None:
       "files": result["files"],
       "size": result["size"],
     })
-    p.ok(f"Saved {c.TEAL}{args.output}{c.END}")
+    p.ok(f"Saved {fmt_path(args.output, c.TEAL)}")
 
 if __name__ == "__main__":
   main()

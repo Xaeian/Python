@@ -32,7 +32,7 @@ except ModuleNotFoundError as e:
   raise MissingExtra("Install with: pip install xaeian[eda]") from e
 
 from ..files import FILE, DIR, CSV, PATH
-from ..colors import Color as c
+from ..colors import Color as c, fmt_path
 from ..log import Logger, Print
 from ..cmd import run as cmd_run
 from ..table import (
@@ -808,5 +808,5 @@ class KiCad:
 
   def ok(self) -> None:
     """Print where the production files landed."""
-    folder = f"{c.ORANGE}{self.produce_path.removesuffix('/')}{c.END}"
+    folder = fmt_path(self.produce_path, c.ORANGE)
     self.log.ok(f"Production files generated in {folder}")

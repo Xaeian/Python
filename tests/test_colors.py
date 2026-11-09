@@ -2,6 +2,7 @@
 
 """ANSI color codes, pre-formatted level indicators and the look of a value."""
 
+import os
 from xaeian import Color, Ico, grey, fmt_id, fmt_path, fmt_cmd, fmt_count, fmt_list
 
 E = Color.END
@@ -22,9 +23,14 @@ def an_id_is_cream_and_pads_to_its_batch():
   assert fmt_id(42) == f"{Color.CREAM}#42{E}"
   assert fmt_id(3, 12) == f"{Color.CREAM}#3{E} "
 
-def a_path_greys_its_folder_and_colours_its_name():
+def a_path_greys_its_folder_and_colors_its_name():
   assert fmt_path("out/img/a.svg") == f"{Color.GREY}out/img/{E}{Color.BLUE}a.svg{E}"
   assert fmt_path("a.svg", Color.SKY) == f"{Color.SKY}a.svg{E}"
+
+def a_folder_keeps_its_slash_and_the_working_one_shows():
+  """A "Saved to" line never ends in nothing, and a folder never reads as a file."""
+  assert fmt_path(".") == fmt_path(os.getcwd()) == f"{Color.BLUE}./{E}"
+  assert fmt_path("out/img/") == f"{Color.GREY}out/{E}{Color.BLUE}img/{E}"
 
 def a_command_reads_as_a_console_shows_it():
   assert fmt_cmd("py -m draw.check <style>") == (f"{Color.YELLOW}py{E} {grey('-m')} "
@@ -32,9 +38,17 @@ def a_command_reads_as_a_console_shows_it():
   assert fmt_cmd("xn tree . | more").split(" ")[0] == f"{Color.GOLD}xn{E}"
   assert fmt_cmd("xn tree . | more").endswith(f"{grey('|')} {Color.YELLOW}more{E}")
 
+def a_quoted_part_and_a_redirect_start_no_program():
+  """A separator inside quotes is text, and the file behind `>` is written, not run."""
+  assert fmt_cmd('git log --grep "a | b"').endswith(f'{grey("--grep")} "a | b"')
+  assert fmt_cmd("xn tree > out.txt").endswith(f"{grey('>')} out.txt")
+  assert fmt_cmd("echo don't \"stop").endswith(" don't \"stop") # a quote left open, kept in place
+  program = '"C:/Program Files/x.exe"' # spaces inside, still one program
+  assert fmt_cmd(f"{program} -v") == f"{Color.YELLOW}{program}{E} {grey('-v')}"
+
 def a_count_takes_the_word_for_its_number():
   assert fmt_count(1, "file") == f"{Color.BLUE}1{E} file"
   assert fmt_count(2, "entry", "entries", "") == "2 entries"
 
-def a_list_colours_each_name():
+def a_list_colors_each_name():
   assert fmt_list(["a", "b"]) == f"{Color.SKY}a{E}, {Color.SKY}b{E}"

@@ -12,7 +12,7 @@ Hence plain `subprocess` rather than `xaeian.cmd`: nothing a release runs lives 
 import shutil, subprocess, sys
 from typing import NoReturn
 from ..log import Print
-from ..colors import Color as c, fmt_cmd
+from ..colors import Color as c, fmt_cmd, fmt_path
 
 p = Print()
 
@@ -86,7 +86,7 @@ def github() -> None:
 def fmt_branch(name:str) -> str: return f"{c.VIOLET}{name}{c.END}"
 def fmt_release(name:str) -> str: return f"{c.SKY}{name}{c.END}" # version, tag or title
 def fmt_sha(commit:str) -> str: return f"{c.GOLD}{commit[:7]}{c.END}"
-def fmt_file(path:str) -> str: return f"{c.ORANGE}{path}{c.END}"
+def fmt_file(path:str) -> str: return fmt_path(path, c.ORANGE)
 def fmt_tool(name:str) -> str: return f"{c.CYAN}{name}{c.END}"
 
 #------------------------------------------------------------------------------------------ Queries

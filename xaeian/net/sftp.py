@@ -16,7 +16,7 @@ __extras__ = ("sftp", ["paramiko"])
 import os, stat, threading
 from pathlib import Path
 from ..log import Logger, Print
-from ..colors import Color as c
+from ..colors import Color as c, grey, fmt_cmd, fmt_count
 from ..files import FILE, PATH
 from .common import (
   TIMEOUT_S, local_index, _tmp_seq, Filter, Progress, Action, log_sync, pruned, safe_name,
@@ -207,8 +207,7 @@ class SFTP:
     except paramiko.BadHostKeyException as e:
       raise ConnectionError(
         f"SFTP host key changed on {c.TURQUS}{self.host}{c.END} | {e} | "
-        "Rebuilt on purpose? Drop the old key with: "
-        f"xn host {self.host} {c.GREY}--drop{c.END}",
+        f"Rebuilt on purpose? Drop the old key with: {fmt_cmd(f'xn host {self.host} --drop')}",
       ) from e
     except Exception as e:
       raise ConnectionError(
@@ -278,8 +277,8 @@ class SFTP:
       try: self._sftp.utime(remote, (mtime, mtime))
       except Exception:
         self._can_utime = False # SETSTAT refused: `sync_push` falls back to size-only skip
-        if self.log: self.log.wrn(f"utime failed {c.GREY}{remote}{c.END}: mtime not preserved")
-    if self.log: self.log.dot(f"{c.GREY}{local}{c.END} → {c.GREY}{remote}{c.END}")
+        if self.log: self.log.wrn(f"utime failed {grey(remote)}: mtime not preserved")
+    if self.log: self.log.dot(f"{grey(local)} → {grey(remote)}")
 
   def get(
     self,
@@ -310,8 +309,8 @@ class SFTP:
       if rstat.st_mtime is not None:
         atime = rstat.st_atime if rstat.st_atime is not None else rstat.st_mtime
         os.utime(local, (atime, rstat.st_mtime))
-      elif self.log: self.log.wrn(f"mtime unavailable {c.GREY}{remote}{c.END}: not preserved")
-    if self.log: self.log.dot(f"{c.GREY}{remote}{c.END} → {c.GREY}{local}{c.END}")
+      elif self.log: self.log.wrn(f"mtime unavailable {grey(remote)}: not preserved")
+    if self.log: self.log.dot(f"{grey(remote)} → {grey(local)}")
 
   def remove(self, remote:str) -> None:
     """Delete remote file. Silent if not found."""
@@ -375,7 +374,8 @@ class SFTP:
     self._require_connected()
     files = local_index(local)
     if self.log:
-      self.log.inf(f"put_dir {c.CYAN}{len(files)}{c.END} files → {c.SKY}{remote}{c.END}")
+      count = fmt_count(len(files), "file", color=c.CYAN)
+      self.log.inf(f"put_dir {count} → {c.SKY}{remote}{c.END}")
     for rel, f in files.items():
       if pruned(rel, filter): continue
       self.put(str(f), f"{remote}/{rel}", atomic=atomic, callback=callback, _label=rel)
@@ -517,7 +517,7 @@ class SFTP:
     err = err_buf[0].decode(errors="replace").strip()
     rc = stdout.channel.recv_exit_status()
     if self.log:
-      for line in out.splitlines(): self.log.gap(f"{c.GREY}{line}{c.END}")
+      for line in out.splitlines(): self.log.gap(grey(line))
       for line in err.splitlines(): self.log.wrn(line)
     if check and rc != 0:
       raise RuntimeError(f"remote command failed (rc={rc}): {cmd}" + (f"\n{err}" if err else ""))
@@ -544,7 +544,7 @@ class SFTP:
     try: target = self._sftp.stat(path)
     except OSError: target = None
     if target is None or _is_dir(target):
-      if self.log: self.log.wrn(f"symlink skipped {c.GREY}{path}{c.END}")
+      if self.log: self.log.wrn(f"symlink skipped {grey(path)}")
       return None
     target.filename = attr.filename
     return target

@@ -7,7 +7,7 @@ from typing import Any
 from collections import defaultdict
 from ..files import PATH, DIR, FILE, JSON
 from ..log import Print
-from ..colors import Color as c
+from ..colors import Color as c, grey, fmt_path, fmt_count
 from .args import fmt_size, make_parser, add_help
 
 p = Print()
@@ -131,11 +131,10 @@ def main() -> None:
   args = parser.parse_args()
   root = PATH.resolve(args.root)
   if not DIR.exists(root):
-    p.err(f"Directory {c.ORANGE}{root}{c.END} not found")
+    p.err(f"Directory {fmt_path(root, c.ORANGE)} not found")
     sys.exit(1)
-  p.inf(f"Scanning {c.ORANGE}{root}{c.END} "
-    f"{c.GREY}({args.algo}, min {fmt_size(args.min_size)}"
-    f"{', +zips' if args.zips else ''}){c.END}")
+  note = f"({args.algo}, min {fmt_size(args.min_size)}{', +zips' if args.zips else ''})"
+  p.inf(f"Scanning {fmt_path(root, c.ORANGE)} {grey(note)}")
   try:
     groups = find_dupes(root, args.algo, args.min_size, args.zips, args.follow_symlinks)
   except Exception as e:
@@ -146,19 +145,19 @@ def main() -> None:
   else:
     total_files = sum(g["count"] for g in groups)
     wasted = sum((g["count"] - 1) * g["size"] for g in groups)
-    p.wrn(f"Found {c.TEAL}{len(groups)}{c.END} duplicate groups, "
-      f"{c.TEAL}{total_files}{c.END} files, "
+    p.wrn(f"Found {fmt_count(len(groups), 'duplicate group', color=c.TEAL)}, "
+      f"{fmt_count(total_files, 'file', color=c.TEAL)}, "
       f"{c.ORANGE}{fmt_size(wasted)}{c.END} wasted")
     print()
     w = len(str(len(groups)))
     for i, g in enumerate(groups, 1):
       p.inf(f"[{c.GOLD}{i:0{w}}{c.END}] {c.CYAN}{fmt_size(g['size'])}{c.END} "
-        f"x{g['count']} {c.GREY}{g['hash'][:16]}...{c.END}")
+        f"x{g['count']} {grey(g['hash'][:16] + '...')}")
       for path in g["paths"]:
-        p.gap(f"{c.GREY}{_short(path, root)}{c.END}")
+        p.gap(grey(_short(path, root)))
   if args.output:
     JSON.save_pretty(args.output, {"root": root, "zips": args.zips, "groups": groups})
-    p.ok(f"Saved {c.TEAL}{args.output}{c.END}")
+    p.ok(f"Saved {fmt_path(args.output, c.TEAL)}")
 
 if __name__ == "__main__":
   main()

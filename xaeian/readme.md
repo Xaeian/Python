@@ -109,7 +109,7 @@ p.wrn("careful")          # WRN careful
 p.run("starting...")      # RUN starting...
 ```
 
-A value in a message takes the colour of its role, and the sentence stays plain:
+A value in a message takes the color of its role, and the sentence stays plain:
 
 ```py
 from xaeian import Print, grey, fmt_id, fmt_path, fmt_cmd, fmt_count, fmt_list
@@ -175,6 +175,26 @@ path = "dev/link_wire.h"
 message = Message({1: sample})
 FILE.save(path, message.export_c_header(path, prefix="LINK", extern={point: ("GEO_Point_t", "geo.h")}))
 ```
+
+A text of fixed size, the names of a field's numbers, and one number for the whole layout:
+
+```py
+from enum import IntEnum
+
+class State(IntEnum):
+  Idle = 0
+  Run = 1
+
+deck = Struct("deck",
+  Field(Type.char, "label", length=8),       # 7 bytes of UTF-8 and a NUL, `char label[8]` in C
+  Field(Type.uint8, "state", values=State),  # reads back `State.Run`, C gets `LINK_State_Run`
+  doc="one deck of the set",                 # above its `typedef` in C
+)
+Message({1: deck}).fingerprint               # CRC-32 of the layout, `LINK_SCHEMA` in C
+```
+
+Struct and enum names reach C with each word's first letter raised, the rest as written:
+`closed_loop` is `ClosedLoop`, an acronym such as `PWM` stays, and so would `IDLE`: write `Idle`.
 
 On a wire, three layers, joined by you:
 `Struct` is one record, its `crc` a tail that travels with it,

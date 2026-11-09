@@ -15,7 +15,7 @@ from typing import Any
 from ..extras import MissingExtra
 from ..files import PATH, DIR, FILE
 from ..log import Print
-from ..colors import Color as c
+from ..colors import Color as c, grey, fmt_path, fmt_count
 from .args import make_parser, add_help
 
 p = Print()
@@ -325,7 +325,7 @@ def rename_fonts(
     if PATH.ext(f).lower() in FONT_EXTS
   )
   if not files:
-    p.wrn(f"No font files in {c.ORANGE}{root}{c.END}")
+    p.wrn(f"No font files in {fmt_path(root, c.ORANGE)}")
     return []
   results = []
   taken: dict[str, str] = {} # `new_name` → original name
@@ -336,35 +336,35 @@ def rename_fonts(
     stem = PATH.stem(name)
     parsed = _parse_filename(stem)
     if parsed is None:
-      p.dot(f"{c.GREY}SKIP {name}{c.END}")
+      p.dot(grey(f"SKIP {name}"))
       continue
     family, weight, italic = parsed
     new_name = _build_target(family, weight, italic, ext, mode)
     if new_name is None:
       n_skip_var += 1
-      p.dot(f"{c.GREY}VARIABLE {name} (skipped in system mode){c.END}")
+      p.dot(grey(f"VARIABLE {name} (skipped in system mode)"))
       continue
     if new_name in taken:
-      p.wrn(f"DUPE {c.ORANGE}{name}{c.END} → {new_name} "
-        f"{c.GREY}(kept {taken[new_name]}){c.END}")
+      p.wrn(f"DUPE {fmt_path(name, c.ORANGE)} → {new_name} "
+        f"{grey(f'(kept {taken[new_name]})')}")
       continue
     old_path = root + "/" + name
     new_path = root + "/" + new_name
     # samefile keeps case-only renames working on a case-insensitive FS
     if name != new_name and FILE.exists(new_path) and not os.path.samefile(old_path, new_path):
-      p.wrn(f"COLLISION {c.ORANGE}{new_name}{c.END} exists, skipping {name}")
+      p.wrn(f"COLLISION {fmt_path(new_name, c.ORANGE)} exists, skipping {name}")
       continue
     if name == new_name:
       n_ok += 1
     else:
-      p.dot(f"{name} → {c.CYAN}{new_name}{c.END}")
+      p.dot(f"{name} → {fmt_path(new_name, c.CYAN)}")
       if not dry_run:
         os.rename(old_path, new_path)
     if meta and not dry_run:
       try:
         _rewrite_metadata(new_path, family, weight, italic)
       except Exception as e:
-        p.wrn(f"META {c.ORANGE}{new_name}{c.END} | {e}")
+        p.wrn(f"META {fmt_path(new_name, c.ORANGE)} | {e}")
     taken[new_name] = name
     slug = _family_to_slug(family)
     results.append({
@@ -372,9 +372,9 @@ def rename_fonts(
       "italic": italic, "filename": new_name, "ext": ext,
     })
   if n_ok:
-    p.inf(f"{c.GREY}{n_ok} already named correctly{c.END}")
+    p.inf(grey(f"{n_ok} already named correctly"))
   if n_skip_var:
-    p.inf(f"{c.GREY}{n_skip_var} variable fonts skipped (system mode){c.END}")
+    p.inf(grey(f"{n_skip_var} variable fonts skipped (system mode)"))
   if css:
     _generate_css(root, css, results, dry_run)
   return results
@@ -382,7 +382,7 @@ def rename_fonts(
 def _generate_css(font_dir:str, css_path:str, results:list[dict], dry_run:bool):
   """One `@font-face` per family+weight+italic, format variants collapsed into one src list."""
   if not results:
-    p.wrn(f"No fonts to write CSS for, skipping {c.ORANGE}{css_path}{c.END}")
+    p.wrn(f"No fonts to write CSS for, skipping {fmt_path(css_path, c.ORANGE)}")
     return
   css_path = PATH.resolve(css_path)
   rel = os.path.relpath(font_dir, PATH.dirname(css_path)).replace("\\", "/")
@@ -423,7 +423,7 @@ def _generate_css(font_dir:str, css_path:str, results:list[dict], dry_run:bool):
   else:
     DIR.ensure(css_path, is_file=True)
     FILE.save(css_path, content)
-    p.ok(f"CSS → {c.TEAL}{css_path}{c.END} {c.GREY}({len(blocks)} faces){c.END}")
+    p.ok(f"CSS → {fmt_path(css_path, c.TEAL)} {grey(f'({len(blocks)} faces)')}")
 
 #---------------------------------------------------------------------------------------------- CLI
 
@@ -451,13 +451,13 @@ def main() -> None:
   args = parser.parse_args()
   root = PATH.resolve(args.root)
   if not DIR.exists(root):
-    p.err(f"Directory {c.ORANGE}{root}{c.END} not found")
+    p.err(f"Directory {fmt_path(root, c.ORANGE)} not found")
     sys.exit(1)
   flags = []
-  if args.dry_run: flags.append(f"{c.GREY}dry run{c.END}")
-  if args.meta: flags.append(f"{c.GREY}meta{c.END}")
+  if args.dry_run: flags.append(grey("dry run"))
+  if args.meta: flags.append(grey("meta"))
   flag_str = f" ({', '.join(flags)})" if flags else ""
-  p.inf(f"Scanning {c.ORANGE}{root}{c.END} mode={c.CYAN}{args.mode}{c.END}{flag_str}")
+  p.inf(f"Scanning {fmt_path(root, c.ORANGE)} mode={c.CYAN}{args.mode}{c.END}{flag_str}")
   try:
     results = rename_fonts(
       root, css=args.css, dry_run=args.dry_run,
@@ -468,8 +468,8 @@ def main() -> None:
     sys.exit(1)
   if results:
     families = set(r["family"] for r in results)
-    p.ok(f"Processed {c.TEAL}{len(results)}{c.END} fonts "
-      f"({c.CYAN}{len(families)}{c.END} families)")
+    p.ok(f"Processed {fmt_count(len(results), 'font', color=c.TEAL)} "
+      f"({fmt_count(len(families), 'family', 'families', c.CYAN)})")
 
 if __name__ == "__main__":
   main()

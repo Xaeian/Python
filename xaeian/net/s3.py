@@ -31,7 +31,7 @@ from urllib.parse import quote
 from xml.etree import ElementTree
 from xml.sax.saxutils import escape
 from ..log import Logger, Print
-from ..colors import Color as c
+from ..colors import Color as c, grey, fmt_count
 from ..files import PATH
 from .common import (
   CHUNK, TIMEOUT_S, local_index, Filter, Progress, Action, Attrs, log_sync, pruned,
@@ -190,7 +190,7 @@ def _kept(result, what:str) -> None:
   more = f" and {len(errors) - 1} more" if len(errors) > 1 else ""
   if all(node.findtext(f"{NS}Code") == "AccessDenied" for node in errors):
     raise _refused(f"{key}{more}")
-  raise OSError(f"{what} refused {c.GREY}{key}{c.END}{more}: {code}")
+  raise OSError(f"{what} refused {grey(key)}{more}: {code}")
 
 def _listed(node, name:str) -> Attrs:
   """One `Contents` node as `Attrs`, with `name` already relative to the listed prefix."""
@@ -436,7 +436,7 @@ class S3:
       report = (lambda done: callback(label, done, size)) if callback else None
       with open(local, "rb") as f:
         self._send("PUT", key, body=_Body(f, size, report), length=size).read()
-    if self.log: self.log.dot(f"{c.GREY}{local}{c.END} → {c.GREY}{key}{c.END}")
+    if self.log: self.log.dot(f"{grey(local)} → {grey(key)}")
 
   def get(
     self,
@@ -469,7 +469,7 @@ class S3:
       self._reset() # the rest of this response is still on the wire
       raise
     if preserve_mtime and mtime is not None: os.utime(local, (mtime, mtime))
-    if self.log: self.log.dot(f"{c.GREY}{key}{c.END} → {c.GREY}{local}{c.END}")
+    if self.log: self.log.dot(f"{grey(key)} → {grey(local)}")
 
   def remove(self, remote:str) -> None:
     """Delete one object. Silent if it was not there: a missing key answers 204."""
@@ -610,7 +610,7 @@ class S3:
         if _marker(key): continue
         rel = key[len(prefix):]
         if not _safe_rel(rel):
-          if self.log: self.log.wrn(f"unsafe key skipped {c.GREY}{key}{c.END}")
+          if self.log: self.log.wrn(f"unsafe key skipped {grey(key)}")
           continue
         out.append(_listed(node, rel))
     return out
@@ -649,7 +649,8 @@ class S3:
     self._require_connected()
     files = local_index(local)
     if self.log:
-      self.log.inf(f"put_dir {c.CYAN}{len(files)}{c.END} files → {c.SKY}{remote}{c.END}")
+      count = fmt_count(len(files), "file", color=c.CYAN)
+      self.log.inf(f"put_dir {count} → {c.SKY}{remote}{c.END}")
     for rel, f in files.items():
       if pruned(rel, filter): continue
       self.put(str(f), f"{remote}/{rel}", atomic=atomic, callback=callback, _label=rel)

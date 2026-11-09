@@ -1,22 +1,12 @@
 # Changes `xaeian`
 
-## `1.2.2` Struct
+## `1.2.1` Struct & filters
 
-- `cstruct`: `Struct("name", *members)`, block codes in `Message`, `Frame` carries bytes
-- `cstruct`: `decode` reads one record, `records` many, `raw=True` the wire's numbers
-- `cstruct`: nested structs, numpy `dtype()`, a C header the compiler checks
+- `cstruct`: `Struct("name", *members)`, `decode` one record, `records` many, `raw=True` the wire
+- `cstruct`: nested structs, `char` text, enums, a C header the compiler checks
 - `cstruct`: records of fixed size decode several times faster
-- `crc`: `crc32_iso` computed in C
-
-## `1.2.1` Filters
-
-- `dsp`: filters keep the `order` and -3dB edges asked for, NaN as a gap
-- `dsp`: `butterworth` and `filtfilt` for plain arrays of any length
-- `cstruct`: scaled values round to their step, floats keep full precision
-- `cstruct`: a bitfield refuses unknown names and out-of-range values
-- `serial`: `Recorder` reads a zero and takes `OL` as no reading
+- `dsp`: filters keep the `order` and -3dB edges asked for, `filtfilt` for plain arrays
 - `serial`: `read` with a CRC completes a reply cut by the timeout
-- `xtime`: a timestamp in milliseconds is refused clearly
 
 ## `1.2.0` GIT
 

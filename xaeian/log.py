@@ -23,7 +23,7 @@ Example:
 import sys, re, logging, builtins
 from typing import Literal
 from logging.handlers import RotatingFileHandler
-from .colors import Color, Ico
+from .colors import Color, Ico, grey
 
 PANIC = 60 # one step above CRITICAL
 logging.addLevelName(PANIC, "PANIC")
@@ -108,7 +108,7 @@ class ColorFormatter(LogFormatter):
     msg = f"{tag} {Color.WHITE}{text}{Color.END}"
     if self.datefmt:
       ts = self.formatTime(record, self.datefmt)
-      msg = f"{Color.GREY}{ts}{Color.END} {msg}"
+      msg = f"{grey(ts)} {msg}"
     if record.exc_info: msg += f"\n{self.formatException(record.exc_info)}"
     return msg
 

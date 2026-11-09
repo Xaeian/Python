@@ -4,7 +4,7 @@
 
 import sys, math
 from ..log import Print
-from ..colors import Color as c
+from ..colors import Color as c, grey, fmt_path, fmt_count
 from ..files import PATH, FILE, CSV
 from ..xstring import ensure_suffix
 from .args import make_parser, add_help
@@ -68,7 +68,7 @@ def main() -> None:
   path = ensure_suffix(args.src, ".csv")
   name = PATH.basename(path)
   if not FILE.exists(path):
-    p.err(f"File {c.ORANGE}{name}{c.END} not found")
+    p.err(f"File {fmt_path(name, c.ORANGE)} not found")
     sys.exit(1)
   delimiter = _delimiter(path)
   # a comma that is not the delimiter is a decimal point: Excel writes `3,14` between `;`
@@ -76,16 +76,16 @@ def main() -> None:
   try:
     table = CSV.load_vectors(path, delimiter=delimiter)
   except Exception as e:
-    p.err(f"Failed to read {c.ORANGE}{name}{c.END} | {e}")
+    p.err(f"Failed to read {fmt_path(name, c.ORANGE)} | {e}")
     sys.exit(1)
   if not table:
-    p.err(f"No rows in {c.ORANGE}{name}{c.END}")
+    p.err(f"No rows in {fmt_path(name, c.ORANGE)}")
     sys.exit(1)
   x = args.x or next(iter(table))
   names = [col.strip() for col in args.columns.split(",")] if args.columns else list(table)
   unknown = [col for col in [x, *names] if col not in table]
   if unknown:
-    p.err(f"No column {c.BLUE}{', '.join(unknown)}{c.END} in {c.ORANGE}{name}{c.END}")
+    p.err(f"No column {c.BLUE}{', '.join(unknown)}{c.END} in {fmt_path(name, c.ORANGE)}")
     p.gap(f"Columns: {', '.join(table)}")
     sys.exit(1)
   # numbers first: numpy reads a column of plain integers as years
@@ -99,25 +99,25 @@ def main() -> None:
     if col == x: continue
     values, bad = _numbers(table[col], decimal)
     if all(math.isnan(v) for v in values):
-      p.wrn(f"Skipped {c.BLUE}{col}{c.END} {c.GREY}(no numbers){c.END}")
+      p.wrn(f"Skipped {c.BLUE}{col}{c.END} {grey('(no numbers)')}")
       continue
     if bad: p.wrn(f"{c.BLUE}{col}{c.END}: {c.CYAN}{bad}{c.END} cells not numbers, left as gaps")
     data[col] = values
   if len(data) < 2:
-    p.err(f"Nothing to plot in {c.ORANGE}{name}{c.END}")
+    p.err(f"Nothing to plot in {fmt_path(name, c.ORANGE)}")
     sys.exit(1)
   plot = Plot(theme="dark" if args.dark else "clean").columns(data, x=x).title(name)
-  p.inf(f"{c.ORANGE}{name}{c.END}: {c.CYAN}{len(data) - 1}{c.END} columns, "
-    f"{c.CYAN}{len(xs)}{c.END} rows against {c.BLUE}{x}{c.END}")
+  p.inf(f"{fmt_path(name, c.ORANGE)}: {fmt_count(len(data) - 1, 'column', color=c.CYAN)}, "
+    f"{fmt_count(len(xs), 'row', color=c.CYAN)} against {c.BLUE}{x}{c.END}")
   if not args.dst:
     plot.show()
     return
   try:
     plot.save(args.dst)
   except Exception as e:
-    p.err(f"Failed to save {c.BLUE}{args.dst}{c.END} | {e}")
+    p.err(f"Failed to save {fmt_path(args.dst)} | {e}")
     sys.exit(1)
-  p.ok(f"Plotted {c.ORANGE}{name}{c.END} → {c.BLUE}{PATH.basename(args.dst)}{c.END}")
+  p.ok(f"Plotted {fmt_path(name, c.ORANGE)} → {fmt_path(PATH.basename(args.dst))}")
 
 if __name__ == "__main__":
   main()

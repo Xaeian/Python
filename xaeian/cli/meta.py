@@ -4,7 +4,7 @@
 
 import sys
 from ..log import Print
-from ..colors import Color as c
+from ..colors import Color as c, grey, fmt_path
 from ..files import PATH
 from ..media.meta import scrub_metadata
 from .args import make_parser, add_help
@@ -32,16 +32,16 @@ def main() -> None:
   try:
     result = scrub_metadata(args.src, args.dst, args.inplace)
   except FileNotFoundError:
-    p.err(f"File {c.ORANGE}{name}{c.END} not found")
+    p.err(f"File {fmt_path(name, c.ORANGE)} not found")
     sys.exit(1)
   except Exception as e: # an unsupported format says so in its own message
-    p.err(f"Failed to scrub {c.ORANGE}{name}{c.END} | {e}")
+    p.err(f"Failed to scrub {fmt_path(name, c.ORANGE)} | {e}")
     sys.exit(1)
   if PATH.resolve(result) == PATH.resolve(args.src):
-    p.ok(f"Scrubbed {c.ORANGE}{name}{c.END} {c.GREY}(in-place){c.END}")
+    p.ok(f"Scrubbed {fmt_path(name, c.ORANGE)} {grey('(in-place)')}")
   else:
     out_name = PATH.basename(result)
-    p.ok(f"Scrubbed {c.ORANGE}{name}{c.END} → {c.BLUE}{out_name}{c.END}")
+    p.ok(f"Scrubbed {fmt_path(name, c.ORANGE)} → {fmt_path(out_name)}")
 
 if __name__ == "__main__":
   main()

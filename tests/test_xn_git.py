@@ -632,4 +632,5 @@ def each_role_keeps_its_color():
   assert _git.fmt_release("OpenCPLC 0.6.0") == f"{c.SKY}OpenCPLC 0.6.0{c.END}"
   assert _git.fmt_sha("47cc7a4e1f9b") == f"{c.GOLD}47cc7a4{c.END}"
   assert _git.fmt_file("changes.md") == f"{c.ORANGE}changes.md{c.END}"
+  assert _git.fmt_file("xaeian/cli.py") == f"{c.GREY}xaeian/{c.END}{c.ORANGE}cli.py{c.END}"
   assert _git.fmt_tool("gh") == f"{c.CYAN}gh{c.END}"

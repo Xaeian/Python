@@ -11,7 +11,7 @@ import os, sys, re, subprocess, platform
 from typing import Any
 from ..files import JSON
 from ..log import Print
-from ..colors import Color as c
+from ..colors import Color as c, grey, fmt_path, fmt_count
 from .args import make_parser, add_help
 
 p = Print()
@@ -118,9 +118,9 @@ def main() -> None:
   system = platform.system()
   if system not in ("Windows", "Linux"):
     p.err(f"Platform {c.BLUE}{system}{c.END} not supported "
-      f"{c.GREY}(Windows or Linux required){c.END}")
+      f"{grey('(Windows or Linux required)')}")
     sys.exit(1)
-  p.inf(f"Scanning Wi-Fi profiles {c.GREY}({system}){c.END}...")
+  p.inf(f"Scanning Wi-Fi profiles {grey(f'({system})')}...")
   try:
     networks = wifi_passwords()
   except Exception as e:
@@ -131,20 +131,20 @@ def main() -> None:
   else:
     has_pw = sum(1 for n in networks if n["password"])
     no_pw = len(networks) - has_pw
-    p.ok(f"Found {c.TEAL}{len(networks)}{c.END} networks "
-      f"({c.CYAN}{has_pw}{c.END} with password"
-      f"{', ' + c.GREY + str(no_pw) + ' open' + c.END if no_pw else ''})")
+    opened = f", {grey(f'{no_pw} open')}" if no_pw else ""
+    p.ok(f"Found {fmt_count(len(networks), 'network', color=c.TEAL)} "
+      f"({c.CYAN}{has_pw}{c.END} with password{opened})")
     max_ssid = max(len(n["ssid"]) for n in networks)
     for n in networks:
       ssid = n["ssid"].ljust(max_ssid)
       if n["password"]:
         p.dot(f"{c.CREAM}{ssid}{c.END}  {n['password']}")
       else:
-        p.dot(f"{c.GREY}{ssid}  (open){c.END}")
+        p.dot(grey(f"{ssid}  (open)"))
   if args.output:
     JSON.save_pretty(args.output, networks)
     os.chmod(args.output, 0o600) # POSIX only: on Windows the directory ACL is the protection
-    p.ok(f"Saved {c.TEAL}{args.output}{c.END}")
+    p.ok(f"Saved {fmt_path(args.output, c.TEAL)}")
     p.wrn("The file holds passwords in plain text")
 
 if __name__ == "__main__":

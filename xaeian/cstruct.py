@@ -22,13 +22,15 @@ Example:
 import re
 from numbers import Integral, Real
 from struct import pack, unpack_from, calcsize, error as PackError, Struct as Packer
-from enum import Enum
+from enum import Enum, EnumType, IntEnum
 from typing import Any, Callable, Iterator, NamedTuple, cast
 
 from .crc import CRC, crc32_iso
 from .extras import MissingExtra, absent
 
 __extras__ = ("cstruct", ["numpy"]) # `dtype()` alone
+
+_Names = type[IntEnum] # names for the numbers of a field or a bit group
 
 class Type(Enum):
   """Field types named as in C; the value is the `struct` format char, except string and bytes."""
@@ -42,7 +44,8 @@ class Type(Enum):
   int64 = "q"
   float = "f"
   double = "d"
-  string = "str" # null-terminated UTF-8
+  char = "s" # NUL-terminated UTF-8 in its `length` bytes
+  string = "str" # NUL-terminated UTF-8
   bytes = "byte" # length-prefixed by a uint16
 
   @property
@@ -54,6 +57,11 @@ class Type(Enum):
   def is_integer(self) -> bool:
     """`True` for the integer types, whose values round to the nearest whole before packing."""
     return self.name.startswith(("int", "uint"))
+
+  @property
+  def is_number(self) -> bool:
+    """`True` for the integers, float and double: what a scale and an offset apply to."""
+    return self.is_integer or self in (Type.float, Type.double)
 
 class Endian(Enum):
   """Byte order of a struct's numbers."""
@@ -81,6 +89,15 @@ def _float32(value:float) -> float:
     except OverflowError: continue # rounded past FLT_MAX, as 3.403e+38 is for 3.4028235e+38
   return value
 
+def _text(raw:bytes) -> str:
+  """The text of a `char` field: its bytes up to the NUL, all of them where a writer left none."""
+  try: return raw.split(b"\0", 1)[0].decode("utf-8")
+  except UnicodeDecodeError as e: raise ValueError(f"holds no UTF-8: {e.reason}") from None
+
+def _enum_shape(enum:_Names|None) -> tuple:
+  """The names and numbers of an `IntEnum` for a fingerprint, none without one."""
+  return tuple((member.name, int(member)) for member in enum) if enum else ()
+
 #-------------------------------------------------------------------------------------------- Field
 
 class Field:
@@ -97,6 +114,7 @@ class Field:
     length:int = 1,
     scale:float = 1,
     offset:float = 0,
+    values:_Names|None = None,
     default:Any = None,
     doc:str = "",
   ) -> None:
@@ -105,8 +123,9 @@ class Field:
       type: A `Type`, or a `Struct` nested here as in C, its value a dict of its own
       name: Key of the field in the record's dict
       unit: Documentation only, e.g. "V", "Hz"
-      length: 1 = scalar, >1 = fixed-size array; string and bytes size themselves
+      length: 1 = scalar, >1 = an array, or the bytes of a `char` text, its NUL among them
       scale: Raw counts per unit of a number, `100` stores 23.45 as 2345
+      values: `IntEnum` naming the numbers of an integer field: a read gives its members
       default: Encoded where the record lacks the field, `None` = the field is required
       doc: Documentation only, the note of the C field
     """
@@ -122,14 +141,25 @@ class Field:
       raise TypeError(f"Field '{name}' shifts by a number, not {offset!r}")
     if length > 1 and type in (Type.string, Type.bytes):
       raise ValueError(f"Field '{name}' of {type.name} sizes itself: no length")
-    if (scale != 1 or offset) and not (isinstance(type, Type) and type.size):
+    if length < 2 and type == Type.char:
+      raise ValueError(f"Field '{name}' of char holds its text and a NUL: length 2 or more")
+    if (scale != 1 or offset) and not (isinstance(type, Type) and type.is_number):
       raise ValueError(f"Field '{name}' of {type.name} holds no number to scale or shift")
+    if values is not None:
+      if not (isinstance(values, EnumType) and issubclass(values, IntEnum)):
+        raise TypeError(f"Field '{name}' names its numbers with an IntEnum, not {values!r}")
+      if not (isinstance(type, Type) and type.is_integer) or scale != 1 or offset:
+        raise ValueError(f"Field '{name}' names whole raw numbers: an integer, unscaled")
+      for member in values:
+        try: pack("<" + type.value, member)
+        except PackError: raise ValueError(f"Field '{name}' cannot hold {member!r}") from None
     self.type: Type|Struct = type
     self.name: str = name
     self.unit: str = unit
     self.length: int = length
     self.scale: float = scale
     self.offset: float = offset
+    self.values: _Names|None = values
     self.default: Any = default
     self.doc: str = doc
 
@@ -149,7 +179,8 @@ class Field:
     return value * self.scale + self.offset
 
   def _value(self, raw:float) -> float:
-    """The number the field means: shift and scale undone."""
+    """The number the field means: its member where `values` names it, shift and scale undone."""
+    if self.values: return self.values(int(raw)) if raw in self.values else raw
     if self.offset: raw -= self.offset
     if self.scale != 1: raw /= self.scale
     return raw
@@ -157,7 +188,7 @@ class Field:
   @property
   def _plain(self) -> bool:
     """`True` where `_value` gives the raw number back as it is, so a read can skip it."""
-    return not self.offset and self.scale == 1
+    return not self.offset and self.scale == 1 and not self.values
 
   def __repr__(self) -> str:
     unit = f", {self.unit!r}" if self.unit else ""
@@ -179,12 +210,14 @@ class Bitfield:
     bits:list[tuple[str, int]],
     type:Type|None = None,
     *,
+    values:dict[str, _Names]|None = None,
     doc:str = "",
   ) -> None:
     """
     Args:
       bits: `(bit_name, bit_width)` pairs, the lowest bits first
       type: Unsigned integer the bits pack into, by default the narrowest that holds them
+      values: `{bit_name: IntEnum}` naming the numbers of a group, as `Field` does
       doc: Documentation only, the note of the C member
     """
     groups = dict(bits)
@@ -201,9 +234,16 @@ class Bitfield:
     kind = type or narrowest
     if not kind.name.startswith("uint") or total > 8 * calcsize(kind.value):
       raise ValueError(f"Bitfield '{name}' needs an unsigned integer of {total} bits or more")
+    for bit, enum in (values or {}).items():
+      if bit not in groups: raise KeyError(f"Bitfield '{name}' has no {bit}")
+      if not (isinstance(enum, EnumType) and issubclass(enum, IntEnum)):
+        raise TypeError(f"Bit '{bit}' of '{name}' names its numbers with an IntEnum, not {enum!r}")
+      if any(not 0 <= member < 1 << groups[bit] for member in enum):
+        raise ValueError(f"Bit '{bit}' of '{name}' cannot hold every {enum.__name__}")
     self.name: str = name
     self.bits: dict[str, int] = groups
     self.type: Type = kind
+    self.values: dict[str, _Names] = dict(values or {})
     self.doc: str = doc
 
   @property
@@ -227,15 +267,19 @@ class Bitfield:
       if not isinstance(value, Integral):
         raise TypeError(f"Bit '{bit}' takes an integer, got {type(value).__name__}")
       if not 0 <= value <= mask: raise ValueError(f"Bit '{bit}' value {value} outside 0 to {mask}")
+      enum = self.values.get(bit)
+      if enum and value not in enum:
+        raise ValueError(f"Bit '{bit}' holds {value}, not a {enum.__name__}")
       packed |= value << at
       at += width
     return packed
 
   def decode(self, packed:int) -> dict[str, int]:
-    """One integer unpacked into named bit values."""
+    """One integer unpacked into named bit values, a member where `values` names the number."""
     values, at = {}, 0
     for bit, width in self.bits.items():
-      values[bit] = (packed >> at) & ((1 << width) - 1)
+      value, enum = (packed >> at) & ((1 << width) - 1), self.values.get(bit)
+      values[bit] = enum(value) if enum and value in enum else value
       at += width
     return values
 
@@ -264,7 +308,7 @@ class _Step(NamedTuple):
 
 class _Run:
   """Members of fixed size side by side: one `struct` call reads them, `build` lays them out."""
-  def __init__(self, members:list, endian:Endian) -> None:
+  def __init__(self, members:list, struct:"Struct") -> None:
     fmt, steps = "", []
     for member in members:
       if isinstance(member, Padding):
@@ -278,15 +322,18 @@ class _Run:
         steps.append(_Step(member.name, member.length, None, inner))
       else:
         fmt += f"{member.length}{member.type.value}"
-        steps.append(_Step(member.name, member.length, self._reader(member), None))
+        length = 1 if member.type == Type.char else member.length # a text is one value
+        steps.append(_Step(member.name, length, self._reader(member), None))
+    self.struct = struct # naming what it cannot read
     self.members: tuple = tuple(members) # in wire order, padding included
     self.steps: tuple[_Step, ...] = tuple(steps)
     self.format: str = fmt # without the byte order, so a host struct can take it in
-    self.packer: Packer = Packer(endian.value + fmt)
+    self.packer: Packer = Packer(struct.endian.value + fmt)
 
   @staticmethod
   def _reader(field:Field) -> Callable|None:
-    """Raw → value: a float32 first the shortest decimal of its bits, then the field's own."""
+    """Raw → value: text or a float32 first out of its bits, then the field's own."""
+    if field.type == Type.char: return _text
     if field.type != Type.float: return None if field._plain else field._value
     return _float32 if field._plain else lambda raw: field._value(_float32(raw))
 
@@ -301,7 +348,10 @@ class _Run:
           items.append(item)
       else:
         items = list(values[at:at + step.length])
-        if step.value and not raw: items = [step.value(value) for value in items]
+        if step.value and not raw:
+          try: items = [step.value(value) for value in items]
+          except ValueError as e:
+            raise ValueError(f"{self.struct._where(step.name)} {e}") from None
         at += step.length
       record[step.name] = items if step.length > 1 else items[0]
     return at
@@ -322,6 +372,7 @@ class Struct:
     endian:Endian = Endian.little,
     crc:CRC|None = None,
     align:int = 1,
+    doc:str = "",
   ) -> None:
     """
     Args:
@@ -329,6 +380,7 @@ class Struct:
       members: In wire order; a field's or a bitfield's name is its key in the record, one each
       crc: Appended to every record, behind its alignment padding
       align: Pad each record up to this byte multiple, 1 = none
+      doc: Documentation only, the note above its C type
     """
     if not name: raise ValueError("A struct needs a name: it keys its blocks and names its C type")
     if not members: raise ValueError(f"Struct '{name}' needs a member: no record is empty")
@@ -356,6 +408,7 @@ class Struct:
     self.endian: Endian = endian
     self.crc: CRC|None = crc
     self.align: int = align
+    self.doc: str = doc
     self._keys: frozenset = frozenset(names)
     self._parts: list[_Run|Field] = self._compile()
     for member in members: # a default the field cannot hold fails here, not when it is missed
@@ -370,10 +423,10 @@ class Struct:
       if member.size is not None:
         run.append(member)
         continue
-      if run: parts.append(_Run(run, self.endian))
+      if run: parts.append(_Run(run, self))
       parts.append(member)
       run = []
-    if run: parts.append(_Run(run, self.endian))
+    if run: parts.append(_Run(run, self))
     return parts
 
   def _where(self, name:str) -> str:
@@ -393,15 +446,19 @@ class Struct:
       raise ValueError(f"{self._where(name)}: {e}") from None
 
   def _encode_field(self, field:Field, value:Any) -> bytes:
-    """One field's bytes: a string, bytes, numbers or nested records."""
-    if field.type == Type.string:
+    """One field's bytes: a text, bytes, numbers or nested records."""
+    if field.type in (Type.string, Type.char):
+      where = self._where(field.name)
       if not isinstance(value, str):
-        raise TypeError(f"{self._where(field.name)} takes str, got {type(value).__name__}")
-      if "\0" in value:
-        raise ValueError(f"{self._where(field.name)} holds a NUL, its end on the wire")
-      try: return value.encode("utf-8") + b"\0"
+        raise TypeError(f"{where} takes str, got {type(value).__name__}")
+      if "\0" in value: raise ValueError(f"{where} holds a NUL, its end on the wire")
+      try: text = value.encode("utf-8")
       except UnicodeEncodeError as e:
-        raise ValueError(f"{self._where(field.name)} holds no UTF-8: {e.reason}") from None
+        raise ValueError(f"{where} holds no UTF-8: {e.reason}") from None
+      if field.type == Type.string: return text + b"\0"
+      if len(text) >= field.length: # its NUL always goes out, C's string functions stop at it
+        raise ValueError(f"{where} takes {field.length - 1}B of UTF-8 and a NUL, got {len(text)}B")
+      return text + bytes(field.length - len(text))
     if field.type == Type.bytes:
       if not isinstance(value, (bytes, bytearray)):
         raise TypeError(f"{self._where(field.name)} takes bytes, got {type(value).__name__}")
@@ -422,6 +479,8 @@ class Struct:
       except TypeError: # what the scale cannot multiply is no number
         got = type(v).__name__
         raise TypeError(f"{self._where(field.name)} takes a number, got {got}") from None
+      if field.values and raw not in field.values:
+        raise ValueError(f"{self._where(field.name)} holds {v!r}, not a {field.values.__name__}")
       data += self._pack(field.type, field.name, raw)
     return data
 
@@ -533,6 +592,32 @@ class Struct:
       total += member.size
     return total + -total % self.align + (self.crc.size if self.crc else 0)
 
+  @property
+  def fingerprint(self) -> int:
+    """
+    CRC-32 of all the bytes and their meaning hang on, `doc`, `unit` and `default` aside:
+    two sides whose fingerprints agree read each other's records.
+    """
+    return crc32_iso.checksum(repr(self._shape()).encode())
+
+  def _shape(self) -> tuple:
+    """The record as plain values for `fingerprint`, a nested struct as its own shape."""
+    crc = self.crc
+    tail = (crc.width, crc.polynomial, crc.initial, crc.reflect_in, crc.reflect_out,
+      crc.xor, crc.invert_out) if crc else None
+    members: list = []
+    for member in self.members:
+      if isinstance(member, Padding):
+        members.append(member.size)
+      elif isinstance(member, Bitfield):
+        named = tuple(_enum_shape(member.values.get(bit)) for bit in member.bits)
+        members.append((member.name, member.type.name, tuple(member.bits.items()), named))
+      else:
+        kind = member.type._shape() if isinstance(member.type, Struct) else member.type.name
+        meaning = (float(member.scale), float(member.offset), _enum_shape(member.values))
+        members.append((member.name, kind, member.length, *meaning))
+    return (self.name, self.endian.name, self.align, tail, tuple(members))
+
   def dtype(self) -> Any:
     """
     numpy dtype of one record, every byte of it: padding, the alignment tail and `crc` included.
@@ -551,8 +636,9 @@ class Struct:
       if member.size is None:
         raise ValueError(f"{self._where(member.name)} varies in size: no dtype holds it")
       if isinstance(member.type, Struct): kind = member.type.dtype()
+      elif isinstance(member, Field) and member.type == Type.char: kind = f"S{member.length}"
       else: kind = self.endian.value + member.type.value
-      count = member.length if isinstance(member, Field) else 1
+      count = member.length if isinstance(member, Field) and member.type != Type.char else 1
       names.append(member.name)
       formats.append((kind, (count,)) if count > 1 else kind)
       offsets.append(at)
@@ -645,9 +731,15 @@ class Message:
       at += size
     return data
 
+  @property
+  def fingerprint(self) -> int:
+    """CRC-32 of every block code and the shape of its struct, as `Struct.fingerprint` has it."""
+    shapes = tuple((code, struct._shape()) for code, struct in sorted(self.structs.items()))
+    return crc32_iso.checksum(repr(shapes).encode())
+
   def export_c_header(self, path:str|None=None, prefix:str="", extern:dict|None=None) -> str:
     """
-    C header of the whole body: block codes, the block header, every struct and its checks.
+    C header of the whole body: block codes and fingerprint, the block header, every struct.
     `prefix` names the module the C way: `REC` gives `REC_CODE_SAMPLE` and `REC_Sample_t`.
     `extern` maps a struct to the `(type, header)` already defining it in C:
     that header is included and the type checked, never defined twice.
@@ -772,6 +864,10 @@ def _c_name(name:str) -> bool:
   if name in _C_KEYWORDS or _C_MACROS.fullmatch(name): return False
   return bool(_C_NAME.fullmatch(name))
 
+def _pascal(name:str) -> str:
+  """PascalCase, an acronym keeping its capitals: `FOC_dump` is `FOCDump`, `off` is `Off`."""
+  return "".join(word[:1].upper() + word[1:] for word in name.split("_"))
+
 def _separator(name:str="") -> str:
   """A `cstyle` separator: a whole line, the name at its end."""
   label = f" {name}" if name else ""
@@ -835,7 +931,7 @@ class _CHeader:
 
   def _refuse(self, struct:Struct) -> None:
     """Refuse what no C struct can mirror, before a line is written."""
-    names = [struct.name]
+    names: list[str] = [] # members go to C as written; `render` checks the names made of others
     for member in struct.members:
       if isinstance(member, Field): names.append(member.name)
       elif isinstance(member, Bitfield): names += [member.name, *member.bits]
@@ -856,7 +952,32 @@ class _CHeader:
     for row in rows: # a note breaks where its author breaks it, so a line too long is theirs
       if any(len(f"  // {line}") > _WIDTH for line in row.note.splitlines()):
         where = struct._where(row.name)
-        raise ValueError(f"{where} has a note line past {_WIDTH} in C: break it with \\n")
+        raise ValueError(f"{where} has a note line past {_WIDTH}: break it with \\n")
+    if any(len(f"// {line}") > _WIDTH for line in struct.doc.splitlines()):
+      raise ValueError(f"Struct '{struct.name}' has a doc line past {_WIDTH}: break it with \\n")
+
+  @staticmethod
+  def enums_of(struct:Struct) -> list[_Names]:
+    """The `IntEnum`s naming numbers of `struct`, in order of first use, each once."""
+    found: list[_Names] = []
+    for member in struct.members:
+      if isinstance(member, Field) and member.values: named = [member.values]
+      elif isinstance(member, Bitfield): named = list(member.values.values())
+      else: continue
+      for enum in named:
+        if enum not in found: found.append(enum)
+    return found
+
+  def enum_name(self, enum:_Names) -> str:
+    """C name of an `IntEnum`, its type `_t` behind it: `mode` of module `REC` is `REC_Mode`."""
+    if not self.prefix:
+      raise ValueError(f"Enum '{enum.__name__}' names C constants after a module: pass prefix")
+    return f"{self.prefix}_{_pascal(enum.__name__)}"
+
+  def constants(self, enum:_Names) -> list[tuple[str, int]]:
+    """Each C constant of an `IntEnum` with its number: `off = 0` is `REC_Mode_Off = 0`."""
+    kind = self.enum_name(enum)
+    return [(f"{kind}_{_pascal(member.name)}", member.value) for member in enum]
 
   def code(self, struct:Struct) -> str:
     """Define of the block code of `struct`: `REC_CODE_SAMPLE`."""
@@ -871,15 +992,13 @@ class _CHeader:
     """C type of `struct` or its bitfield: `REC_State_t`, `REC_StateFlags_t`, `state_flags_t`."""
     if struct in self.extern and not bitfield: return self.extern[struct][0]
     words = f"{struct.name}_{bitfield}" if bitfield else struct.name
-    if not self.prefix: return f"{words}_t"
-    # an acronym keeps its capitals: `FOC_dump` is `FOCDump`, never `FocDump`
-    camel = "".join(word[:1].upper() + word[1:] for word in words.split("_"))
-    return f"{self.prefix}_{camel}_t"
+    return f"{self.prefix}_{_pascal(words)}_t" if self.prefix else f"{words}_t"
 
   @staticmethod
   def note(field:Field) -> str:
-    """`doc`, then `[unit]` only where C holds the value in it: scaled, it holds raw counts."""
+    """`doc`, then `[unit]` only where C holds the value in it, or the form of a `char` text."""
     unit = f"[{field.unit}]" if field.unit and field._plain else ""
+    if field.type == Type.char: unit = "[UTF-8, NUL-terminated]"
     return " ".join(part for part in (field.doc, unit) if part)
 
   def members(self, struct:Struct) -> list[_Row]:
@@ -954,7 +1073,8 @@ class _CHeader:
     trailing = {row.name for row in trail}
     alone = len(trailing) == 1
     packed = "" if self.natural(struct) else " __attribute__((packed))"
-    lines = [f"typedef struct{packed} {{"]
+    lines = [f"// {line}".rstrip() for line in struct.doc.splitlines()]
+    lines.append(f"typedef struct{packed} {{")
     for row in rows:
       decl = f"  {row.decl}"
       if row.name in trailing:
@@ -997,12 +1117,26 @@ class _CHeader:
       f"}} {self.block_type};",
     ]
 
+  def enums(self) -> list[_Names]:
+    """Every `IntEnum` the structs defined here name, each once."""
+    found: list[_Names] = []
+    for struct in self.defined:
+      found += [enum for enum in self.enums_of(struct) if enum not in found]
+    return found
+
+  def enum(self, enum:_Names) -> list[str]:
+    """An `IntEnum` as C constants; the field keeps its width, as an `enum` type's size varies."""
+    lines = [f"  {name} = {value}," for name, value in self.constants(enum)]
+    return ["typedef enum {", *lines, f"}} {self.enum_name(enum)}_t;", ""]
+
   def defines(self, message:Message|None) -> list[str]:
-    """Every name the header defines or checks: codes, the block, struct and bitfield types."""
+    """Every name the header defines or checks: codes, block, enums, struct and bitfield types."""
     names = [self.name(struct) for struct in self.included]
     if message:
-      names.append(self.block_type)
+      names += [self.block_type, f"{self.prefix}_SCHEMA"]
       names += [self.code(struct) for struct in message.structs.values()]
+    for enum in self.enums():
+      names += [f"{self.enum_name(enum)}_t", *(name for name, _ in self.constants(enum))]
     for struct in self.defined:
       names.append(self.name(struct))
       for member in struct.members:
@@ -1012,6 +1146,8 @@ class _CHeader:
   def render(self, path:str|None, guard:str, message:Message|None=None) -> str:
     """The header in `cstyle` order: path, guard, includes, constants, types, structs, checks."""
     names = self.defines(message) # the includes have defined their own types once already
+    bad = [name for name in names if not _c_name(name)] # as C sees them: `auto` is `REC_Auto_t`
+    if bad: raise ValueError(f"No C names: {', '.join(bad)}")
     twice = sorted({name for name in names if names.count(name) > 1 or _C_TYPES.fullmatch(name)})
     if twice: raise ValueError(f"The header would define {', '.join(twice)} twice")
     out = [f"// {path}", ""] if path else []
@@ -1023,11 +1159,14 @@ class _CHeader:
     checks = []
     if message:
       out += [_separator("Constants"), ""]
+      schema = f"#define {self.prefix}_SCHEMA 0x{message.fingerprint:08X}u"
+      out.append(f"{schema} // `Message.fingerprint` of this layout")
       out += [f"#define {self.code(struct)} {code}" for code, struct in message.structs.items()]
       out.append("")
       block, size = self.block_type, Message.BLOCK_HEAD
       checks.append(_assert(f"sizeof({block}) == {size}", f"{block} is {size}B"))
     types = [*self.block(), ""] if message else []
+    for enum in self.enums(): types += self.enum(enum)
     for struct in self.defined: types += self.bitfields(struct)
     if types: out += [_separator("Types"), "", *types]
     out += [_separator("Structure"), ""]

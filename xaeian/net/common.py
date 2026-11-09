@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Callable
 from ..log import Logger, Print
 from ..files import DIR, FILE, PATH
-from ..colors import Color as c
+from ..colors import Color as c, grey
 
 _tmp_seq = itertools.count()  # numbers the remote `.tmp` a put lands beside its target
 CHUNK = 2**20                 # read size for a streamed transfer, download and digest alike
@@ -116,5 +116,5 @@ def log_sync(log:Logger|Print|None, op:str, actions:list[Action], dry_run:bool) 
   counts = {k: sum(1 for a, _ in actions if a == k) for k in ("put", "get", "skip", "delete")}
   hue = {"put": c.LIME, "skip": c.MAGNTA}
   parts = [f"{k}:{hue.get(k, c.CYAN)}{v}{c.END}" for k, v in counts.items() if v]
-  suffix = f" {c.GREY}(dry){c.END}" if dry_run else ""
+  suffix = f" {grey('(dry)')}" if dry_run else ""
   log.inf(f"{op} {' '.join(parts)}{suffix}")

@@ -5,7 +5,7 @@
 import os, ftplib, datetime
 from pathlib import Path
 from ..log import Logger, Print
-from ..colors import Color as c
+from ..colors import Color as c, grey, fmt_count
 from ..files import FILE, PATH
 from .common import (
   TIMEOUT_S, local_index, _tmp_seq, Filter, Progress, Action, Attrs, log_sync, pruned,
@@ -205,8 +205,8 @@ class FTP:
       ).strftime("%Y%m%d%H%M%S")
       try: self._ftp.sendcmd(f"MFMT {ts} {remote}")
       except Exception:
-        if self.log: self.log.wrn(f"MFMT failed {c.GREY}{remote}{c.END}: mtime not preserved")
-    if self.log: self.log.dot(f"{c.GREY}{local}{c.END} → {c.GREY}{remote}{c.END}")
+        if self.log: self.log.wrn(f"MFMT failed {grey(remote)}: mtime not preserved")
+    if self.log: self.log.dot(f"{grey(local)} → {grey(remote)}")
 
   def _stor(self, local:str, dst:str, remote:str, label:str, callback:Progress|None) -> None:
     """Upload one file, reading a refusal against the parent directory."""
@@ -253,8 +253,8 @@ class FTP:
     if preserve_mtime:
       mtime = self._mdtm(remote)
       if mtime: os.utime(local, (mtime, mtime))
-      elif self.log: self.log.wrn(f"MDTM failed {c.GREY}{remote}{c.END}: mtime not preserved")
-    if self.log: self.log.dot(f"{c.GREY}{remote}{c.END} → {c.GREY}{local}{c.END}")
+      elif self.log: self.log.wrn(f"MDTM failed {grey(remote)}: mtime not preserved")
+    if self.log: self.log.dot(f"{grey(remote)} → {grey(local)}")
 
   def _retr(self, remote:str, write):
     """Download, reading a refusal against the file itself."""
@@ -369,7 +369,8 @@ class FTP:
     self._require_connected()
     files = local_index(local)
     if self.log:
-      self.log.inf(f"put_dir {c.CYAN}{len(files)}{c.END} files → {c.SKY}{remote}{c.END}")
+      count = fmt_count(len(files), "file", color=c.CYAN)
+      self.log.inf(f"put_dir {count} → {c.SKY}{remote}{c.END}")
     for rel, f in files.items():
       if pruned(rel, filter): continue
       self.put(str(f), f"{remote}/{rel}", atomic=atomic, callback=callback, _label=rel)
