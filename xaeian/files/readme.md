@@ -16,6 +16,7 @@ FILE.put("data.txt", "Hello!")      # → "unchanged": the file and its mtime st
 FILE.load("data.txt")               # → "Hello!"
 FILE.append("data.txt", "\nmore")
 FILE.load("data.bin", binary=True)  # → bytes
+FILE.read("data.bin", 1024, 64)     # → 64 bytes from byte 1024, the rest unread
 FILE.hash("data.bin", algo="md5")   # → "5d41402abc..."
 FILE.exists("data.txt")             # → True
 
@@ -33,6 +34,8 @@ from xaeian import JSON
 
 JSON.save("config", {"debug": True, "port": 8080})
 JSON.load("config")                    # → dict
+JSON.format({"port": 8080})            # → '{"port":8080}', as `save` writes it
+JSON.parse('{"port":8080}')            # → {"port": 8080}
 JSON.load("missing", otherwise={})     # → {} if not found
 JSON.save_pretty("config", cfg)        # indented, sorted (configs)
 JSON.save_smart("data", measurements)  # compact arrays inline (machine state)
@@ -88,11 +91,12 @@ DIR.file_list("src", exts=[".py"], blacklist=["__pycache__"])
 DIR.zip("folder", "archive.zip")
 DIR.zip("folder", "archive.zip", keep_fresh=True)  # archive newer than the tree stays as it is
 DIR.mtime("folder")                                # latest change under it, a deletion included
+DIR.free_space("data")                             # bytes free on its disk
 ```
 
 ## `PATH`
 
-Pure path manipulation, no IO - except `real`, which expands symlinks and says so.
+Pure path manipulation, no IO (except `real` and `same`, which follow symlinks and say so).
 Whether a path exists is `FILE.exists` / `DIR.exists` business.
 
 ```py
@@ -102,6 +106,10 @@ PATH.stem("a/b/file.txt")         # → "file"
 PATH.ext("a/b/file.txt")          # → ".txt"
 PATH.with_suffix("f.txt", ".md")  # → "f.md"
 PATH.resolve("data/cfg")          # → "/home/user/project/data/cfg"
+PATH.resolve("$HOME/x")           # → "/home/user/x"; a `$` further in names a folder
+PATH.is_abs("~/x")                # → False, as written
+PATH.same("a/../b", "b")          # → True: one place, links followed
+PATH.native("a/b")                # → "a\b" on Windows
 ```
 
 ## Context-based paths

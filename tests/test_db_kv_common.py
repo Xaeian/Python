@@ -41,7 +41,7 @@ def check_table_rejects_non_string():
 
 @pytest.mark.parametrize("table", ["", "1table", "drop table", "a-b", "a;b"])
 def check_table_rejects_bad_identifiers(table):
-  # stricter than keys: table names are interpolated into DDL, so no leading digit / symbols
+  # Stricter than keys: table names are interpolated into DDL, so no leading digit / symbols
   with pytest.raises(ValueError):
     check_table(table)
 
@@ -86,7 +86,7 @@ def loads_wraps_bad_json_with_key_context():
 def now_ms_returns_epoch_milliseconds():
   ts = now_ms()
   assert isinstance(ts, int)
-  # bracket against the wall clock: catches a seconds (too small) or nanoseconds mixup
+  # Bracket against the wall clock: catches a seconds (too small) or nanoseconds mixup
   assert time.time() * 1000 - 5000 < ts < time.time() * 1000 + 5000
 
 #------------------------------------------------------------------------------------- SQL builders
@@ -134,7 +134,7 @@ def where_key_builds_lookup_clause():
   lambda t: sql_read_all_meta(t, '"'),
 ], ids=["create", "get_value", "get_meta", "read_all", "read_all_meta"])
 def sql_builders_reject_bad_table_names(build):
-  # every table name flows through `ident()`, so injection attempts blow up at build time
+  # Every table name flows through `ident()`, so injection attempts blow up at build time
   with pytest.raises(ValueError):
     build("kv; DROP TABLE kv")
 

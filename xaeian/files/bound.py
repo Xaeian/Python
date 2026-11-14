@@ -44,7 +44,7 @@ class _BoundNamespace:
         result = method(*args, **kwargs)
       finally:
         _context.reset(token)
-      # a generator body runs only once advanced, long after this wrapper returned
+      # A generator body runs only once advanced, long after this wrapper returned
       return _bound_gen(self._cfg, result) if generator else result
     self._cache[name] = wrapper
     return wrapper

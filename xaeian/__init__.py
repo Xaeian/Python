@@ -1,7 +1,7 @@
 # xaeian/__init__.py
 
 """
-Xaeian - Python utilities library.
+Xaeian: Python utilities library.
 
 Not re-exported here, import the module directly:
 `table` (list[dict] ops), `files_async`, `cmd`, `cstruct` (binary structs),
@@ -12,7 +12,7 @@ Example:
   >>> from xaeian import logger, JSON, split_sql, Files, Plot
 """
 
-__version__ = "1.2.1"
+__version__ = "1.2.2"
 __repo__ = "Xaeian/Python"
 __python__ = ">=3.12"
 __description__ = (

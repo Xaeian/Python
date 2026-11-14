@@ -35,9 +35,9 @@ def update_returning_via_get_dict_releases_write_lock(db_path):
     row = await a.get_dict(
       "UPDATE users SET failed_logins = failed_logins + 1 WHERE id = 1 RETURNING failed_logins")
     assert row == {"failed_logins": 1}
-    # the leak itself: an uncommitted implicit transaction left open on A
+    # The leak itself: an uncommitted implicit transaction left open on A
     assert a._persistent.in_transaction is False
-    # end-to-end: another connection can write immediately (fail fast, not 5s)
+    # End-to-end: another connection can write immediately (fail fast, not 5s)
     await b.exec("PRAGMA busy_timeout=100")
     assert await b.exec("UPDATE users SET failed_logins = 0 WHERE id = 1") == 1
     await a.close()
@@ -53,7 +53,7 @@ def update_returning_via_get_dict_persists_without_start(db_path):
     await db.exec("INSERT INTO t (id, n) VALUES (1, 0)")
     row = await db.get_dict("UPDATE t SET n = 5 WHERE id = 1 RETURNING n")
     assert row == {"n": 5}
-    # closed uncommitted, a per-call connection rolls back silently → 0
+    # Closed uncommitted, a per-call connection rolls back silently → 0
     assert await db.get_value("SELECT n FROM t WHERE id = 1") == 5
   asyncio.run(main())
 

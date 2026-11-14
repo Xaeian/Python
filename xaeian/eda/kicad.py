@@ -7,7 +7,7 @@ Automates BOM, gerber, CPL and PDF layout export via `kicad-cli`.
 
 Footprint names may be given with or without the library prefix:
 'Inductor:Coil-12x5mm' and 'Coil-12x5mm' select the same components.
-Refs accept glob patterns - 'CN*', 'R?', 'IC[12]'.
+Refs accept glob patterns: 'CN*', 'R?', 'IC[12]'.
 
 Example:
   >>> from xaeian.eda.kicad import KiCad
@@ -168,7 +168,7 @@ def _pkg_match(pkg:str, rows:list[dict]) -> list[dict]:
   """
   Rows whose `Package` matches: exact name first, then case-insensitive substring.
 
-  Library prefix is optional on both sides - the netlist keeps it, `pcb export pos` drops it.
+  Library prefix is optional on both sides: the netlist keeps it, `pcb export pos` drops it.
   """
   def norm(x) -> str: return str(x).rsplit(":", 1)[-1].strip().lower()
   key = norm(pkg)
@@ -389,7 +389,7 @@ class KiCad:
     """
     Export netlist, keep raw components and build aggregated BOM rows.
 
-    `rows` drops what cannot be ordered - no `Code` (or `Code` of '-') and DNP parts -
+    `rows` drops what cannot be ordered, parts without `Code` (or with `Code` '-') and DNP ones,
     then aggregates by `Manufacturer`+`Code`. `components` keeps everything.
     """
     net_name = self.project_path + self.name + ".net"
@@ -422,7 +422,7 @@ class KiCad:
     List refs of netlist components matching every given field.
 
     `manufacturer` and `code` are exact, empty matches any; `package` prefix is optional.
-    Refs come straight from the netlist - DNP parts and parts without `Code` included.
+    Refs come straight from the netlist: DNP parts and parts without `Code` included.
     Giving no field at all raises, it would otherwise select the whole board.
     """
     if not (manufacturer or code or package):
@@ -505,7 +505,7 @@ class KiCad:
       self.log.wrn("BOM skipped: no schematic in the project")
       return
     tag = re.sub(r"[^a-z0-9]", "", contractor.lower())
-    # copy: replacements edit rows in place, `self.rows` has to survive for the next call
+    # Copy: replacements edit rows in place, `self.rows` has to survive for the next call
     rows = [dict(r) for r in self.rows]
     dnp = set(self._dnp_refs(dnp_ref, dnp_part, dnp_package))
     rows = _filter_dnp(rows, list(dnp), ref_field="Reference")

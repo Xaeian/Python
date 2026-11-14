@@ -145,7 +145,7 @@ def repo(template, tmp_path, monkeypatch) -> Repo:
   shutil.copytree(template, tmp_path, dirs_exist_ok=True)
   repo = Repo(tmp_path, monkeypatch)
   monkeypatch.setattr(release, "gh", repo.gh)
-  # install and login of `gh` have tests of their own
+  # Install and login of `gh` have tests of their own
   monkeypatch.setattr(commit, "github", lambda: None)
   monkeypatch.setattr(release, "github", lambda: None)
   monkeypatch.chdir(repo.work)

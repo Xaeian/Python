@@ -6,7 +6,8 @@ PDF manipulation: compress, merge, split, extract, metadata, text overlay.
 Compression shells out to Ghostscript, structure edits use pypdf, text PyMuPDF (fitz).
 """
 
-import itertools, os, subprocess
+import itertools, logging, os, subprocess, threading
+from contextlib import contextmanager
 from io import BytesIO
 from typing import Literal, NoReturn, Sequence
 from ..extras import MissingExtra, absent
@@ -33,6 +34,25 @@ def _write(writer:PdfWriter, path:str) -> str:
   writer.write(bio)
   FILE.save(path, bio.getvalue())
   return path
+
+_LOG_LOCK = threading.RLock() # pypdf's logger is one per process: one thread quiets it at a time
+
+@contextmanager
+def _quiet():
+  """
+  pypdf's own warnings kept off the console while it works,
+  as `Annotation sizes differ` over a link it carries over whole.
+  A fault it cannot pass raises all the same.
+  Two threads take turns, or the later one would restore the level the earlier one set.
+  """
+  with _LOG_LOCK:
+    log = logging.getLogger("pypdf")
+    level = log.level
+    log.setLevel(logging.ERROR)
+    try:
+      yield
+    finally:
+      log.setLevel(level)
 
 #----------------------------------------------------------------------------------------- Compress
 
@@ -91,7 +111,7 @@ def pdf_compress(
 def _page_count(path:str) -> int:
   """Page count, `0` when the file cannot be read as PDF."""
   try:
-    return len(PdfReader(path).pages)
+    return pdf_page_count(path)
   except Exception:
     return 0
 
@@ -135,6 +155,37 @@ def pdf_merge(paths:Sequence[str], dst:str) -> str:
     for page in PdfReader(path).pages:
       writer.add_page(page)
   return _write(writer, os.path.abspath(dst))
+
+def pdf_insert(
+  src:str, insert:str, at:int,
+  replace:int = 0,
+  dst:str|None = None,
+  inplace:bool = False,
+) -> str:
+  """
+  Insert the pages of `insert` into `src` before its page `at`, 1-based.
+
+  The `replace` pages from there are taken out.
+  The bookmarks, links and info of `src` stay, and the links of `insert` come along.
+  Its bookmarks stay behind: they would follow the last of `src`, out of page order.
+  `dst=None` → `-merged` suffix beside the source, or the source itself when `inplace`.
+  """
+  src, insert = require_file(src, "PDF"), require_file(insert, "PDF")
+  with _quiet():
+    writer = PdfWriter(clone_from=src)
+    if not 1 <= at <= len(writer.pages) - replace + 1:
+      raise ValueError(f"No page {at} to insert before, {replace} taken out, in {src}")
+    added = pdf_page_count(insert)
+    writer.merge(at - 1, insert, import_outline=False)
+    for _ in range(replace):
+      writer.remove_page(at - 1 + added)
+    return _write(writer, resolve_dst(src, dst, inplace, "merged"))
+
+def pdf_page_count(src:str) -> int:
+  """How many pages the PDF at `src` holds."""
+  src = require_file(src, "PDF")
+  with _quiet():
+    return len(PdfReader(src).pages)
 
 def pdf_split(src:str, dst_dir:str, prefix:str="page") -> list[str]:
   """Split PDF into one file per page, named `<prefix>_001.pdf` upward."""
@@ -198,7 +249,7 @@ def pdf_extract(src:str, dst:str, pages:str|int|Sequence[str|int]) -> str:
 #--------------------------------------------------------------------------------------------- Text
 
 # PyMuPDF base-14 codes: helv/tiro/cour = Helvetica/Times/Courier regular,
-# a bo/it/bi ending marks bold, italic, bold-italic; symb = Symbol, zadb = ZapfDingbats
+# a bo/it/bi ending marks bold, italic, bold-italic; symb = Symbol, zadb = ZapfDingbats.
 FitzFontname = Literal[
   "helv", "hebo", "heit", "hebi",
   "tiro", "tibo", "tiit", "tibi",

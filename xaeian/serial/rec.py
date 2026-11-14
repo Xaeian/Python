@@ -27,8 +27,9 @@ class Recorder(SerialPort):
   """
   Single numeric value pulled from a byte stream by a background thread.
 
-  The reader thread owns the connection - it opens the port, reconnects after dropouts
-  and closes on stop - and `with Recorder(...)` owns the thread: enter starts it, exit stops it.
+  The reader thread owns the connection: it opens the port, reconnects after dropouts
+  and closes on stop.
+  `with Recorder(...)` owns the thread: enter starts it, exit stops it.
   The stream is unframed text, so `address` and `crc` do not apply here.
 
   The rolling buffer holds the line still being received, so a value split across reads matches
@@ -36,10 +37,10 @@ class Recorder(SerialPort):
   which the calling thread reads without a lock.
 
   Patterns for `regex=`:
-    `SCI_NORM` - 1.23456e+02 (SCPI, Brymen, Rigol), a zero as 0.00000e+00
-    `SCI` - general scientific notation
-    `FLOAT` - 123.456, refusing 1.2e-05 rather than reading 1.2
-    `NUM` - int or float, its exponent included
+    `SCI_NORM`: 1.23456e+02 (SCPI, Brymen, Rigol), a zero as 0.00000e+00
+    `SCI`: general scientific notation
+    `FLOAT`: 123.456, refusing 1.2e-05 rather than reading 1.2
+    `NUM`: int or float, its exponent included
 
   Args:
     name: Device identifier shown in the console prefix.
@@ -50,7 +51,7 @@ class Recorder(SerialPort):
   SCI_NORM = r"(?<![\d.])-?\d\.\d+[eE][+-]?\d{2}(?!\d)"
   SCI = r"-?\d+\.?\d*[eE][+-]?\d+"
   FLOAT = r"(?<![\d.])-?\d+\.\d+(?![\d.eE])"
-  # an exponent is part of the number, not a second one
+  # An exponent is part of the number, not a second one
   NUM = r"(?<![\d.])-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?(?![\d.])"
 
   _BUF_MAX = 4096
@@ -132,7 +133,7 @@ class Recorder(SerialPort):
       if line.strip():
         self.print(f"{self.color}{line.strip()}{c.END}")
         new_lines.append(line.strip())
-    # cap in case the instrument streams without newlines
+    # Cap in case the instrument streams without newlines
     if len(self._print_buf) > self._BUF_MAX:
       self._print_buf = self._print_buf[-self._BUF_MAX:]
     if new_lines: self._reset_timeout() # a meter showing `OL` talks: only silence is a lost link

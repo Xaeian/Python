@@ -35,7 +35,7 @@ def _windows() -> list[dict[str, Any]]:
     detail = _run(["netsh", "wlan", "show", "profile", ssid, "key=clear"])
     password = None
     if detail:
-      # netsh labels are localized: English, then Polish
+      # `netsh` labels are localized: English, then Polish
       m = re.search(r"Key Content\s*:\s*(.+)", detail)
       if not m:
         m = re.search(r"Zawarto.{1,5} klucza\s*:\s*(.+)", detail)
@@ -105,8 +105,8 @@ def wifi_passwords() -> list[dict[str, Any]]:
 
 EXAMPLES = """
 examples:
-  xn wifi               # list saved networks and their passwords
-  xn wifi -o wifi.json  # save report to JSON file
+  xn wifi - list saved networks and their passwords
+  xn wifi -o wifi.json - save report to JSON file
 """
 
 def main() -> None:

@@ -11,7 +11,7 @@ PDF compression additionally needs the Ghostscript binary on PATH, not a pip dep
 The `xn min`, `xn meta` and `xn ico` commands drive this package from `xaeian.cli`.
 """
 
-__extras__ = ("media", ["Pillow", "pypdf", "PyMuPDF"])
+__extras__ = ("media", ["Pillow", "pypdf[crypto]", "PyMuPDF"])
 
 from ..extras import MissingExtra
 from .min import compress
@@ -23,13 +23,13 @@ try:
   from .img import img_compress, img_convert, img_resize, img_scrub_metadata
   from .pdf import (
     pdf_compress, pdf_scrub_metadata, pdf_merge, pdf_split, pdf_extract, pdf_add_text,
-    parse_pages,
+    pdf_insert, pdf_page_count, parse_pages,
   )
   from .ico import img_to_ico, pick_sizes, source_side, DEFAULT_SIZES
   __all__ += [
     "img_compress", "img_convert", "img_resize", "img_scrub_metadata",
     "pdf_compress", "pdf_scrub_metadata", "pdf_merge", "pdf_split", "pdf_extract",
-    "pdf_add_text", "parse_pages",
+    "pdf_add_text", "pdf_insert", "pdf_page_count", "parse_pages",
     "img_to_ico", "pick_sizes", "source_side", "DEFAULT_SIZES",
   ]
 except MissingExtra:

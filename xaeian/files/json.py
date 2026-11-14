@@ -22,13 +22,23 @@ class JSON:
     with open(path, "r", encoding=cfg.encoding) as file:
       content = file.read()
     if not content: return otherwise
-    return json.loads(content)
+    return JSON.parse(content)
 
   @staticmethod
   def save(path:str, content:Any, ensure_ascii:bool=False) -> None:
     """Save JSON in compact form, no whitespace."""
     path = PATH.ensure_suffix(path, ".json")
-    FILE.save(path, json.dumps(content, separators=(",", ":"), ensure_ascii=ensure_ascii))
+    FILE.save(path, JSON.format(content, ensure_ascii))
+
+  @staticmethod
+  def parse(text:str|bytes) -> Any:
+    """The value a JSON text holds, as `load` reads it from a file."""
+    return json.loads(text)
+
+  @staticmethod
+  def format(value:Any, ensure_ascii:bool=False) -> str:
+    """`value` as compact JSON text, no whitespace, as `save` writes it."""
+    return json.dumps(value, separators=(",", ":"), ensure_ascii=ensure_ascii)
 
   @staticmethod
   def save_pretty(

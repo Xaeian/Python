@@ -85,7 +85,7 @@ def paginate_refuses_a_page_size_it_cannot_divide_by(db):
 
 def dict_value_is_stored_as_json_and_parsed_back(db):
   db.insert("users", {"name": "Jan", "meta": {"role": "admin", "tags": [1, 2]}})
-  # stored as JSON text...
+  # Stored as JSON text...
   stored = db.get_value("SELECT meta FROM users WHERE name = ?", "Jan")
   assert stored == '{"role": "admin", "tags": [1, 2]}'
   # ...and revived to a real dict when the column is marked json

@@ -104,7 +104,7 @@ def fmt_list(names:Iterable[object], color:str=Color.SKY) -> str:
   """Names in `color`, joined by commas."""
   return ", ".join(f"{color}{n}{Color.END}" for n in names)
 
-def test_colors() -> None:
+def _demo() -> None:
   """Print each color name rendered in its own color, next to its escape literal."""
   for name, code in vars(Color).items():
     if not name.isupper() or name == "END": continue
@@ -112,4 +112,4 @@ def test_colors() -> None:
     print(f"{code}{name:8}{Color.END}{literal:15}")
 
 if __name__ == "__main__":
-  test_colors()
+  _demo()

@@ -22,10 +22,10 @@ from xaeian import MissingExtra
 
 REPO = Path(__file__).resolve().parent.parent
 if not (REPO / "xaeian" / "__init__.py").exists():
-  # publishing copies `tests/` beside the wheel, and the wheel tests answer there
+  # Publishing copies `tests/` beside the wheel, and the wheel tests answer there
   pytest.skip("not a repository checkout", allow_module_level=True)
 
-# variable name → the class its readme examples call it on; async blocks resolve separately
+# Variable name → the class its readme examples call it on; async blocks resolve separately
 OBJECTS = {
   "xaeian/db/readme.md": {"db": xaeian.db.SqliteDatabase, "kv": xaeian.db.KeyValue},
   "xaeian/files/readme.md": {ns: getattr(xaeian, ns) for ns in

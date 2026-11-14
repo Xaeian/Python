@@ -26,7 +26,7 @@ with SerialPort("COM3", 9600, address=0x42, crc=crc16_modbus) as sp:
   resp = sp.read()              # auto-verify CRC, strip address
 ```
 
-Color attrs are class-level - override in subclass or per instance:
+Color attrs are class-level, so override them in a subclass or per instance:
 
 ```py
 from xaeian import Color
@@ -35,7 +35,7 @@ class QuietPort(SerialPort):
   COLOR_TIME = Color.CREMA
   COLOR_INFO = Color.SKY
 
-# or runtime
+# Or at runtime
 sp = SerialPort("COM3")
 sp.COLOR_TIME = Color.SILVER
 ```
@@ -80,7 +80,7 @@ vals = mr.read_values() # [12.5, 0.34, 25.0, 1500] or None
 ## Recording pattern
 
 Recorders are pure data sources: `start()` spawns a reader thread that keeps `.value` / `.values` fresh.
-Output (CSV, DB, MQTT, plot) is application code - run a reap loop that snapshots values at a fixed period, as below.
+Output (CSV, DB, MQTT, plot) is application code: run a reap loop that snapshots values at a fixed period, as below.
 
 ```py
 import threading
@@ -115,7 +115,7 @@ Wraps standard built-ins; use `exec()` for everything else.
 from xaeian.serial import Shell
 
 with Shell("/dev/ttyUSB0") as sh:
-  # basic
+  # Basic
   sh.ping()  # True/False (retries 3x)
   sh.uid()   # bytes (12-byte device UID)
 

@@ -221,6 +221,11 @@ class DIR:
     return latest
 
   @staticmethod
+  def free_space(path:str) -> int:
+    """Bytes free on the disk that holds the directory."""
+    return shutil.disk_usage(PATH.resolve(path, read=True)).free
+
+  @staticmethod
   def zip(
     path:str,
     zip_output:str|None = None,

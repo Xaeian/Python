@@ -28,7 +28,7 @@ def reflect_palindrome_is_unchanged():
 
 #----------------------------------------------------------------------------------- catalog values
 
-# Every predefined instance matched against its published check value for "123456789".
+# Every predefined instance matched against its published check value for "123456789"
 CATALOG = [
   (crc32_iso, 0xCBF43926), # standard CRC-32 (Ethernet, ZIP, PNG)
   (crc32_aixm, 0x3010BF7F),
@@ -149,7 +149,7 @@ def one_wire_rom_checksums_to_zero():
 
 @pytest.mark.parametrize("crc", [crc8_smbus, crc16_modbus, crc32_iso])
 def every_single_bit_flip_is_detected(crc):
-  # the core promise of a CRC: any one-bit error in the frame fails verification
+  # The core promise of a CRC: any one-bit error in the frame fails verification
   frame = crc.encode(b"sensor")
   for i in range(len(frame)):
     for bit in range(8):

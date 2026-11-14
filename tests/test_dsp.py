@@ -29,7 +29,7 @@ def accel():
 #------------------------------------------------------------------------------------------ metrics
 
 def rms_matches_the_amplitudes_that_went_in(accel):
-  # two sines of amplitude 2 and 0.5 plus noise: sqrt(2²/2 + 0.5²/2 + 0.3²)
+  # Two sines of amplitude 2 and 0.5 plus noise: sqrt(2²/2 + 0.5²/2 + 0.3²)
   assert accel.rms == pytest.approx(1.49, abs=0.05)
   assert accel.peak > accel.rms
   assert accel.crest_factor == pytest.approx(accel.peak / accel.rms, rel=1e-9)
@@ -37,7 +37,7 @@ def rms_matches_the_amplitudes_that_went_in(accel):
 
 def a_band_pass_isolates_the_component_inside_it(accel):
   clean = accel.highpass(10).lowpass(100)
-  # only the 50Hz sine survives: rms of amplitude 2 is 2/sqrt(2)
+  # Only the 50Hz sine survives: rms of amplitude 2 is 2/sqrt(2)
   assert clean.rms == pytest.approx(1.414, abs=0.05)
   assert clean.rms < accel.rms
 
@@ -179,7 +179,7 @@ def arithmetic_scales_and_subtracts_signals(accel):
   doubled = accel * 2
   assert doubled.rms == pytest.approx(accel.rms * 2, rel=1e-6)
   residual = accel - accel.highpass(10).lowpass(100)
-  # what the band-pass removed: the 200Hz component and the noise
+  # What the band-pass removed: the 200Hz component and the noise
   assert 0 < residual.rms < accel.rms
   assert (1 / Signal([2.0, 4.0], fs=1)).data.tolist() == [0.5, 0.25]
 

@@ -11,8 +11,8 @@ from xaeian import file_context, Files, PATH, DIR, FILE, INI, CSV, JSON, YAML
 
 @pytest.fixture(autouse=True)
 def _root_context(tmp_path):
-  # every test runs under a global context rooted at a fresh temp dir (restored on exit);
-  # tests that need the path itself take the standard `tmp_path` fixture directly
+  # Every test runs under a global context rooted at a fresh temp dir (restored on exit);
+  # tests that need the path itself take the standard `tmp_path` fixture directly.
   with file_context(root_path=str(tmp_path)):
     yield
 
@@ -63,6 +63,19 @@ def path_rel_and_is_under(tmp_path):
 
 def path_ext_empty_for_no_extension():
   assert PATH.ext("noext") == ""
+
+def path_resolve_expands_only_what_opens_with_a_variable(tmp_path, monkeypatch):
+  """A `$` further in names a folder, `Ca$h`, whatever the environment holds."""
+  monkeypatch.setenv("XAEIAN_T", str(tmp_path))
+  assert PATH.resolve("$XAEIAN_T/y") == PATH.normalize(str(tmp_path / "y"))
+  named = PATH.normalize(str(tmp_path / "Ca$XAEIAN_T"))
+  assert PATH.resolve(named) == named and PATH.resolve("Ca$XAEIAN_T").endswith("/Ca$XAEIAN_T")
+
+def path_is_abs_same_and_native(tmp_path):
+  assert PATH.is_abs(str(tmp_path)) and not PATH.is_abs("a/b") and not PATH.is_abs("~/x")
+  assert PATH.same("a/../b", "b") and not PATH.same("a", "b")
+  assert PATH.native("a/b") == os.path.join("a", "b") # backslashes on Windows
+  if os.name == "nt": assert PATH.same(str(tmp_path).upper(), PATH.normalize(str(tmp_path)))
 
 def path_exists_is_file_is_dir():
   FILE.save("a.txt", "x")
@@ -122,9 +135,16 @@ def file_load_missing_raises():
 def file_hash_and_size():
   FILE.save("h.txt", "abc")
   assert FILE.hash("h.txt", algo="md5") == "900150983cd24fb0d6963f7d28e17f72" # md5("abc")
-  # sha256 of "abc"
+  # SHA-256 of "abc"
   assert FILE.hash("h.txt") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
   assert FILE.size("h.txt") == 3 and FILE.mtime("h.txt") > 0
+
+def file_read_takes_a_byte_range():
+  FILE.save("r.bin", bytes(range(10)))
+  assert FILE.read("r.bin", 2, 3) == bytes([2, 3, 4])
+  assert FILE.read("r.bin", 8, 5) == bytes([8, 9]) # the file ends first
+  with pytest.raises(ValueError):
+    FILE.read("r.bin", -1, 2)
 
 def concurrent_saves_of_one_path_never_blend(tmp_path):
   """
@@ -233,6 +253,9 @@ def dir_zip_unzip_roundtrip():
   DIR.zip("z")
   DIR.unzip("z.zip", "out")
   assert sorted(DIR.file_list("out", shape="rel")) == ["a.txt", "inner/b.txt"]
+
+def dir_free_space_counts_the_disk_bytes():
+  assert DIR.free_space(".") > 0
 
 def dir_mtime_moves_with_a_deletion(tmp_path):
   FILE.save("m/a.txt", "1"); FILE.save("m/inner/b.txt", "2")
@@ -387,6 +410,13 @@ def json_smart_stays_valid_and_ascii_escapes():
 
 def json_load_missing_returns_default():
   assert JSON.load("nope", otherwise={"def": 1}) == {"def": 1}
+
+def json_parse_and_format_are_the_text_of_load_and_save():
+  value = {"a": [1, 2.5, None], "name": "żółw"}
+  assert JSON.format(value) == '{"a":[1,2.5,null],"name":"żółw"}' # compact, as written
+  assert JSON.parse(JSON.format(value)) == value and JSON.parse(b'{"x":1}') == {"x": 1}
+  JSON.save("v", value)
+  assert FILE.load("v.json") == JSON.format(value)
 
 def yaml_roundtrip():
   data = {"debug": True, "port": 8080, "tags": ["a", "b"]}

@@ -39,7 +39,7 @@ def split_sql_normalizes_whitespace():
   assert split_sql("SELECT 1;  SELECT   2 ;") == ["SELECT 1;", "SELECT 2;"]
 
 def split_sql_preserves_string_literals():
-  # the whitespace and punctuation collapse stays out of quoted content
+  # The whitespace and punctuation collapse stays out of quoted content
   out = split_sql("INSERT INTO t VALUES ('a , b', 'x=y')")
   assert out == ["INSERT INTO t VALUES('a , b','x=y');"]
   assert split_sql("SELECT 'a;b'") == ["SELECT 'a;b';"] # ; inside a literal is not a split point
@@ -65,7 +65,7 @@ def replace_start_end_are_line_anchored():
   assert replace_end("file.txt\ndata.txt", ".txt", ".md") == "file.md\ndata.md"
 
 def replace_treats_replacement_literally():
-  # the replacement is literal text, not a regex template
+  # The replacement is literal text, not a regex template
   assert replace_start("old_x", "old_", r"A\1B") == r"A\1Bx"
   assert replace_start("old_x", "old_", r"\g<name>") == r"\g<name>x"
 

@@ -115,7 +115,7 @@ class FTP:
     """Rename, falling back to delete-then-rename: RFC 959 RNTO may refuse an existing target."""
     try: self._ftp.rename(src, dst)
     except ftplib.error_perm as e:
-      # src is gone: fail before dst gets destroyed
+      # `src` is gone: fail before `dst` gets destroyed
       if not self.exists(src): raise _gone(src) from e
       try: self._ftp.delete(dst)
       except ftplib.error_perm: pass
@@ -334,7 +334,7 @@ class FTP:
         child = f"{remote}/{name}"
         try:
           size = self._ftp.size(child)
-        except ftplib.error_perm: # 550: a directory, or SIZE denied - the probe decides
+        except ftplib.error_perm: # 550: a directory or a denied SIZE, the probe tells them apart
           size = None
         is_dir = self._is_dir(child) if size is None else False
         result.append(Attrs(st_size=size or 0, st_mtime=None, filename=name, is_dir=is_dir))
@@ -403,7 +403,7 @@ class FTP:
     Push local → remote, skipping unchanged files.
 
     Skip strategy: mtime+size when the server supports MFMT,
-    size-only otherwise - then a same-size edit can be missed.
+    size-only otherwise, where a same-size edit can be missed.
 
     `delete` is refused when the local source is not a directory,
     so a missing source can never wipe the remote.
@@ -455,7 +455,7 @@ class FTP:
     Pull remote → local, skipping unchanged files.
 
     Skip strategy: mtime+size when the server offers MLSD or MDTM,
-    size-only otherwise - then a same-size edit can be missed.
+    size-only otherwise, where a same-size edit can be missed.
 
     `delete` is refused on an incomplete remote listing,
     so an unreadable remote can never wipe local files.
@@ -538,7 +538,7 @@ class FTP:
             idx[rel] = Attrs(st_size=size, st_mtime=self._mdtm(child), filename=name)
             continue
         except ftplib.error_perm:
-          pass # 550: a directory, or SIZE denied - the nested listing decides
+          pass # 550: a directory or a denied SIZE, the nested listing tells them apart
         if filter and not (filter(rel) and filter(f"{rel}/")): continue
         idx.update(self._index_remote(child, rel, filter))
         self._binary() # the nested nlst reset TYPE again

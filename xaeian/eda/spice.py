@@ -201,7 +201,7 @@ class Simulation:
       self._print.run(f"ngspice {self.name} ({label})")
     try: # the work files go on every way out, a timeout included
       result = cmd_run([self._ngspice, "-b", cir_path], capture=True, timeout=self.timeout)
-      # ngspice returns non-zero on warnings too, so the output file decides success
+      # `ngspice` returns non-zero on warnings too, so the output file decides success
       if not os.path.exists(out_path):
         raise RuntimeError(f"ngspice wrote no output (exit {result.returncode}), "
           f"does the .sp run `wrdata {{FILE}} ...`?\n{(result.stderr or '').strip()}")
@@ -216,7 +216,7 @@ class Simulation:
       self._print.ok(f"{self.name} done ({sum(len(v) for v in data.values())} values)")
     if cache:
       n = min(len(v) for v in data.values())
-      # a parallel run of the same parameters aims here too, and stores the same rows
+      # A parallel run of the same parameters aims here too, and stores the same rows
       try: CSV.save(csv_path, [{k: v[i] for k, v in data.items()} for i in range(n)])
       except OSError: pass
     return self._transform(data)
@@ -251,7 +251,7 @@ class Simulation:
       try:
         return self.run(cache=cache, **overrides)
       except Exception as e:
-        if self.verbose: self._print.err(f"{label}: {e}")
+        if self.verbose: self._print.err(f"{label} | {e}")
         return {}
     if parallel and len(jobs) > 1:
       with ThreadPoolExecutor(max_workers=max_workers) as pool:
@@ -273,7 +273,7 @@ if __name__ == "__main__":
   print('  data = sim.run(RLOAD="2.2k")')
   print('  results = sim.sweep(RLOAD=["1k", "2.2k", "4.7k"])')
   print()
-  # an AC run as ngspice writes it under `wr_singlescale` and `wr_vecnames`
+  # An AC run as `ngspice` writes it under `wr_singlescale` and `wr_vecnames`
   sample = (
     " frequency       v(out)          v(out)          vdb(out)\n"
     " 1.00000000e+01  9.96067682e-01 -6.25847783e-02 -1.71115043e-02\n"

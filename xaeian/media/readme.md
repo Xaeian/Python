@@ -19,8 +19,8 @@ scrub_metadata("photo.jpg")   # → photo-nometa.jpg
 ```
 
 Both `compress()` and `scrub_metadata()` auto-detect PDF vs image by extension.
-`compress()` returns one dict per file - `src`, `dst`, `orig_kB`, `new_kB` - whatever the
-input kind; images add `orig_size`, `new_size` and `format`.
+`compress()` returns one dict per file (`src`, `dst`, `orig_kB`, `new_kB`) whatever the input kind.
+Images add `orig_size`, `new_size` and `format`.
 
 ## Modules
 
@@ -32,6 +32,9 @@ from xaeian.media.pdf import *
 pdf_compress(src, dst=None, level="1.7", settings="/ebook", inplace=False, verify=True)
 pdf_scrub_metadata(src, dst=None, inplace=False)
 pdf_merge(["a.pdf", "b.pdf"], "out.pdf")
+# The pages of `annex.pdf` before page 5, page 5 taken out: bookmarks, links and info kept
+pdf_insert("doc.pdf", "annex.pdf", 5, replace=1, inplace=True)
+pdf_page_count("doc.pdf")                      # → 12
 pdf_split("doc.pdf", "pages/", prefix="page")  # → pages/page_001.pdf, ...
 pdf_extract("doc.pdf", "out.pdf", "1,3,5-7")   # extract specific pages
 pdf_add_text(src, dst=None, text="DRAFT", pos=(50, 50), fontsize=12, pages=None)

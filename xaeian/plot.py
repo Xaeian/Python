@@ -49,10 +49,10 @@ PALETTE = [
   "#6699CC", "#661100", "#004488", "#AA4499", "#EEDD88",
 ]
 
-# trace kinds that draw data: each takes a palette color and can name the y axis
+# Trace kinds that draw data: each takes a palette color and can name the y axis
 _SERIES = ("line", "scatter", "step", "fill", "bar")
 
-# a `name_unit` suffix counts only as a known unit, so `sensor_id` or `temp_max` stay names
+# A `name_unit` suffix counts only as a known unit, so `sensor_id` or `temp_max` stay names
 _UNIT = re.compile(r"[pnuµmkMG]?(V|A|W|Wh|Hz|s|Ohm|Ω|F|H|m|g|Pa|J)|°C|C|K|dB|dBm|%|rpm|ppm")
 
 def _parse_label(label:str|tuple|None) -> tuple[str, str]:
@@ -172,7 +172,7 @@ THEMES = {
   },
 }
 
-# look of `hline` and `vline`, every key overridable per call
+# Look of `hline` and `vline`, every key overridable per call
 _REF_LINE = {"ls": "--", "alpha": 0.7, "lw": 1.0}
 
 #--------------------------------------------------------------------------------------------- Plot
@@ -407,7 +407,7 @@ class Plot:
           tax.spines["right"].set_visible(True) # theme hides it
           color_idx = self._draw_traces(tax, panel["twin"], color_idx)
           self._apply_axis(tax, panel["twin"], is_twin=True)
-          # twin draws on top, so the merged legend has to live on it
+          # The twin draws on top, so the merged legend has to live on it
           self._apply_legend(ax, panel, merge_from=tax)
         else:
           self._apply_legend(ax, panel)
@@ -420,7 +420,7 @@ class Plot:
           if tr["x"] is not None and _is_datetime(tr["x"]):
             _setup_date_axis(ax)
             break
-        # shared x: the upper panels would repeat the bottom panel's labels
+        # Shared x: the upper panels would repeat the bottom panel's labels
         if not is_last and n > 1:
           ax.tick_params(labelbottom=False)
           ax.set_xlabel("")
@@ -554,7 +554,7 @@ def quick(x, y, label:str|tuple|None=None, **kw) -> Plot:
 
 #--------------------------------------------------------------------------------------------- Demo
 
-def demo() -> None:
+def _demo() -> None:
   """Stacked sensor dashboard: alarm, twinx, multi-series, datetime."""
   t = np.arange("2025-03-01", "2025-03-02", dtype="datetime64[5m]")
   n = len(t)
@@ -581,10 +581,10 @@ def demo() -> None:
     .title("Sensor Dashboard: 24h")
     .show())
 
-def demo_family() -> None:
+def _demo_family() -> None:
   """Family of curves: simulated parametric sweep."""
   t = np.linspace(0, 1e-3, 200)
-  # same shape `Simulation.sweep()` returns
+  # The same shape `Simulation.sweep()` returns
   results = {}
   for r in ["1k", "2.2k", "4.7k", "10k"]:
     rv = float(r.replace("k", "")) * 1e3
@@ -604,6 +604,6 @@ def demo_family() -> None:
 if __name__ == "__main__":
   import sys
   if "family" in sys.argv:
-    demo_family()
+    _demo_family()
   else:
-    demo()
+    _demo()

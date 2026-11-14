@@ -1,6 +1,6 @@
 # xaeian/cli/ico.py
 
-"""`xn ico` - convert an image to a multi-size .ico."""
+"""`xn ico`: convert an image to a multi-size .ico."""
 
 import os, sys
 from ..log import Print
@@ -13,11 +13,11 @@ p = Print()
 
 EXAMPLES = """
 examples:
-  xn ico logo.png                   # sizes picked from the source → logo.ico
-  xn ico logo.png -o favicon.ico    # custom output path
-  xn ico photo.jpg --fit crop       # center-crop to square
-  xn ico logo.png --sizes 16,32,48  # only these sizes
-  xn ico logo.png --upscale         # include sizes larger than the source
+  xn ico logo.png - sizes picked from the source → logo.ico
+  xn ico logo.png -o favicon.ico - custom output path
+  xn ico photo.jpg --fit crop - center-crop to square
+  xn ico logo.png --sizes 16,32,48 - only these sizes
+  xn ico logo.png --upscale - include sizes larger than the source
 """
 
 def main() -> None:

@@ -16,13 +16,13 @@ from ..colors import Color as c, fmt_cmd, fmt_path
 
 p = Print()
 
-# by `sys.platform`; any other system takes apt
+# Keyed by `sys.platform`, any other system takes apt
 INSTALL_GH = {
   "win32": "winget install --id GitHub.cli",
   "darwin": "brew install gh",
 }
 
-# the empty helper drops whatever git would ask instead, as `gh auth setup-git` writes it
+# The empty helper drops whatever git would ask instead, as `gh auth setup-git` writes it
 CREDENTIALS = (
   "-c", "credential.https://github.com.helper=",
   "-c", "credential.https://github.com.helper=!gh auth git-credential",
@@ -82,7 +82,7 @@ def github() -> None:
 
 #------------------------------------------------------------------------------------------- Colors
 
-# one color per role, the same in every message of both commands
+# One color per role, the same in every message of both commands
 def fmt_branch(name:str) -> str: return f"{c.VIOLET}{name}{c.END}"
 def fmt_release(name:str) -> str: return f"{c.SKY}{name}{c.END}" # version, tag or title
 def fmt_sha(commit:str) -> str: return f"{c.GOLD}{commit[:7]}{c.END}"

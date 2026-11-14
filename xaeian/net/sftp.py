@@ -501,7 +501,7 @@ class SFTP:
     """
     Run command on remote host, blocking until it exits.
 
-    The exit status is never returned - `check=True` raises `RuntimeError` on non-zero.
+    The exit status is never returned: `check=True` raises `RuntimeError` on non-zero.
 
     Returns:
       `(stdout, stderr)`, decoded with `errors="replace"` and stripped.

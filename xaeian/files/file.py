@@ -62,6 +62,14 @@ class FILE:
       return file.read()
 
   @staticmethod
+  def read(path:str, start:int, size:int) -> bytes:
+    """`size` bytes from byte `start` on, fewer where the file ends first, not loaded whole."""
+    if start < 0 or size < 0: raise ValueError(f"Bytes are counted from 0, not {start} and {size}")
+    with open(PATH.resolve(path, read=True), "rb") as file:
+      file.seek(start)
+      return file.read(size)
+
+  @staticmethod
   def load_lines(path:str) -> list[str]:
     """Load text file as list of lines, line endings kept."""
     cfg = get_context()
@@ -119,7 +127,7 @@ class FILE:
     encoding = None if binary else get_context().encoding
     newline = None if binary else ""
     target = PATH.resolve(path, read=False)
-    # a secret saved again stays a secret; Windows would carry only a read-only bit that blocks
+    # A secret saved again stays a secret; Windows would carry only a read-only bit that blocks
     if chmod is None and os.name != "nt" and os.path.isfile(target):
       chmod = stat.S_IMODE(os.stat(target).st_mode)
     with FILE.atomic(target) as tmp:

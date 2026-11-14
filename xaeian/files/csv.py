@@ -142,7 +142,7 @@ class CSV:
     """
     if datarow is None: raise ValueError("datarow must not be None")
     cfg = get_context()
-    # appends in place rather than through the atomic `FILE.save`, so it resolves its own path
+    # Appends in place rather than through the atomic `FILE.save`, so it resolves its own path
     path = PATH.resolve(PATH.ensure_suffix(path, ".csv"), read=False)
     DIR.ensure(path, is_file=True)
     file_exists = os.path.isfile(path) and os.path.getsize(path) > 0
@@ -180,7 +180,7 @@ class CSV:
     the rows of the previous save must not read as the current ones.
     """
     path = PATH.ensure_suffix(path, ".csv")
-    # rendered whole first, so a bad row cannot leave a truncated file behind
+    # Rendered whole first, so a bad row cannot leave a truncated file behind
     csv_file = io.StringIO()
     if data and all(isinstance(row, dict) for row in data):
       field_names = field_names or list(data[0].keys())

@@ -82,7 +82,7 @@ MC34063 = VConv(
   lambda R1, R2, vref: vref * (1 + R2 / R1),
   vref=1.25, doc="MC34063: Vout = Vref * (1 + R2/R1)",
 )
-# the ~50uA IADJ * R2 term is left out: it needs R2 in ohms, and every pair here is a ratio
+# The ~50µA IADJ × R2 term is left out: it needs R2 in ohms, and every pair here is a ratio
 LM317 = VConv(
   lambda R1, R2, vref: vref * (1 + R2 / R1),
   vref=1.25, doc="LM317 positive regulator: Vout = Vref * (1 + R2/R1)",

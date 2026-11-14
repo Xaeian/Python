@@ -48,7 +48,7 @@ class CRCProto(Protocol):
 
 #------------------------------------------------------------------------------------------ Helpers
 
-# the pattern is pure ASCII, so the bytes twin is the same rule, never a second one
+# The pattern is pure ASCII, so the bytes twin is the same rule, never a second one
 _ANSI = r"\x1B\[[0-?]*[ -/]*[@-~]"
 _ANSI_RE = re.compile(_ANSI)
 _ANSI_RE_BYTES = re.compile(_ANSI.encode())
@@ -132,7 +132,7 @@ class SerialPort:
     """Render line with timestamp, prefix, address. Output to console + file."""
     if len(text) > self.print_limit:
       text = text[:self.print_limit] + f"...{c.END}" # reset color in case cut mid-ANSI
-    # envelope order: addr → prefix → time → text (each prepended to previous)
+    # Envelope order: addr → prefix → time → text (each prepended to previous)
     if self.time_disp:
       text = f"{self.COLOR_TIME}{self._timestamp()}{c.END} {text}"
     if prefix: text = f"{prefix} {text}"
@@ -256,7 +256,7 @@ class SerialPort:
     Read available bytes: up to `buffer_size`, blocking until `timeout`.
     With `crc`, a reply the timeout cut reads on until it verifies or the line goes quiet.
 
-    `None` covers every miss alike - nothing arrived, the read failed,
+    `None` covers every miss alike: nothing arrived, the read failed,
     the address did not match, or the CRC did not verify.
 
     Args:
@@ -308,7 +308,7 @@ class SerialPort:
     resp = self._read_chunk()
     if self.address is not None: resp = self._check_address(resp)
     if not resp: return None
-    # so the split cannot yield empty lines
+    # Line breaks collapse to one first, so the split yields no empty line
     lines = re.sub(b"[\r\n]+", b"\n", resp).strip(b"\n").split(b"\n")
     result = []
     for line in lines:

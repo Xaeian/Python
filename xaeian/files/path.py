@@ -12,7 +12,8 @@ class PATH:
   """
   Static path helpers; normalization and resolution follow the active `Config`.
 
-  Everything here is lexical: no call reads the filesystem; `real` alone expands symlinks.
+  Everything here is lexical, no call reads the filesystem,
+  except `real` and `same`, which follow symlinks.
   Whether a path exists is `FILE.exists` / `DIR.exists` business.
   """
   @staticmethod
@@ -43,12 +44,14 @@ class PATH:
   @staticmethod
   def resolve(path:str, read:bool=True) -> str:
     """
-    Resolve to absolute: expands `~` and `$VAR`, then joins relative paths onto `root_path`.
+    Absolute path: a leading `~`, `$VAR` or `%VAR%` expands, a relative one joins `root_path`.
+
+    A `$` further in is part of a name, as in `C:/Music/Ca$h`.
 
     `read=False` ignores the PyInstaller bundle (`_MEIPASS`) base.
     """
     cfg = get_context()
-    path = PATH.expand(path)
+    path = PATH.expand(path) if path.startswith(("~", "$", "%")) else PATH.normalize(path)
     if os.path.isabs(path): return PATH.normalize(os.path.normpath(path))
     if read and cfg.bundle and hasattr(sys, "_MEIPASS"):
       meipass = PATH.normalize(getattr(sys, "_MEIPASS"))
@@ -71,6 +74,16 @@ class PATH:
     Use this whenever a path from untrusted input must be proven to stay inside a base directory.
     """
     return PATH.normalize(os.path.realpath(PATH.resolve(path)))
+
+  @staticmethod
+  def native(path:str) -> str:
+    """The path in the system's own spelling, with backslashes on Windows, `..` folded."""
+    return os.path.normpath(path)
+
+  @staticmethod
+  def same(a:str, b:str) -> bool:
+    """`True` for two paths to one place, links followed; on Windows case and slashes aside."""
+    return os.path.normcase(PATH.real(a)) == os.path.normcase(PATH.real(b))
 
   @staticmethod
   def script_dir() -> str:
@@ -173,6 +186,11 @@ class PATH:
     _, ext = os.path.splitext(path)
     if ext.lower() == suffix.lower(): return path
     return path + suffix
+
+  @staticmethod
+  def is_abs(path:str) -> bool:
+    """`True` for a path absolute as written, before any `~` or `$VAR` expands."""
+    return os.path.isabs(path)
 
   @staticmethod
   def is_under(path:str, base:str|None=None, real:bool=False) -> bool:

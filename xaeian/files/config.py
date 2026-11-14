@@ -40,7 +40,7 @@ class Config:
     elif not os.path.isabs(self.root_path):
       self.root_path = os.path.abspath(self.root_path)
 
-# The default Config is built at import, so its `root_path` snapshots the cwd at import time.
+# The default `Config` is built at import, so its `root_path` snapshots the cwd at import time
 _context: ContextVar[Config] = ContextVar("xaeian_files_config", default=Config())
 
 def get_context() -> Config:

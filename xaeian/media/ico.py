@@ -1,7 +1,7 @@
 # xaeian/media/ico.py
 
 """
-Image to ICO conversion - multi-size favicon generator.
+Image to ICO conversion: a multi-size favicon generator.
 
 Pillow decodes and resizes, the ICO container is packed by hand for full control.
 """
@@ -45,7 +45,7 @@ def _write_ico(path:str, sizes:list[int], blobs:list[bytes]):
   offset = 6 + 16 * count
   for s, blob in zip(sizes, blobs):
     w = 0 if s == 256 else s # the side is a single byte, so 0 encodes 256
-    # width, height, palette colors, reserved, planes, bpp, blob length, blob offset
+    # Width, height, palette colors, reserved, planes, bpp, blob length, blob offset
     entries.append(struct.pack("<BBBBHHII", w, w, 0, 0, 1, 32, len(blob), offset))
     offset += len(blob)
   with open(path, "wb") as f:

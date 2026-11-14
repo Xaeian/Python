@@ -1,6 +1,6 @@
 # xaeian/cli/dupes.py
 
-"""Duplicate file finder - content hashing, optionally reaching inside ZIP archives."""
+"""Duplicate file finder: content hashing, optionally reaching inside ZIP archives."""
 
 import os, sys, hashlib, zipfile
 from typing import Any
@@ -70,7 +70,7 @@ def find_dupes(
     follow_symlinks: Measure a linked file as its target, so link and target can pair up.
 
   Returns:
-    Dicts with keys: size, hash, count, paths - sorted by size ascending.
+    Dicts with keys `size`, `hash`, `count` and `paths`, sorted by size ascending.
     A ZIP entry appears as `zip://<archive>::<entry>`.
   """
   root = PATH.resolve(root)
@@ -108,11 +108,11 @@ def find_dupes(
 
 EXAMPLES = """
 examples:
-  xn dupes photos/            # find duplicates
-  xn dupes docs/ --zips       # include ZIP contents
-  xn dupes . --min-size 1024  # skip files under 1kB
-  xn dupes . --algo md5       # use MD5 (faster)
-  xn dupes . -o report.json   # save JSON report
+  xn dupes photos/ - find duplicates
+  xn dupes docs/ --zips - include ZIP contents
+  xn dupes . --min-size 1024 - skip files under 1kB
+  xn dupes . --algo md5 - use MD5 (faster)
+  xn dupes . -o report.json - save JSON report
 """
 
 def main() -> None:

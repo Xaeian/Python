@@ -818,7 +818,7 @@ class Frame:
     while True:
       start = self._buf.find(self.SYNC)
       if start < 0:
-        # a lone first sync byte at the end may be a pair the chunk cut in half
+        # A lone first sync byte at the end may be a pair the chunk cut in half
         keep = 1 if self._buf.endswith(self.SYNC[:1]) else 0
         del self._buf[:len(self._buf) - keep]
         return
@@ -857,7 +857,7 @@ _C_MACROS = re.compile( # what `<stddef.h>` and `<stdint.h>` define without argu
 _C_TYPES = re.compile( # the types they define, so a struct of the same name is a second one
   r"(u?int(_least|_fast)?(8|16|32|64)|u?int(ptr|max)|size|ptrdiff|wchar|max_align|nullptr)_t",
 )
-_WIDTH = 99 # the longest line `cstyle` takes
+_WIDTH = 99 # the longest line of an exported header
 
 def _c_name(name:str) -> bool:
   """`True` for an identifier C takes as written: no keyword, nothing reserved or defined."""
@@ -868,8 +868,13 @@ def _pascal(name:str) -> str:
   """PascalCase, an acronym keeping its capitals: `FOC_dump` is `FOCDump`, `off` is `Off`."""
   return "".join(word[:1].upper() + word[1:] for word in name.split("_"))
 
+def _above(note:str, indent:str="") -> list[str]:
+  """`note` as full-line comments, which open with a capital; its author's breaks stay."""
+  if note[:1].isascii() and note[:1].islower(): note = note[0].upper() + note[1:]
+  return [f"{indent}// {line}".rstrip() for line in note.splitlines()]
+
 def _separator(name:str="") -> str:
-  """A `cstyle` separator: a whole line, the name at its end."""
+  """A section separator: a whole line, the name at its end."""
   label = f" {name}" if name else ""
   return "//" + "-" * (_WIDTH - 2 - len(label)) + label
 
@@ -883,7 +888,7 @@ def _guard(path:str|None, name:str) -> str:
 def _assert(test:str, says:str) -> str:
   """
   One `_Static_assert`, its message saying what the wire holds.
-  Past the width of `cstyle` the message goes on a line of its own, and the test too
+  Past `_WIDTH` the message goes on a line of its own, and the test too
   when its own line runs past it.
   """
   line = f'_Static_assert({test}, "{says} on the wire");'
@@ -1073,17 +1078,17 @@ class _CHeader:
     trailing = {row.name for row in trail}
     alone = len(trailing) == 1
     packed = "" if self.natural(struct) else " __attribute__((packed))"
-    lines = [f"// {line}".rstrip() for line in struct.doc.splitlines()]
+    lines = _above(struct.doc)
     lines.append(f"typedef struct{packed} {{")
     for row in rows:
       decl = f"  {row.decl}"
       if row.name in trailing:
         lines.append(f"{decl} // {row.note}" if alone else f"{decl.ljust(column)}// {row.note}")
         continue
-      lines += [f"  // {line}".rstrip() for line in row.note.splitlines()] # the author's breaks
+      lines += _above(row.note, "  ")
       lines.append(decl)
     if struct.size is None and (struct.align > 1 or struct.crc):
-      lines.append("  // variable size: alignment padding and crc follow the record on the wire")
+      lines.append("  // Variable size: alignment padding and crc follow the record on the wire")
     lines.append(f"}} {self.name(struct)};")
     return lines
 
@@ -1144,7 +1149,7 @@ class _CHeader:
     return names
 
   def render(self, path:str|None, guard:str, message:Message|None=None) -> str:
-    """The header in `cstyle` order: path, guard, includes, constants, types, structs, checks."""
+    """The header in order: path, guard, includes, constants, types, structs, checks."""
     names = self.defines(message) # the includes have defined their own types once already
     bad = [name for name in names if not _c_name(name)] # as C sees them: `auto` is `REC_Auto_t`
     if bad: raise ValueError(f"No C names: {', '.join(bad)}")

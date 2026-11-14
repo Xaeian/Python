@@ -1,6 +1,6 @@
 # xaeian/eda/__init__.py
 
-"""Electronics - E-series, voltage converters, KiCad production exports, ngspice runner."""
+"""Electronics: E-series, voltage converters, KiCad production exports, ngspice runner."""
 
 from ..extras import MissingExtra
 from .ee import E6, E12, E24, expand_series, VConv

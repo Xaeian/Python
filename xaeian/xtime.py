@@ -16,7 +16,7 @@ from __future__ import annotations
 __extras__ = ("time", ["pytz", "tzlocal"])
 
 from datetime import datetime, timedelta, tzinfo
-from typing import Union, overload
+from typing import overload
 import calendar, re
 
 from .extras import MissingExtra, absent
@@ -27,7 +27,7 @@ except ModuleNotFoundError as e:
   if not absent(e, "pytz", "tzlocal"): raise
   raise MissingExtra("Install with: pip install xaeian[time]") from e
 
-TimeInput = Union[str, int, float, datetime, timedelta, "Time"]
+type TimeInput = str | int | float | datetime | timedelta | Time
 
 class Time(datetime):
   """
@@ -37,7 +37,7 @@ class Time(datetime):
   - `Time("2025-03-01 12:00")`: parse datetime string
   - `Time(1700000000)`: unix timestamp
   - `Time("2d")`: now + 2 days
-  - `Time("-6h 30m")`: now - 6 hours + 30 minutes
+  - `Time("-6h 30m")`: now − 6 hours + 30 minutes
 
   Naive values are treated as local time; comparisons run in UTC.
   Comparison accepts only `Time` and `datetime`: wrap anything else, `t == Time("2025-03-01")`.
@@ -240,7 +240,7 @@ class Time(datetime):
 
   #------------------------------------------------------------------------------- Interval parsing
 
-  # unit alternation is longest-first: `m` must not shadow `mo` or `ms`
+  # Unit alternation is longest-first: `m` must not shadow `mo` or `ms`
   INTERVAL_PATTERN = r"[+\-]?[0-9]*\.?[0-9]+(?:mo|ms|µs|us|y|w|d|h|m|s)"
   INTERVAL_RE = re.compile(INTERVAL_PATTERN)
   INTERVALS_RE = re.compile(rf"^(?:{INTERVAL_PATTERN}\s*)+$")

@@ -71,7 +71,7 @@ result = db.paginate("SELECT * FROM users", page=2, per_page=20)
 with db.transaction():
   db.insert("orders", {"user_id": 1, "total": 99.50})
   db.update("users", {"balance": 0}, "id = ?", 1)
-  # commits on success, rolls back on exception
+  # Commits on success, rolls back on exception
 
 # Batch execute
 db.exec_batch("CREATE TABLE a (id INT); CREATE TABLE b (id INT)")
@@ -106,7 +106,7 @@ await db.start()  # create pool eagerly, fail fast if DB unreachable
 # ... use db ...
 await db.close()  # clean shutdown
 
-# or as context manager:
+# Or as context manager:
 async with AsyncDatabase("postgres", "mydb", user="postgres", password="secret") as db:
   await db.insert("users", {"name": "Jan"})
 ```
@@ -177,9 +177,9 @@ kv = KeyValue(db, table="_settings")
 ```py
 from datetime import datetime, timezone
 
-# dict/list → JSON (on insert); a string is stored as given, never read as a date
+# `dict`/`list` → JSON (on insert); a string is stored as given, never read as a date
 db.insert("events", {"data": {"key": "value"}})
-# datetime binds natively, SQLite keeps it as ISO text
+# `datetime` binds natively, SQLite keeps it as ISO text
 db.insert("logs", {"created": datetime.now(timezone.utc)})
 # JSON parsing (on select)
 # Single value
@@ -218,10 +218,10 @@ db.drop_database("olddb")
 ```py
 from xaeian import logger, Print
 
-# daemon / API
+# Daemon / API
 db = Database("sqlite", "app.db", log=logger("app"))
 
-# script / CLI
+# Script / CLI
 db = Database("mysql", "mydb", user="root", password="secret", log=Print())
 ```
 
@@ -252,8 +252,8 @@ db = PostgresDatabase("mydb", host="localhost", user="postgres", password="secre
 
 ## Placeholders
 
-Raw SQL takes `?`, and only `?`. Each driver's own form is written in one place, on the way
-into that driver:
+Raw SQL takes `?`, and only `?`.
+Each driver's own form is written in one place, on the way into that driver:
 
 - SQLite: `?` unchanged
 - MySQL, and PostgreSQL through `psycopg2`: `?` → `%s`

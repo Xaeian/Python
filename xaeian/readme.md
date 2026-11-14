@@ -59,7 +59,7 @@ t = Time("2025-03-01")                 # parse date
 t = Time("2025-03-01T12:00:00+02:00")  # ISO with timezone
 t = Time(1700000000)                   # unix timestamp
 t = Time("2d")                         # now + 2 days
-t = Time("-6h 30m")                    # now - 6.5 hours
+t = Time("-6h 30m")                    # now − 6 hours + 30 minutes, the sign on its first term
 
 t + "1w"  # add 1 week
 t - "3d"  # subtract 3 days
@@ -74,7 +74,7 @@ t.round("w")  # round to week (Monday)
 t = Time("2025-03-01T12:00:00+02:00")
 t.to("ts")        # unix timestamp (float)
 t.to("iso")       # "2025-03-01T12:00:00+02:00", the offset survives
-t.to("utc")       # Time in UTC
+t.to("utc")       # `Time` in UTC
 t.to("%Y-%m-%d")  # "2025-03-01"
 ```
 
@@ -173,7 +173,8 @@ from xaeian.cstruct import Message
 
 path = "dev/link_wire.h"
 message = Message({1: sample})
-FILE.save(path, message.export_c_header(path, prefix="LINK", extern={point: ("GEO_Point_t", "geo.h")}))
+header = message.export_c_header(path, prefix="LINK", extern={point: ("GEO_Point_t", "geo.h")})
+FILE.save(path, header)
 ```
 
 A text of fixed size, the names of a field's numbers, and one number for the whole layout:
@@ -219,19 +220,22 @@ for body in link.feed(wire):  # any stretch of the stream, frames cut anywhere
 link.errors                   # frames dropped on length or CRC
 link.pending                  # bytes held back, a frame still arriving
 
-message.encode({...})  # a body on its own, for a transport that keeps boundaries
+message.encode({...}) # a body on its own, for a transport that keeps boundaries
 ```
 
 ## `cmd`
 
 ```py
-from xaeian.cmd import version, exists, which, run, output
+from xaeian.cmd import version, exists, which, run, output, start, stop
 
-version("python3")            # "3.12.3"
-exists("gcc")                 # True/False
-which("python3", "python")    # "/usr/bin/python3"
-output("git rev-parse HEAD")  # "a1b2c3d..."
-run("make -j4", cwd="build")  # CompletedProcess
+version("python3")                  # "3.12.3"
+exists("gcc")                       # True/False
+which("python3", "python")          # "/usr/bin/python3"
+output("git rev-parse HEAD")        # "a1b2c3d..."
+run("make -j4", cwd="build")        # `CompletedProcess`, a byte that is no UTF-8 replaced
+run(["ffmpeg", ...], binary=True)   # its output as bytes
+proc = start("worker", stdin=True)  # left running, its pipes of bytes
+stop(proc)                          # ended, on Windows with what it started; its exit code back
 ```
 
 ## `plot`
@@ -314,7 +318,7 @@ y = filtfilt(butterworth("lowpass", 500, fs=10_000), samples)
 # Vibration metrics
 sig.rms                         # root mean square
 sig.peak                        # max absolute value
-sig.peak_to_peak                # max - min
+sig.peak_to_peak                # max − min
 sig.crest_factor                # peak / rms
 # Integration (accel → velocity → displacement)
 vel = sig.integrate(highpass_Hz=5, units="m/s")

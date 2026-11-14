@@ -99,7 +99,7 @@ def _pick_formats(req:ImgFormat, img:Image.Image, src_ext:str) -> list[tuple[str
   if req == "webp": return [("WEBP", ".webp"), ("AVIF", ".avif"), ("JPEG", ".jpg")]
   if req == "jpg": return [("JPEG", ".jpg")]
   if req == "png": return [("PNG", ".png")]
-  # auto: size-first
+  # `auto`: size-first
   if _has_alpha(img):
     return [("WEBP", ".webp"), ("AVIF", ".avif"), ("PNG", ".png"), ("JPEG", ".jpg")]
   return [("AVIF", ".avif"), ("WEBP", ".webp"), ("JPEG", ".jpg"), ("PNG", ".png")]
@@ -171,7 +171,7 @@ def img_scrub_metadata(src:str, dst:str|None=None, inplace:bool=False) -> str:
   """
   src = require_file(src, "Image")
   image = Image.open(src)
-  # the raw pixel buffer: per-pixel tuples would cost seconds and gigabytes on a phone photo
+  # The raw pixel buffer: per-pixel tuples would cost seconds and gigabytes on a phone photo
   clean = Image.frombytes(image.mode, image.size, image.tobytes())
   if image.mode == "P":
     clean.putpalette(image.getpalette())

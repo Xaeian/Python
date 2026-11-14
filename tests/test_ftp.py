@@ -308,7 +308,7 @@ def index_walks_nested_directories_without_mlsd(client):
   assert session._index_partial is False
 
 def index_reasserts_binary_after_a_failed_nested_listing(client):
-  # the nested NLST sends TYPE A and then fails, so it returns without restoring binary
+  # The nested NLST sends TYPE A and then fails, so it returns without restoring binary
   session = client(files={"/r/b.txt": (7, EPOCH)}, dirs=["/r", "/r/sub"],
     mlsd=False, unlistable=["/r/sub"])
   idx = session._index_remote("/r")

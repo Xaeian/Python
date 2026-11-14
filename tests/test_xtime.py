@@ -69,7 +69,7 @@ def fractional_time_intervals():
   assert base + "0.5d" == Time("2025-03-02 00:00:00")
 
 def fractional_calendar_units_truncate():
-  # months/years step by whole units - the fractional part is dropped
+  # Months and years step by whole units: the fractional part is dropped
   assert Time("2025-03-01 12:00") + "2.5mo" == Time("2025-05-01 12:00") # +2 months, not +2.5
   assert Time("2025-03-01 12:00") + "0.5y" == Time("2025-09-01 12:00") # int(0.5*12) = 6 months
 

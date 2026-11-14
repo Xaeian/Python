@@ -141,6 +141,7 @@ xn min photo.jpg -f avif        # convert to AVIF
 xn min photos/ --max-px 1280    # batch resize
 xn meta photo.jpg -i            # strip EXIF in-place
 xn ico logo.png -o favicon.ico  # multi-size .ico
+xn plot log.csv                 # a CSV file as a waveform
 xn commit -m "fix: Timeout"     # commit and push
 xn release                      # merge into main, tag, publish
 ```

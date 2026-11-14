@@ -101,7 +101,7 @@ def to_driver(sql:str, style:str) -> str:
 
 #------------------------------------------------------------------------------------- SQL Builders
 
-# Shared by the sync and async implementations.
+# Shared by the sync and async implementations
 
 def _insert_sql(table:str, data:dict) -> tuple[str, tuple]:
   """Build `INSERT INTO ... VALUES (...)` and its params (no RETURNING)."""
@@ -181,7 +181,7 @@ def _upsert_sql(
   cols = ", ".join(ident(k) for k in d.keys())
   vals = ph(len(d))
   keys = on if isinstance(on, list) else [on]
-  # nothing but keys to set: rewriting one with itself keeps the row, where an empty SET fails
+  # Nothing but keys to set: rewriting one with itself keeps the row, where an empty SET fails
   upd = update or [k for k in d.keys() if k not in keys] or keys[:1]
   if excluded is None:
     sets = ", ".join(f"{ident(k)} = VALUES({ident(k)})" for k in upd)

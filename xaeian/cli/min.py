@@ -1,6 +1,6 @@
 # xaeian/cli/min.py
 
-"""`xn min` - compress PDFs and images."""
+"""`xn min`: compress PDFs and images."""
 
 import sys
 from ..log import Print
@@ -13,14 +13,14 @@ p = Print()
 
 EXAMPLES = """
 examples:
-  xn min report.pdf                   # compress PDF (ebook preset)
-  xn min report.pdf -s /screen        # compress PDF for screen
-  xn min photo.jpg                    # compress image → photo-min.jpg
-  xn min photo.jpg -i                 # compress image in-place
-  xn min photos/                      # compress directory recursively
-  xn min photos/ --max-px 1280 -q 70  # cap at 1280px, quality 70
-  xn min hero.png -f webp             # convert to WebP
-  xn min photos/ --target-kb 200      # fit under 200kB
+  xn min report.pdf - compress PDF (ebook preset)
+  xn min report.pdf -s /screen - compress PDF for screen
+  xn min photo.jpg - compress image → photo-min.jpg
+  xn min photo.jpg -i - compress image in-place
+  xn min photos/ - compress directory recursively
+  xn min photos/ --max-px 1280 -q 70 - cap at 1280px, quality 70
+  xn min hero.png -f webp - convert to WebP
+  xn min photos/ --target-kb 200 - fit under 200kB
 """
 
 def main() -> None:

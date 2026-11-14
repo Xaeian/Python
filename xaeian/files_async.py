@@ -6,8 +6,9 @@ Async wrappers for file operations.
 `DIR`, `FILE`, `INI`, `CSV`, `JSON` and `YAML` offloaded to `asyncio.to_thread()`.
 Same API as the sync versions, just `await` the calls.
 
-Called directly, not awaited: the pure helpers `INI.format`, `INI.parse` and `JSON.smart`,
-which never touch the filesystem, and what the caller drives itself:
+Called directly, not awaited: the pure helpers `INI.format` and `INI.parse`,
+`JSON.parse`, `JSON.format` and `JSON.smart`, which never touch the filesystem,
+and what the caller drives itself:
 the generators `DIR.iter_files` and `FILE.iter_lines`, and the context manager `FILE.atomic`.
 `PATH` is sync throughout.
 
@@ -66,6 +67,7 @@ class DIR:
   folder_list = _offload(_DIR.folder_list)
   file_list = _offload(_DIR.file_list)
   mtime = _offload(_DIR.mtime)
+  free_space = _offload(_DIR.free_space)
   zip = _offload(_DIR.zip)
   unzip = _offload(_DIR.unzip)
   unzip_bytes = _offload(_DIR.unzip_bytes)
@@ -74,6 +76,7 @@ class DIR:
 class FILE:
   """Async file operations."""
   load = _offload(_FILE.load)
+  read = _offload(_FILE.read)
   save = _offload(_FILE.save)
   put = _offload(_FILE.put)
   append = _offload(_FILE.append)
@@ -112,6 +115,8 @@ class JSON:
   save_pretty = _offload(_JSON.save_pretty)
   save_smart = _offload(_JSON.save_smart)
   smart = _JSON.smart # pure: no IO to wait for
+  parse = _JSON.parse # pure: no IO to wait for
+  format = _JSON.format # pure: no IO to wait for
 
 def __getattr__(name:str) -> Any:
   """`YAML` is built on first use, mirroring the sync side."""

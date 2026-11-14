@@ -41,7 +41,7 @@ class Attrs:
   st_mtime: float|None = None # UTC epoch, `None` when the transport has no timestamp
   filename: str = ""
   is_dir: bool = False
-  # content digest, `S3` only: a file protocol never says what is inside
+  # Content digest, `S3` only: a file protocol never says what is inside
   etag: str|None = None
 
 #------------------------------------------------------------------------------------------- Faults

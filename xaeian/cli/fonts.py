@@ -194,7 +194,7 @@ def _parse_filename(stem:str) -> tuple[str, int|str, bool]|None:
   if first != first.lower():
     weight, italic = _extract_weight_italic(rest)
     return _camel_split(first), weight, italic
-  # lowercase: already renamed, or Google Fonts style
+  # Lowercase: already renamed, or Google Fonts style
   parts = stem.split("-")
   italic = parts[-1] in ("italic", "oblique")
   if italic:
@@ -268,7 +268,7 @@ def _rewrite_metadata(path:str, family:str, weight:int|str, italic:bool):
   for name_id, value in records.items():
     name_table.setName(value, name_id, 1, 0, 0) # Mac Roman
     name_table.setName(value, name_id, 3, 1, 0x409) # Windows Unicode US
-  # nameID 18-25 (compatible full, variations) would override the records above
+  # `nameID` 18-25 (compatible full, variations) would override the records above
   name_table.names = [
     n for n in name_table.names
     if n.nameID not in {18, 19, 20, 21, 22, 23, 24, 25}
@@ -350,7 +350,7 @@ def rename_fonts(
       continue
     old_path = root + "/" + name
     new_path = root + "/" + new_name
-    # samefile keeps case-only renames working on a case-insensitive FS
+    # `samefile` keeps case-only renames working on a case-insensitive FS
     if name != new_name and FILE.exists(new_path) and not os.path.samefile(old_path, new_path):
       p.wrn(f"COLLISION {fmt_path(new_name, c.ORANGE)} exists, skipping {name}")
       continue
@@ -429,11 +429,11 @@ def _generate_css(font_dir:str, css_path:str, results:list[dict], dry_run:bool):
 
 EXAMPLES = """
 examples:
-  xn fonts web/fonts/                          # web layout: inter-400.ttf
-  xn fonts web/fonts/ --css web/css/fonts.css  # web layout plus its @font-face CSS
-  xn fonts assets/fonts/ --mode system         # system layout: Inter-Regular.ttf
-  xn fonts assets/fonts/ --mode system --meta  # also rewrite the TTF name table to match
-  xn fonts fonts/ --dry-run                    # preview without changes
+  xn fonts web/fonts/ - web layout: inter-400.ttf
+  xn fonts web/fonts/ --css web/css/fonts.css - web layout plus its @font-face CSS
+  xn fonts assets/fonts/ --mode system - system layout: Inter-Regular.ttf
+  xn fonts assets/fonts/ --mode system --meta - also rewrite the TTF name table to match
+  xn fonts fonts/ --dry-run - preview without changes
 """
 
 def main() -> None:

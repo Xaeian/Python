@@ -1,5 +1,13 @@
 # Changes `xaeian`
 
+## `1.2.2` PDF & processes
+
+- `media`: `pdf_insert`, `pdf_page_count`, PDFs locked with AES open
+- `cmd`: `start` runs a command in the background, `stop` ends it, on Windows with its children
+- `cmd`: `run(binary=True)` gives bytes, text survives a byte that is no UTF-8
+- `files`: `FILE.read` a byte range, `DIR.free_space`, `PATH.same`, `JSON.parse`
+- Fix: `PATH.resolve` keeps a `$` inside a path
+
 ## `1.2.1` Struct & filters
 
 - `cstruct`: `Struct("name", *members)`, `decode` one record, `records` many, `raw=True` the wire

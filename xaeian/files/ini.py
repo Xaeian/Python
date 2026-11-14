@@ -138,7 +138,7 @@ class INI:
       for line in str(text).splitlines():
         line = line.strip()
         if line: f.write(f"{comment_section_char}{line}\n")
-    # built whole, then handed to the atomic `FILE.save`: a failure here cannot touch the target
+    # Built whole, then handed to the atomic `FILE.save`: a failure here cannot touch the target
     file = io.StringIO()
     wrote_anything = False
     top_field_comments = comment_field.get(None, {}) or {}

@@ -47,7 +47,7 @@ class DatabaseCore:
     s = " ".join(sql.split())[:100]
     msg = f"[{self.db_name or 'db'}] {op}: {s} {params or ''}"
     if self.log: self.log.dbg(msg)
-    else: print(msg)
+    else: Print().dbg(msg)
 
   def _rowcount(self, cur) -> int:
     """Row count clamped to 0, since drivers report -1 when it is unknown."""

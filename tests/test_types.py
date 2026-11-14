@@ -17,9 +17,12 @@ import pytest
 
 CLIENT = '''
 from datetime import timedelta
+from subprocess import CompletedProcess, Popen
 from typing import Any, Iterator, assert_type
 from xaeian import CRC, CSV, DIR, FILE, INI, JSON, PATH, Files, Logger, Print, Time
 from xaeian import generate_token, logger, replace_map, split_sql
+from xaeian.cmd import output, run, start, stop
+from xaeian.media import pdf_insert, pdf_page_count
 from xaeian.cstruct import Bitfield, Field, Frame, Message, Padding, Struct, Type
 from xaeian.db import AbstractAsyncDatabase, AbstractDatabase, AsyncDatabase, Database, KeyValue
 import xaeian.table as tbl
@@ -30,14 +33,35 @@ assert_type(FILE.load("a.txt"), str|bytes)
 assert_type(FILE.load_lines("a.txt"), list[str])
 assert_type(FILE.iter_lines("a.txt"), Iterator[str])
 assert_type(FILE.hash("a.txt"), str)
+assert_type(FILE.read("a.bin", 0, 64), bytes)
 assert_type(FILE.save("a.txt", "x"), None)
 assert_type(DIR.ensure("out"), str)
 assert_type(DIR.file_list(".", exts=[".py"]), list[str])
+assert_type(DIR.free_space("."), int)
 assert_type(JSON.load("a.json"), Any) # payload shape is the caller's business
+assert_type(JSON.parse("{}"), Any)
+assert_type(JSON.format({}), str)
 assert_type(CSV.load("a.csv"), list[dict[str, Any]])
 assert_type(INI.load("a.ini"), dict[str, Any])
 assert_type(PATH.resolve("a"), str)
+assert_type(PATH.is_abs("a"), bool)
+assert_type(PATH.same("a", "b"), bool)
+assert_type(PATH.native("a/b"), str)
 assert_type(Files(root_path="/d").FILE.load("a.txt"), Any) # bound namespaces are untyped
+
+#----------------------------------------------------------------------------------------- Commands
+
+assert_type(output("git rev-parse HEAD"), str|None)
+assert_type(run("make"), CompletedProcess[str])
+assert_type(run(["ffmpeg"], binary=True), CompletedProcess[bytes]) # the overload keeps bytes apart
+proc = start("worker", stdin=True, stderr="drop", group=True)
+assert_type(proc, Popen[bytes])
+assert_type(stop(proc), int)
+
+#-------------------------------------------------------------------------------------------- Media
+
+assert_type(pdf_page_count("a.pdf"), int)
+assert_type(pdf_insert("a.pdf", "annex.pdf", 2, replace=1), str)
 
 #------------------------------------------------------------------------------------------- Binary
 
@@ -119,6 +143,6 @@ def a_client_sees_the_declared_types(tmp_path):
     cwd=tmp_path, capture_output=True, text=True,
   )
   out = run.stdout + run.stderr
-  # an editable install is invisible to mypy, so there is nothing to read and nothing to claim
+  # An editable install is invisible to mypy, so there is nothing to read and nothing to claim
   if "Cannot find implementation" in out: pytest.skip("no wheel-style xaeian install to read")
   assert run.returncode == 0, out

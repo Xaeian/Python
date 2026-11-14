@@ -390,7 +390,7 @@ def an_empty_body_is_a_frame():
 def frame_matches_the_c_layer():
   # Captured from `FRAME_Send` of `demo/com/frame` built on the host,
   # the block above as payload and `crc32_iso`;
-  # `zlib.crc32` of that payload gives the same four bytes
+  # `zlib.crc32` of that payload gives the same four bytes.
   wire = bytes.fromhex("aa55 0c00 0100 0400 3412 7856 371c8236")
   body = bytes.fromhex("0100 0400 3412 7856")
   frame = Frame()
@@ -402,7 +402,7 @@ def frame_feed_survives_cuts_junk_and_a_false_sync():
   frame = Frame(limit=64)
   bodies = [bytes([i] * (5 + i)) for i in range(12)]
   wire = b"\x00\xAA" + frame.encode(bodies[0])
-  # a sync pair in noise between frames, with a plausible length behind it
+  # A sync pair in noise between frames, with a plausible length behind it
   wire += b"\xAA\x55\x10\x00junk" + b"".join(frame.encode(b) for b in bodies[1:6])
   broken = bytearray(frame.encode(bodies[6])); broken[7] ^= 0xFF
   wire += bytes(broken) + b"".join(frame.encode(b) for b in bodies[7:])
@@ -436,7 +436,7 @@ def the_header_mirrors_the_wire():
   header = s.export_c_header()
   assert "uint8_t _align[1];" in header and "uint8_t crc[4];" in header
   loose = Struct("txt", Field(Type.uint8, "kind"), Field(Type.string, "t"), crc=crc32_iso)
-  assert "_align" not in loose.export_c_header() and "variable size" in loose.export_c_header()
+  assert "_align" not in loose.export_c_header() and "Variable size" in loose.export_c_header()
 
 def a_natural_layout_is_not_packed_and_every_offset_is_asserted():
   """Only a layout C would pad is packed; the asserts hold either way."""
@@ -465,7 +465,7 @@ def a_message_header_names_codes_block_and_types_after_its_module():
   assert all(len(line) == 99 for line in lines if line.startswith("//--"))
 
 def a_check_past_99_characters_puts_its_message_on_a_line_of_its_own():
-  """`cstyle` keeps a line to 99: a long member name would push its offset check past it."""
+  """A header line stays within 99: a long member name would push its offset check past it."""
   s = Struct("drive", Field(Type.uint16, "entry_timeout_s_of_the_closing_gate"))
   lines = s.export_c_header("dev/drive.h").splitlines()
   assert all(len(line) <= 99 for line in lines)
@@ -490,7 +490,7 @@ def a_bitfield_note_reaches_c():
 
 def a_note_of_lines_or_too_long_to_trail_goes_above_its_member():
   """
-  `cstyle` Placement keeps a line to 99: a note past it goes above its member,
+  A header line stays within 99: a note past it goes above its member,
   a declaration whose column would push the other notes past it gives the column up,
   and a note of several lines keeps the breaks its author put where the sentence pauses.
   """
@@ -505,13 +505,13 @@ def a_note_of_lines_or_too_long_to_trail_goes_above_its_member():
   assert all(len(line) <= 99 for line in lines)
   assert "  uint16_t seq; // first sample of the frame, its clock on the wire" in lines # alone
   at = lines.index(f"  uint16_t {gate};")
-  assert lines[at - 1] == "  // gate timeout"
+  assert lines[at - 1] == "  // Gate timeout" # above, a comment line opens with a capital
   at = lines.index("  int16_t bus;")
-  above = ["  // raw counts of the drive's own ADC,", "  // never scaled on the wire"]
+  above = ["  // Raw counts of the drive's own ADC,", "  // never scaled on the wire"]
   assert lines[at - 2:at] == above
 
 def notes_line_up_two_spaces_past_the_longest_line_that_has_one():
-  """`cstyle` Placement: a line without a note, however long, does not push the column."""
+  """A line without a note, however long, does not push the column of notes."""
   s = Struct("state", Field(Type.uint16, "seq", doc="first sample"),
     Bitfield("flags", [("mode", 4)]), Field(Type.int8, "hand", "ticks"))
   lines = s.export_c_header().splitlines()
@@ -528,7 +528,8 @@ def a_struct_doc_stands_above_its_c_type():
   s = Struct("deck", Field(Type.uint8, "a"), doc="one deck of the set,\nwhat it plays")
   lines = s.export_c_header().splitlines()
   at = lines.index("typedef struct {")
-  assert lines[at - 2:at] == ["// one deck of the set,", "// what it plays"]
+  above = ["// One deck of the set,", "// what it plays"] # a comment line opens with a capital
+  assert lines[at - 2:at] == above
 
 def a_char_text_is_char_in_c_and_bytes_in_numpy():
   """C learns the text ends in a NUL, so its string functions take it as it is."""

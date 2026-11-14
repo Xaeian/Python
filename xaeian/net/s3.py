@@ -52,7 +52,7 @@ NS = "{http://s3.amazonaws.com/doc/2006-03-01/}"
 PAGE_MAX = 1000
 # S3 refuses a single PUT above this; over it the upload goes multipart
 PUT_MAX = 5 * 2**30
-# every part but the last must reach this, and no upload may hold more than the count
+# Every part but the last must reach this, and no upload may hold more than the count
 PART_MIN = 5 * 2**20
 PART_COUNT_MAX = 10_000
 

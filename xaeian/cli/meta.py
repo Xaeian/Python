@@ -1,6 +1,6 @@
 # xaeian/cli/meta.py
 
-"""`xn meta` - strip metadata from PDFs and images."""
+"""`xn meta`: strip metadata from PDFs and images."""
 
 import sys
 from ..log import Print
@@ -13,10 +13,10 @@ p = Print()
 
 EXAMPLES = """
 examples:
-  xn meta report.pdf             # strip PDF metadata → report-nometa.pdf
-  xn meta photo.jpg              # strip EXIF → photo-nometa.jpg
-  xn meta photo.jpg -i           # strip EXIF in-place
-  xn meta scan.png -o clean.png  # custom output path
+  xn meta report.pdf - strip PDF metadata → report-nometa.pdf
+  xn meta photo.jpg - strip EXIF → photo-nometa.jpg
+  xn meta photo.jpg -i - strip EXIF in-place
+  xn meta scan.png -o clean.png - custom output path
 """
 
 def main() -> None:

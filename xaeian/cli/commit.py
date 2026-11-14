@@ -1,7 +1,7 @@
 # xaeian/cli/commit.py
 
 """
-`xn commit` - everything changed on the active branch, committed and pushed.
+`xn commit`: everything changed on the active branch, committed and pushed.
 
 A branch tracking no remote one keeps its commit local.
 Signed when git signs commits anyway (`commit.gpgsign`), as a plain `git commit` would be.
@@ -17,14 +17,14 @@ p = Print()
 
 EXAMPLES = """
 examples:
-  xn commit -m "fix: Timeout"  # add, commit and push everything changed on this branch
+  xn commit -m "fix: Timeout" - add, commit and push everything changed on this branch
 """
 
 SECRETS = (".env*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*", "id_ed25519*")
 SIZE_MAX_MB = 5
 COLORS = {"new": c.CREAM, "changed": c.GREY, "deleted": c.SALMON} # of each word `label` gives
 
-# marker in the git directory of each operation that can be left half done
+# Marker in the git directory of each operation that can be left half done
 BUSY = (
   ("merge", "MERGE_HEAD"),
   ("rebase", "rebase-merge"),
@@ -84,7 +84,7 @@ def push(name:str) -> None:
     git("-c", "push.default=upstream", "push") # `simple` refuses a tracked branch of another name
   except CommandError as e:
     p.err(f"Push of {fmt_branch(name)} rejected, commit kept locally | {e}")
-    p.tip(f"Pull first with {fmt_cmd('git pull --rebase')}, then push with {fmt_cmd('git push')}")
+    p.tip(f"Pull first, then push: {fmt_cmd('git pull --rebase && git push')}")
     sys.exit(1)
   p.ok(f"Pushed {fmt_branch(name)}")
 
@@ -105,7 +105,7 @@ def commit(message:str) -> None:
   if out:
     p.err(f"Nothing committed: secrets or files over {SIZE_MAX_MB}MB")
     for path in out: p.dot(fmt_file(path))
-    p.tip(f"To commit one anyway, use plain {fmt_cmd('git')}")
+    p.tip(f"Commit one anyway: {fmt_cmd('git add <path> && git commit')}")
     sys.exit(1)
   for status, path in entries:
     word = label(status)

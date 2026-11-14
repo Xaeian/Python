@@ -51,7 +51,7 @@ def print_ok_appends_badge():
   out = buf.getvalue()
   assert "done" in out and "OK" in out
 
-# Logger's file handler writes plain, ANSI-stripped lines with 3-char levels.
+# Logger's file handler writes plain, ANSI-stripped lines with 3-char levels
 
 def logger_writes_abbreviated_levels_to_file(tmp_path):
   log = logger("xaeian_test_a", file=str(tmp_path / "a.log"), stream=False, file_lvl=logging.DEBUG)

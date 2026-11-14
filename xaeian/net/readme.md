@@ -68,15 +68,14 @@ r.get_dir("/srv/data", "./backup")
 actions = r.sync_push("./dist", "/srv/app", delete=True, dry_run=True)
 actions = r.sync_push("./dist", "/srv/app", delete=True)
 actions = r.sync_pull("/srv/data", "./local")
-# actions → [("put"|"get"|"skip"|"delete", rel_path), ...]
+# `actions` → [("put"|"get"|"skip"|"delete", rel_path), ...]
 ```
 
 `sync_pull` refuses to `delete` on an incomplete remote listing.
 
-A `filter` is asked about folders as well as files, each as `name` and as `name/`, and a folder
-it holds back prunes everything below it. The same on either side of a sync, so what a push
-sends is what a pull brings back. Write one as a denylist: an allowlist that only ever matches
-file names rejects every folder and so prunes the whole tree.
+A `filter` is asked about folders as well as files, each as `name` and as `name/`, and a folder it holds back prunes everything below it.
+The same on either side of a sync, so what a push sends is what a pull brings back.
+Write one as a denylist: an allowlist that only ever matches file names rejects every folder and so prunes the whole tree.
 
 Failures read alike from either client:
 `FileNotFoundError` for a path that is not there,
@@ -98,10 +97,10 @@ SFTP("host", "user", password="pass")
 SFTP("host", "user", agent=True)
 ```
 
-Host keys are checked against `~/.ssh/known_hosts`. An unknown host is trusted on first
-contact and its key is pinned to `~/.ssh/known_hosts.xaeian`, so a changed server key aborts
-the next connect; `strict=True` rejects unknown hosts outright. `xn host` lists the pinned
-keys, `xn host <ip>` shows one, and `xn host <ip> --drop` removes it after a server rebuild.
+Host keys are checked against `~/.ssh/known_hosts`.
+An unknown host is trusted on first contact and its key is pinned to `~/.ssh/known_hosts.xaeian`, so a changed server key aborts the next connect.
+`strict=True` rejects unknown hosts outright.
+`xn host` lists the pinned keys, `xn host <ip>` shows one, and `xn host <ip> --drop` removes it after a server rebuild.
 
 ## FTP notes
 
@@ -109,7 +108,7 @@ Skip strategy depends on server capabilities detected at connect:
 - `sync_push` → **mtime + size** with MFMT, **size only** without
 - `sync_pull` → **mtime + size** with MLSD or MDTM, **size only** without
 
-`preserve_mtime` on upload needs MFMT - without it the remote mtime is left as-is.
+`preserve_mtime` on upload needs MFMT: without it the remote mtime is left as-is.
 
 FTP is cleartext: prefer SFTP when confidentiality matters.
 
@@ -158,12 +157,11 @@ with S3("<account>.r2.cloudflarestorage.com", key_id, secret, "assets") as s3:
   s3.sync_pull("cdn", "./backup", delete=True)
 ```
 
-Skip strategy: **size, then ETag**, which for a single-part upload is the object's own MD5. A
-same-size edit is caught here, where FTP without MFMT calls it unchanged. A multipart object's
-ETag digests the part digests, which no client can reproduce, so those fall back to size alone.
+Skip strategy: **size, then ETag**, which for a single-part upload is the object's own MD5.
+A same-size edit is caught here, where FTP without MFMT calls it unchanged.
+A multipart object's ETag digests the part digests, which no client can reproduce, so those fall back to size alone.
 
-`sync_pull` needs no guard against a partial listing: a listing that fails raises rather than
-coming back short, and one short of a page carries the token to the next.
+`sync_pull` needs no guard against a partial listing: a listing that fails raises rather than coming back short, and one short of a page carries the token to the next.
 
 ### What an object store does differently
 
@@ -174,7 +172,7 @@ coming back short, and one short of a page carries the token to the next.
 - `rename` is a server-side copy followed by a delete.
   `copy` reads the response body, not the status line:
   S3 answers `200` before it knows how the copy went, and reports the failure inside
-- `put` over 5 GiB goes up in parts, and takes the upload back down if a part fails
+- `put` over 5GiB goes up in parts, and takes the upload back down if a part fails
 - `atomic` and `preserve_mtime` on `put` are accepted and ignored:
   one request lands the whole object, and `LastModified` is when it landed, which no client sets
 - `walk` is S3 only.

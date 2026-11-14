@@ -10,7 +10,7 @@ from xaeian.files.config import file_context
 
 WINDOWS = os.name == "nt" # different-drive paths (Z:\) only exist on Windows
 
-# Pin a deterministic context so resolution is reproducible regardless of cwd/platform.
+# Pin a deterministic context so resolution is reproducible regardless of cwd/platform
 ROOT = "/proj/app"
 
 @pytest.fixture(autouse=True)
@@ -64,7 +64,7 @@ def match_supports_single_char_wildcard():
   assert PATH.match("a/b/c.txt", "c.???") is True
 
 def match_ignores_directory_part():
-  # pattern matches the basename only, never the leading directories
+  # A pattern matches the basename only, never the leading directories
   assert PATH.match("src/main.py", "src/*") is False
 
 #---------------------------------------------------------------------------------------------- rel

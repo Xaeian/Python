@@ -26,11 +26,11 @@ p = Print()
 
 EXAMPLES = """
 examples:
-  xn release                   # version and text from changes.md
-  xn release 1.2.0             # this version, text from changes.md
-  xn release -n note.md        # version from changes.md, text from note.md
-  xn release 1.2.0 -n note.md  # both given
-  xn release --dry-run         # run checks, print record only
+  xn release - version and text from changes.md
+  xn release 1.2.0 - this version, text from changes.md
+  xn release -n note.md - version from changes.md, text from note.md
+  xn release 1.2.0 -n note.md - both given
+  xn release --dry-run - run checks, print record only
 """
 
 TARGETS = ("main", "master") # releases land there, `main` first
@@ -43,17 +43,17 @@ ENTRY = re.compile(r"[`\[]?(v?\d+\.\d+\.\d+)[`\]]?\s*(.*)") # `1.2.0 Title` of a
 @dataclass
 class Release:
   """What one run releases, settled before anything is written."""
-  version: str       # `X.Y.Z`, without `v` the tag may carry
+  version: str  # `X.Y.Z`, without `v` the tag may carry
   tag: str
-  name: str          # `Xaeian` of `Xaeian 1.2.0`
-  target: str        # `main` or `master`, where it lands
-  commit: str        # what the active branch holds on origin: the released tree
-  base: str          # commit of target to merge onto, "" when branch is target
-  last: str          # commit of previous release, "" for first
-  text: str          # note, else changes entry, else ""
-  signed: bool       # `user.signingkey` is set
+  name: str     # `Xaeian` of `Xaeian 1.2.0`
+  target: str   # `main` or `master`, where it lands
+  commit: str   # what the active branch holds on origin: the released tree
+  base: str     # commit of target to merge onto, "" when branch is target
+  last: str     # commit of previous release, "" for first
+  text: str     # note, else changes entry, else ""
+  signed: bool  # `user.signingkey` is set
   checks: list[str]
-  ci: str            # `green <run ids>` or `skipped`
+  ci: str       # `green <run ids>` or `skipped`
 
   @property
   def title(self) -> str:
@@ -221,7 +221,7 @@ def prepare(args:argparse.Namespace) -> Release:
     "ci:skipped" if args.no_ci else "ci"]
   ci = "skipped" if args.no_ci else f"green {ci_runs(commit)}"
   signed = bool(config("user.signingkey"))
-  # last, once nothing can refuse: a warning ahead of a refusal is only noise
+  # Last, once nothing can refuse: a warning ahead of a refusal is only noise
   if not args.note and not file: p.wrn(f"Release without text: no note, {files}")
   if not signed: p.inf("Release without signature: no user.signingkey in git config")
   return Release(version=version, tag=tag, name=name, target=target, commit=commit, base=base,

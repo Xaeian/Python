@@ -6,9 +6,9 @@ Colored logging with file rotation.
 `logger()` builds a `Logger` for services and daemons, `Print` writes CLI/script output.
 Anything taking `log=` may be handed either, because both answer to one vocabulary:
 
-  `dbg` `inf` `wrn` `err` `crt` `pnc` - levels
-  `tip` `run` `ok` - INF with a different tag
-  `gap` (indent) `dot` (`-` entry) - sub-entries, emitted at the level of the last named call
+  `dbg` `inf` `wrn` `err` `crt` `pnc`: levels
+  `tip` `run` `ok`: INF with a different tag
+  `gap` (indent) `dot` (`-` entry): sub-entries, emitted at the level of the last named call
 
 `Logger` also answers to the stdlib names it inherits (`debug`, `info`, ...); `Print` does not.
 The threshold is the one thing they spell differently:
@@ -31,7 +31,7 @@ logging.addLevelName(PANIC, "PANIC")
 LevelName = Literal["DBG", "INF", "WRN", "ERR", "CRT", "PNC"]
 Level = LevelName | int
 
-# each short name must also exist on `Ico`: `ColorFormatter` looks its tag up by `getattr`
+# Each short name must also exist on `Ico`: `ColorFormatter` looks its tag up by `getattr`
 _LEVEL_TABLE = [
   ("DBG", "DEBUG", logging.DEBUG),
   ("INF", "INFO", logging.INFO),
@@ -140,6 +140,7 @@ class Print:
   def _emit_sub(self, ico:str, *args, **kwargs):
     if self._last_level >= self._level: self(ico, *args, **kwargs)
 
+  # One method a tag, at its level: `tip` and `run` at INF
   def dbg(self, *a, **kw) -> None: self._emit(logging.DEBUG, Ico.DBG, *a, **kw)
   def inf(self, *a, **kw) -> None: self._emit(logging.INFO, Ico.INF, *a, **kw)
   def wrn(self, *a, **kw) -> None: self._emit(logging.WARNING, Ico.WRN, *a, **kw)
@@ -149,6 +150,7 @@ class Print:
   def tip(self, *a, **kw) -> None: self._emit(logging.INFO, Ico.TIP, *a, **kw)
   def run(self, *a, **kw) -> None: self._emit(logging.INFO, Ico.RUN, *a, **kw)
 
+  # Sub-entries, at the level of the last tag
   def gap(self, *a, **kw) -> None: self._emit_sub(Ico.GAP, *a, **kw)
   def dot(self, *a, **kw) -> None: self._emit_sub(Ico.DOT, *a, **kw)
 
@@ -160,6 +162,7 @@ class Print:
 
   @property
   def level(self) -> int:
+    """The lowest level printed, set as a name such as `"WRN"` or as a number."""
     return self._level
 
   @level.setter
@@ -197,7 +200,7 @@ class Logger(logging.Logger):
     kw["stacklevel"] = kw.get("stacklevel", 1) + 2
     self._log(level, msg, args, **kw)
 
-  # stdlib overrides
+  # Stdlib overrides
   def debug(self, msg, *a, **kw) -> None: self._at(logging.DEBUG, msg, a, kw)
   def info(self, msg, *a, **kw) -> None: self._at(logging.INFO, msg, a, kw)
   def warning(self, msg, *a, **kw) -> None: self._at(logging.WARNING, msg, a, kw)
@@ -206,7 +209,7 @@ class Logger(logging.Logger):
   def log(self, level, msg, *a, **kw) -> None: self._at(level, msg, a, kw)
   def panic(self, msg, *a, **kw) -> None: self._at(PANIC, msg, a, kw)
 
-  # short aliases: Print compat
+  # Short aliases, the names of `Print`
   def dbg(self, msg, *a, **kw) -> None: self._at(logging.DEBUG, msg, a, kw)
   def inf(self, msg, *a, **kw) -> None: self._at(logging.INFO, msg, a, kw)
   def wrn(self, msg, *a, **kw) -> None: self._at(logging.WARNING, msg, a, kw)
@@ -216,7 +219,7 @@ class Logger(logging.Logger):
   def run(self, msg, *a, **kw) -> None: self._at(logging.INFO, msg, a, kw)
   def tip(self, msg, *a, **kw) -> None: self._at(logging.INFO, msg, a, kw)
 
-  # sub-entries
+  # Sub-entries
   def gap(self, msg="", *a, **kw) -> None: self._at(self._last_level, f"    {msg}", a, kw)
   def dot(self, msg="", *a, **kw) -> None: self._at(self._last_level, f" -  {msg}", a, kw)
 
@@ -270,6 +273,7 @@ class Logger(logging.Logger):
 
   @property
   def stream(self) -> bool:
+    """`True` while records also reach the console."""
     return self._stream_handler is not None
 
   @stream.setter

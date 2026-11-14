@@ -70,7 +70,7 @@ def butterworth(
     if order % 2:
       raise ValueError(f"order {order}: a zero-phase pair runs half of it each way, so even")
     order //= 2 # each of the two passes
-    # the pair is -3dB where each pass is -1.5dB, which a prototype cut at 1 reaches at `shift`
+    # The pair is -3dB where each pass is -1.5dB, which a prototype cut at 1 reaches at `shift`
     shift = (np.sqrt(2) - 1) ** (1 / (2 * order))
     warped = np.tan(np.pi * edges / fs) # where the bilinear transform puts the edges
     if kind == "lowpass": warped /= shift
@@ -94,7 +94,7 @@ def filtfilt(sos:np.ndarray, data, out:np.ndarray|None=None) -> np.ndarray:
   """
   data = np.asarray(data)
   if data.ndim != 1: raise ValueError(f"one channel at a time, got shape {data.shape}")
-  # as `sosfiltfilt` pads: 3 times the taps, 2 a section plus 1, a first-order section 1 fewer
+  # As `sosfiltfilt` pads: 3 times the taps, 2 a section plus 1, a first-order section 1 fewer
   pad = 3 * (2 * len(sos) + 1 - min(np.sum(sos[:, 2] == 0), np.sum(sos[:, 5] == 0)))
   if len(data) <= pad: raise ValueError(f"{len(data)} samples, padding takes {pad} at each end")
   out = np.empty(len(data)) if out is None else out
@@ -421,7 +421,7 @@ class Signal:
     """
     data = self._data - np.mean(self._data)
     data *= windows.tukey(len(data), alpha=0.05)
-    # steep: integration lifts whatever leaks below the edge
+    # Steep: integration lifts whatever leaks below the edge
     data = filtfilt(butterworth("highpass", highpass_Hz, self._fs, order=8), data)
     result = cumulative_trapezoid(data, dx=1 / self._fs, initial=0)
     result = _detrend(result, type="linear")
@@ -521,7 +521,7 @@ class Signal:
 
 #--------------------------------------------------------------------------------------------- Demo
 
-def demo() -> None:
+def _demo() -> None:
   """Signal processing demo: filter, FFT, vibration metrics."""
   rng = np.random.default_rng(0)
   t = np.arange(10000) / 10000
@@ -557,4 +557,4 @@ def demo() -> None:
   print("Mix:", mix)
 
 if __name__ == "__main__":
-  demo()
+  _demo()

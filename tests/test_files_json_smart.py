@@ -24,7 +24,7 @@ from xaeian.files.json import JSON
   [], {},
 ])
 def smart_output_is_always_valid_json(data):
-  # however smart lays it out, it must still parse back to the original value
+  # However smart lays it out, it must still parse back to the original value
   assert json.loads(JSON.smart(data)) == data
 
 #----------------------------------------------------------------------------------- numeric arrays

@@ -1,6 +1,6 @@
 # xaeian/cli/plot.py
 
-"""`xn plot` - a CSV file drawn as a waveform, in a window to zoom and pan."""
+"""`xn plot`: a CSV file drawn as a waveform, in a window to zoom and pan."""
 
 import sys, math
 from ..log import Print
@@ -13,11 +13,11 @@ p = Print()
 
 EXAMPLES = """
 examples:
-  xn plot log.csv                  # every column against the first, one panel per unit
-  xn plot log.csv -c vin_V,vout_V  # only these columns
-  xn plot sweep.csv -x vin_V       # another column on the x axis
-  xn plot log.csv -o log.png       # save instead of opening a window (.png .svg .pdf)
-  xn plot log.csv --dark           # dark theme
+  xn plot log.csv - every column against the first, one panel per unit
+  xn plot log.csv -c vin_V,vout_V - only these columns
+  xn plot sweep.csv -x vin_V - another column on the x axis
+  xn plot log.csv -o log.png - save instead of opening a window (.png .svg .pdf)
+  xn plot log.csv --dark - dark theme
 """
 
 #------------------------------------------------------------------------------------------- Values
@@ -71,7 +71,7 @@ def main() -> None:
     p.err(f"File {fmt_path(name, c.ORANGE)} not found")
     sys.exit(1)
   delimiter = _delimiter(path)
-  # a comma that is not the delimiter is a decimal point: Excel writes `3,14` between `;`
+  # A comma that is not the delimiter is a decimal point: Excel writes `3,14` between `;`
   decimal = "." if delimiter == "," else ","
   try:
     table = CSV.load_vectors(path, delimiter=delimiter)
@@ -88,7 +88,7 @@ def main() -> None:
     p.err(f"No column {c.BLUE}{', '.join(unknown)}{c.END} in {fmt_path(name, c.ORANGE)}")
     p.gap(f"Columns: {', '.join(table)}")
     sys.exit(1)
-  # numbers first: numpy reads a column of plain integers as years
+  # Numbers first: numpy reads a column of plain integers as years
   xs, _ = _numbers(table[x], decimal)
   if all(math.isnan(v) for v in xs): xs = _times(table[x])
   if xs is None:

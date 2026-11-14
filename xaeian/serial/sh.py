@@ -249,7 +249,7 @@ class Shell(SerialPort):
     """Get name of currently active MBB."""
     resp = self.exec("mbb active")
     if not resp: return None
-    # format is firmware-dependent, assume the name is the last token
+    # Format is firmware-dependent, assume the name is the last token
     tokens = resp.strip().split()
     return tokens[-1] if tokens else None
 
@@ -257,7 +257,7 @@ class Shell(SerialPort):
     """Get `(used, total)` byte counts of active MBB, or `None` on parse fail."""
     resp = self.exec("mbb info")
     if not resp: return None
-    # response is either "mbb info: name 123/2048 ..." or bare "name 123/2048 ..."
+    # A response is either "mbb info: name 123/2048 ..." or bare "name 123/2048 ..."
     match = self.RE_MBB_SIZE.search(resp)
     if match: return int(match.group(1)), int(match.group(2))
     return None
@@ -296,10 +296,10 @@ class Shell(SerialPort):
       return False
     pack_count = (len(data) + self.pack_size - 1) // self.pack_size
     action = "append" if append else "save"
-    # announce the incoming pack count, device echoes it back as "pack: N"
+    # Announce the incoming pack count, the device echoes it back as "pack: N"
     resp = self.exec(f"mbb {action} {pack_count}")
     if self._parse_pack_number(resp) != pack_count: return False
-    # device acks each chunk with the count still outstanding, down to 0
+    # The device acks each chunk with the count still outstanding, down to 0
     offset = 0
     remaining = pack_count
     while remaining:
@@ -316,7 +316,7 @@ class Shell(SerialPort):
 
     Each `mbb load <limit> <offset>` reply is exactly `limit` raw bytes
     plus the `\\r\\n` of `DBG_Enter()`,
-    so the exact count is read and the newline consumed - no size guessing.
+    so the exact count is read and the newline consumed, with no size guessing.
     Replies are read off `self.serial` directly, bypassing the `address` and `crc` handling.
     """
     info = self.mbb_info()
@@ -439,7 +439,7 @@ class Shell(SerialPort):
     if magic != self.BOOT_MAGIC or size > len(image):
       self.print_error("Not an image built under the bootloader")
       return False
-    # the signature field is linked erased, so anything else there is the signature Forge wrote
+    # The signature field is linked erased, so anything else there is the signature Forge wrote
     at = size + self.BOOT_SIGNATURE_OFFSET
     signature = image[at:at + self.BOOT_SIGNATURE_SIZE]
     signed = len(signature) == self.BOOT_SIGNATURE_SIZE and signature != b"\xff" * len(signature)
@@ -448,7 +448,7 @@ class Shell(SerialPort):
     if size + self.BOOT_TRAILER_SIZE > info["slot"]: # the slot holds the image and its trailer
       self.print_error(f"Image of {size}B over the {info['slot']}B slot")
       return False
-    # a data line holds the longest offset and the hex of a chunk, kept a multiple of 16B
+    # A data line holds the longest offset and the hex of a chunk, kept a multiple of 16B
     room = (info["line"] - len("boot data 4294967295 ")) // 2
     chunk = min(self.pack_size, room // 16 * 16)
     begin = f"boot begin {size} 0x{crc:08x}" + (f" {signature.hex()}" if signed else "")
