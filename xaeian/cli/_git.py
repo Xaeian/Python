@@ -61,24 +61,23 @@ def gh(*args:str, data:bytes|None=None) -> str:
   """GitHub CLI with `args`."""
   return run("gh", *args, data=data)
 
-def fail(message:str) -> NoReturn:
-  """Print `message` as an error and exit 1."""
+def fail(message:str, tip:str="") -> NoReturn:
+  """Print `message` as an error, `tip` below it when given, and exit 1."""
   p.err(message)
+  if tip: p.tip(tip)
   sys.exit(1)
 
 def github() -> None:
   """`gh` installed and logged in, as both commands need it; else prints the fix and exits 1."""
   if not shutil.which("gh"):
     install = INSTALL_GH.get(sys.platform, "sudo apt install gh")
-    p.err(f"Missing {fmt_tool('gh')} tool")
-    p.tip(f"Install it with package manager: {fmt_cmd(install)}, then open a new terminal")
-    sys.exit(1)
+    fail(f"Missing {fmt_tool('gh')} tool",
+      f"Install it with package manager: {fmt_cmd(install)}, then open a new terminal")
   try:
     gh("auth", "status")
   except CommandError:
-    p.err(f"{fmt_tool('gh')} not logged in")
-    p.tip(f"Log in once with: {fmt_cmd('gh auth login')}")
-    sys.exit(1)
+    fail(f"{fmt_tool('gh')} not logged in",
+      f"Log in once with: {fmt_cmd('gh auth login')}")
 
 #------------------------------------------------------------------------------------------- Colors
 

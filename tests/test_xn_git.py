@@ -79,6 +79,13 @@ class Repo:
     self.git("add", "-A")
     self.git("commit", "-q", "-m", message)
 
+  def add_workflow(self, name:str, text:str) -> None:
+    """GitHub Actions workflow `name` committed and pushed."""
+    (self.work / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+    self.write(f".github/workflows/{name}", text)
+    self.commit_all(f"Workflow {name}")
+    self.git("push", "-q")
+
   def merge_into_main(self) -> None:
     """`develop` merged into `main` by hand and pushed, as before a release from `main`."""
     self.git("switch", "-q", "main")
@@ -419,10 +426,29 @@ def a_skipped_ci_stays_in_the_record(repo, capsys):
   assert "ci:skipped" in out
   assert "Release-CI: skipped" in out
 
+def ci_is_waited_for_where_a_workflow_runs_on_push(repo, capsys):
+  repo.add_workflow("ci.yml", "on: push\n")
+  repo.gh.runs = []
+  assert repo.xn_release("1.1.0", "--dry-run") == 1
+  out = ANSI.sub("", capsys.readouterr().out)
+  assert "ERR No CI tests on commit " in out
+  assert "TIP Wait for them, or release without them: xn release --no-ci" in out
+
+@pytest.mark.parametrize("workflow", [None, "on:\n  workflow_call:\n"])
+def without_a_workflow_run_on_push_there_is_no_ci_to_wait_for(repo, capsys, workflow):
+  if workflow: repo.add_workflow("app.yml", workflow)
+  repo.gh.runs = []
+  assert repo.xn_release("1.1.0", "--dry-run") == 0
+  out = ANSI.sub("", capsys.readouterr().out)
+  assert "Release without CI tests: no workflow runs on push" in out
+  assert "ci:none" in out
+  assert "Release-CI: none" in out
+
 def a_first_release_needs_a_name(repo, capsys):
   repo.gh.releases = []
   assert repo.xn_release("1.1.0", "--dry-run") == 1
-  assert "pass --name" in ANSI.sub("", capsys.readouterr().out)
+  out = ANSI.sub("", capsys.readouterr().out)
+  assert "TIP Name the first release with: xn release --name <name>" in out
   assert repo.xn_release("1.1.0", "--dry-run", "--name", "Demo") == 0
   assert "Demo 1.1.0" in ANSI.sub("", capsys.readouterr().out)
 
@@ -439,7 +465,9 @@ def a_hotfix_on_main_has_to_be_merged_back_first(repo, capsys):
   repo.git("push", "-q")
   repo.git("switch", "-q", "develop")
   assert repo.xn_release("1.1.0") == 1
-  assert "main has changes develop lacks" in ANSI.sub("", capsys.readouterr().out)
+  out = ANSI.sub("", capsys.readouterr().out)
+  assert "ERR main has changes develop lacks\n" in out
+  assert "TIP Merge them into develop first: git merge origin/main" in out
   repo.git("merge", "-q", "--no-edit", "origin/main")
   repo.git("push", "-q")
   assert repo.xn_release("1.1.0") == 0
@@ -456,7 +484,9 @@ def a_diverged_local_main_is_left_with_a_pull_tip(repo, capsys):
   repo.git("commit", "-q", "--allow-empty", "-m", "Local only")
   repo.git("switch", "-q", "develop")
   assert repo.xn_release("1.1.0") == 0
-  assert "Local main not updated: run git pull on it" in ANSI.sub("", capsys.readouterr().out)
+  out = ANSI.sub("", capsys.readouterr().out)
+  assert "INF Local main not updated\n" in out
+  assert "TIP Update it with: git switch main && git pull --rebase" in out
 
 def a_push_race_leaves_origin_without_the_release(repo, monkeypatch, capsys):
   """Origin `main` moves between the checks and the push: the atomic push takes nothing."""
@@ -521,7 +551,8 @@ def without_a_changes_file_the_version_has_to_be_given(repo, capsys):
   repo.git("push", "-q")
   assert repo.xn_release() == 1
   out = ANSI.sub("", capsys.readouterr().out)
-  assert "No changes.md or changelog.md on commit: pass version" in out
+  assert "Version unknown, no changes.md or changelog.md on commit\n" in out
+  assert "TIP Give it with: xn release <version>" in out
 
 def a_given_version_has_to_match_the_changes_entry(repo, capsys):
   repo.set_version("1.2.0")
@@ -540,7 +571,8 @@ def a_local_tag_of_the_same_name_is_in_the_way(repo, capsys):
   repo.git("tag", "1.1.0", "main")
   assert repo.xn_release("1.1.0") == 1
   out = ANSI.sub("", capsys.readouterr().out)
-  assert "Tag 1.1.0 exists locally but not on origin: remove it with git tag -d 1.1.0" in out
+  assert "ERR Tag 1.1.0 exists locally but not on origin\n" in out
+  assert "TIP Remove it with: git tag -d 1.1.0" in out
 
 def a_local_tag_apart_from_origin_blocks_nothing(repo):
   """Tags are read from origin; a fetch of them would refuse to clobber the local one."""
@@ -567,8 +599,30 @@ def a_note_is_read_with_lf(tmp_path):
   (tmp_path / "note.md").write_bytes(b"Refs:\r\n#12 boot hangs\r\n\r\n")
   assert release.read_note(str(tmp_path / "note.md")) == "Refs:\n#12 boot hangs"
 
+@pytest.mark.parametrize("workflow, pushed", [
+  # Events with `push`
+  ("on: push", True),
+  ("on: [pull_request, push] # tests", True),
+  ("'on':\n  pull_request:\n  push:\n    branches: [main]\n", True),
+  ("on:\n  - push\n", True),
+  ("on:\n- push\n", True),
+  ("on:\n  push:\n---\n", True),
+  ("on:\r\n  workflow_dispatch:\r\n\r\n# below\r\n  push:\r\n", True),
+  # Not read whole, so counted as `push`
+  ("name: Odd\n", True),
+  ("on: *triggers", True),
+  ("on: [pull_request,\n  workflow_dispatch]\n", True),
+  ("on:\n  <<: *triggers\n", True),
+  # Read whole, without `push`
+  ("on:\n  workflow_call:\n    inputs:\n      push:\n        type: boolean\n", False),
+  ("on:\n  schedule:\n    - cron: '0 3 * * *'\n  workflow_dispatch:\n", False),
+  ("on:\n  release:\n    types: [published]\njobs:\n  push:\n", False),
+  ("on: workflow_dispatch # push by hand", False),
+])
+def a_workflow_runs_on_push_unless_its_on_reads_whole_without_it(workflow, pushed):
+  assert release.runs_on_push(workflow) is pushed
+
 @pytest.mark.parametrize("runs, said", [
-  ([], "No CI tests on commit 0000000 yet"),
   ([{"status": "in_progress", "conclusion": ""}], "CI tests still running on commit 0000000"),
   ([{"status": "completed", "conclusion": "failure", "url": "https://ci/7"}], "CI tests failed on commit 0000000: https://ci/7"),
 ])
@@ -576,7 +630,7 @@ def ci_short_of_green_is_refused(monkeypatch, capsys, runs, said):
   gh = FakeGh()
   gh.runs = runs
   monkeypatch.setattr(release, "gh", gh)
-  with pytest.raises(SystemExit): release.ci_runs("0" * 40)
+  with pytest.raises(SystemExit): release.check_ci("0" * 40)
   assert said in ANSI.sub("", capsys.readouterr().out)
 
 def code_hash_reads_crlf_as_lf(tmp_path):

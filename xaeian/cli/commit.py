@@ -83,9 +83,8 @@ def push(name:str) -> None:
   try:
     git("-c", "push.default=upstream", "push") # `simple` refuses a tracked branch of another name
   except CommandError as e:
-    p.err(f"Push of {fmt_branch(name)} rejected, commit kept locally | {e}")
-    p.tip(f"Pull first, then push: {fmt_cmd('git pull --rebase && git push')}")
-    sys.exit(1)
+    fail(f"Push of {fmt_branch(name)} rejected, commit kept locally | {e}",
+      f"Pull first, then push: {fmt_cmd('git pull --rebase && git push')}")
   p.ok(f"Pushed {fmt_branch(name)}")
 
 def commit(message:str) -> None:

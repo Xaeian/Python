@@ -148,6 +148,8 @@ class Field:
     if values is not None:
       if not (isinstance(values, EnumType) and issubclass(values, IntEnum)):
         raise TypeError(f"Field '{name}' names its numbers with an IntEnum, not {values!r}")
+      if not len(values):
+        raise ValueError(f"Field '{name}' names its numbers with an empty {values.__name__}")
       if not (isinstance(type, Type) and type.is_integer) or scale != 1 or offset:
         raise ValueError(f"Field '{name}' names whole raw numbers: an integer, unscaled")
       for member in values:
@@ -175,8 +177,12 @@ class Field:
     return None if size is None else size * self.length
 
   def _raw(self, value:float) -> float:
-    """The number the wire holds, before its bits: scaled and shifted."""
-    return value * self.scale + self.offset
+    """
+    The number the wire holds, before its bits: scaled and shifted.
+    With no scale and no offset, the value goes as it is, so a `-0.0` keeps its sign.
+    """
+    raw = value * self.scale + self.offset # what holds no number fails here, a string among them
+    return value if self.scale == 1 and not self.offset else raw
 
   def _value(self, raw:float) -> float:
     """The number the field means: its member where `values` names it, shift and scale undone."""
@@ -238,6 +244,9 @@ class Bitfield:
       if bit not in groups: raise KeyError(f"Bitfield '{name}' has no {bit}")
       if not (isinstance(enum, EnumType) and issubclass(enum, IntEnum)):
         raise TypeError(f"Bit '{bit}' of '{name}' names its numbers with an IntEnum, not {enum!r}")
+      if not len(enum):
+        enum_name = enum.__name__
+        raise ValueError(f"Bit '{bit}' of '{name}' names its numbers with an empty {enum_name}")
       if any(not 0 <= member < 1 << groups[bit] for member in enum):
         raise ValueError(f"Bit '{bit}' of '{name}' cannot hold every {enum.__name__}")
     self.name: str = name
@@ -597,8 +606,9 @@ class Struct:
     """
     CRC-32 of all the bytes and their meaning hang on, `doc`, `unit` and `default` aside:
     two sides whose fingerprints agree read each other's records.
+    A name outside ASCII counts by the escapes `ascii` writes, the same in every Python.
     """
-    return crc32_iso.checksum(repr(self._shape()).encode())
+    return crc32_iso.checksum(ascii(self._shape()).encode())
 
   def _shape(self) -> tuple:
     """The record as plain values for `fingerprint`, a nested struct as its own shape."""
@@ -735,7 +745,7 @@ class Message:
   def fingerprint(self) -> int:
     """CRC-32 of every block code and the shape of its struct, as `Struct.fingerprint` has it."""
     shapes = tuple((code, struct._shape()) for code, struct in sorted(self.structs.items()))
-    return crc32_iso.checksum(repr(shapes).encode())
+    return crc32_iso.checksum(ascii(shapes).encode())
 
   def export_c_header(self, path:str|None=None, prefix:str="", extern:dict|None=None) -> str:
     """

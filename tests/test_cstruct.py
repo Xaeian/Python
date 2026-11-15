@@ -2,7 +2,7 @@
 
 """Binary (de)serialization: round-trips, transforms, messages, frames and what gets refused."""
 
-import random, subprocess
+import math, random, subprocess
 from enum import IntEnum
 from pathlib import Path
 
@@ -57,6 +57,12 @@ def floats_keep_value():
   s = Struct("floats", Field(Type.float, "x"), Field(Type.double, "y"))
   data = {"x": 1.5, "y": 0.25} # exact in IEEE-754, no rounding slack needed
   assert s.decode(s.encode(data)) == data
+
+def a_zero_keeps_its_sign_where_no_scale_or_offset_touches_it():
+  """`-0.0 * 1 + 0` is `0.0`, so a plain field sends its value as it is."""
+  s = Struct("zero", Field(Type.float, "f"), Field(Type.double, "d"))
+  read = s.decode(s.encode({"f": -0.0, "d": -0.0}))
+  assert math.copysign(1, read["f"]) == math.copysign(1, read["d"]) == -1
 
 def a_float_decodes_to_what_its_type_holds():
   """At 3 decimals 0.000123A would decode as 0.0; at 7 digits 12345678 would come back 12345680."""
@@ -655,6 +661,8 @@ def c_reads_the_bytes_python_wrote(tmp_path):
 def a_fingerprint_is_the_same_number_release_after_release():
   """Firmware keeps it as `PREFIX_SCHEMA`: a rework of `_shape` that moves it shows here."""
   assert SAMPLE.fingerprint == 0x7E71EB4E and EDGES.fingerprint == 0x93750228
+  # A name outside ASCII counts by its escapes, so no Unicode version of Python moves it
+  assert Struct("żółw", Field(Type.uint8, "ą")).fingerprint == 0xF662FD86
 
 #-------------------------------------------------------------------------------------------- numpy
 
@@ -765,6 +773,9 @@ class Wide(IntEnum):
   Small = 1
   Huge = 300
 
+class Nameless(IntEnum):
+  """No name at all: every write would be refused, and C has no empty `enum`."""
+
 @pytest.mark.parametrize("make, error", [
   (lambda: Field(Type.uint8, "state", values=dict), TypeError), # no IntEnum
   (lambda: Field(Type.float, "state", values=State), ValueError), # an enum names whole numbers
@@ -772,6 +783,8 @@ class Wide(IntEnum):
   (lambda: Field(Type.uint8, "state", values=Wide), ValueError), # 300 is past uint8
   (lambda: Bitfield("flags", [("mode", 2)], values={"mode": State}), ValueError), # 7 is past 2 bits
   (lambda: Bitfield("flags", [("mode", 4)], values={"mod": State}), KeyError), # no such group
+  (lambda: Field(Type.uint8, "state", values=Nameless), ValueError), # no name to give a number
+  (lambda: Bitfield("flags", [("mode", 4)], values={"mode": Nameless}), ValueError),
 ])
 def an_enum_that_cannot_name_its_numbers_is_refused_where_it_is_made(make, error):
   with pytest.raises(error):

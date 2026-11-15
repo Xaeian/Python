@@ -35,10 +35,18 @@ examples:
 
 TARGETS = ("main", "master") # releases land there, `main` first
 CHANGES = ("changes.md", "changelog.md")
+WORKFLOWS = ".github/workflows"
 
 VERSION = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")
 HEADING = re.compile(r"(#{2,}) +(.*)")
 ENTRY = re.compile(r"[`\[]?(v?\d+\.\d+\.\d+)[`\]]?\s*(.*)") # `1.2.0 Title` of a heading
+# A workflow's top-level `on:`, with the rest of its line and the block below it.
+# A list of `-` items may start at the column of `on`, as YAML allows; `---` ends the block.
+ON = re.compile(r"""^["']?on["']?:(.*)\n((?:[ \t].*\n|-(?:[ \t].*)?\r?\n|\r?\n)*)""", re.M)
+# What `on:` holds whole on its own line: `push` or `[push, fork]`
+INLINE = re.compile(r"""["']?\w+["']?|\[[\w\s,"']*\]""")
+# A line of the block naming one event: `push:`, `push: {...}` or `- push`
+EVENT = re.compile(r"""(?:-[ \t]+)?["']?(\w+)["']?(?:[ \t]*:.*)?""")
 
 @dataclass
 class Release:
@@ -53,7 +61,7 @@ class Release:
   text: str     # note, else changes entry, else ""
   signed: bool  # `user.signingkey` is set
   checks: list[str]
-  ci: str       # `green <run ids>` or `skipped`
+  ci: str       # `green <run ids>`, `none` or `skipped`
 
   @property
   def title(self) -> str:
@@ -74,7 +82,9 @@ def release_name(given:str|None) -> str:
   if given: return given
   listed = json.loads(gh("release", "list", "--limit", "1", "--exclude-drafts", "--json", "name"))
   name = re.sub(r"\s*v?\d+\.\d+\.\d+\S*$", "", listed[0]["name"]).strip() if listed else ""
-  if not name: fail(f"Release name unknown, no previous release: pass {fmt_cmd('--name')}")
+  if not name:
+    fail("Release name unknown, no previous release",
+      f"Name the first release with: {fmt_cmd('xn release --name <name>')}")
   return name
 
 #------------------------------------------------------------------------------------------- Checks
@@ -99,7 +109,8 @@ def check_pure(base:str, commit:str, source:str, target:str) -> None:
     fail(f"{fmt_branch(target)} and {fmt_branch(source)} share no history")
   if tree(fork) != tree(base):
     merge = fmt_cmd(f"git merge origin/{target}")
-    fail(f"{fmt_branch(target)} has changes {fmt_branch(source)} lacks: merge with {merge}")
+    fail(f"{fmt_branch(target)} has changes {fmt_branch(source)} lacks",
+      f"Merge them into {fmt_branch(source)} first: {merge}")
 
 def check_tag(tag:str, version:str, commit:str) -> str:
   """
@@ -125,7 +136,8 @@ def check_tag(tag:str, version:str, commit:str) -> str:
     fail(f"Version {fmt_release(version)} lower than last release {last}")
   if sha(f"refs/tags/{tag}"):
     drop = fmt_cmd(f"git tag -d {tag}")
-    fail(f"Tag {fmt_release(tag)} exists locally but not on origin: remove it with {drop}")
+    fail(f"Tag {fmt_release(tag)} exists locally but not on origin",
+      f"Remove it with: {drop}")
   return tags[max(tags)][1] if tags else ""
 
 def changes_file(commit:str) -> tuple[str, list[str]]|None:
@@ -165,17 +177,58 @@ def code_version(commit:str) -> str|None:
     return None
   return tomllib.loads(text).get("project", {}).get("version")
 
-def ci_runs(commit:str) -> str:
-  """IDs of CI test runs on `commit`, all passed; anything else exits."""
+def workflows(commit:str) -> list[str]:
+  """Texts of the workflows on `commit`: `.yml` and `.yaml` files of `.github/workflows`."""
+  try:
+    names = git("ls-tree", "-z", "--name-only", f"{commit}:{WORKFLOWS}").split("\0")
+  except CommandError:
+    return []
+  return [git("show", f"{commit}:{WORKFLOWS}/{name}") for name in names
+    if name.endswith((".yml", ".yaml"))]
+
+def runs_on_push(text:str) -> bool:
+  """
+  `True` when `push` is among the events of a workflow's `on:`, or when `on:` is not read whole.
+  Whole is a word or a `[list]` on the line of `on:`, or a block with one event a line.
+  The deeper lines of an event, its filters and inputs, are skipped,
+  so a push limited to `main` counts on any branch.
+  Anything else counts as `push`, an alias or a list over lines among them:
+  CI is better waited for than missed.
+  """
+  m = ON.search(re.sub(r"(?:^|[ \t]+)#.*", "", text, flags=re.M) + "\n")
+  if not m: return True
+  inline = m.group(1).strip()
+  if inline and not INLINE.fullmatch(inline): return True
+  events = re.findall(r"\w+", inline)
+  lines = re.findall(r"^([ \t]*)(\S.*)", m.group(2), re.M) # indent and text of each line
+  level = lines[0][0] if lines else ""
+  for indent, line in lines:
+    if len(indent) > len(level): continue # a filter or an input of an event
+    event = EVENT.fullmatch(line.rstrip()) if indent == level else None
+    if not event: return True
+    events.append(event.group(1))
+  return "push" in events
+
+def check_ci(commit:str) -> str:
+  """
+  `green <run ids>` once the CI tests on `commit` all passed, `none` when none will come;
+  anything else exits.
+
+  GitHub runs the workflows the pushed commit carries:
+  tests come only when one of them runs on push.
+  """
   runs = json.loads(gh("run", "list", "--commit", commit,
     "--json", "status,conclusion,databaseId,url"))
   at = fmt_sha(commit)
-  if not runs: fail(f"No CI tests on commit {at} yet: wait for them, or pass {fmt_cmd('--no-ci')}")
+  if not runs:
+    if not any(runs_on_push(text) for text in workflows(commit)): return "none"
+    fail(f"No CI tests on commit {at} yet",
+      f"Wait for them, or release without them: {fmt_cmd('xn release --no-ci')}")
   if any(run["status"] != "completed" for run in runs):
     fail(f"CI tests still running on commit {at}: release again once they pass")
   red = [run for run in runs if run["conclusion"] != "success"]
   if red: fail(f"CI tests failed on commit {at}: {red[0]['url']}")
-  return ",".join(str(run["databaseId"]) for run in runs)
+  return "green " + ",".join(str(run["databaseId"]) for run in runs)
 
 def prepare(args:argparse.Namespace) -> Release:
   """Every check in order; the first refusal exits with nothing changed."""
@@ -201,7 +254,9 @@ def prepare(args:argparse.Namespace) -> Release:
   written, title, items = changelog(file, lines) if file else ("", "", "")
   files = " or ".join(map(fmt_file, CHANGES))
   tag = args.version or written
-  if not tag: fail(f"No {files} on commit: pass version")
+  if not tag:
+    fail(f"Version unknown, no {files} on commit",
+      f"Give it with: {fmt_cmd('xn release <version>')}")
   m = VERSION.fullmatch(tag)
   if not m: fail(f"Version {fmt_release(tag)} is not X.Y.Z")
   version = ".".join(m.groups())
@@ -215,14 +270,15 @@ def prepare(args:argparse.Namespace) -> Release:
   elif file: text = f"**{title}**\n{items}" if title else items
   else: text = ""
   merged = ["target-pure", "ahead"] if base else []
+  ci = "skipped" if args.no_ci else check_ci(commit)
   checks = [*merged, "unreleased", "version",
     "changelog" if file else "changelog:none",
     "code-version" if declared else "code-version:none",
-    "ci:skipped" if args.no_ci else "ci"]
-  ci = "skipped" if args.no_ci else f"green {ci_runs(commit)}"
+    "ci" if ci.startswith("green") else f"ci:{ci}"]
   signed = bool(config("user.signingkey"))
   # Last, once nothing can refuse: a warning ahead of a refusal is only noise
   if not args.note and not file: p.wrn(f"Release without text: no note, {files}")
+  if ci == "none": p.inf("Release without CI tests: no workflow runs on push")
   if not signed: p.inf("Release without signature: no user.signingkey in git config")
   return Release(version=version, tag=tag, name=name, target=target, commit=commit, base=base,
     last=last, text=text, signed=signed, checks=checks, ci=ci)
@@ -288,7 +344,8 @@ def publish(rel:Release, message:str) -> None:
     try:
       git("fetch", ".", f"refs/remotes/origin/{rel.target}:refs/heads/{rel.target}")
     except CommandError:
-      p.inf(f"Local {fmt_branch(rel.target)} not updated: run {fmt_cmd('git pull')} on it")
+      p.inf(f"Local {fmt_branch(rel.target)} not updated")
+      p.tip(f"Update it with: {fmt_cmd(f'git switch {rel.target} && git pull --rebase')}")
   try:
     url = gh("release", "create", rel.tag, "--verify-tag", "--title", rel.title,
       "--notes-file", "-", data=rel.text.encode("utf-8"))

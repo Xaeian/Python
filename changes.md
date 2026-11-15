@@ -1,5 +1,10 @@
 # Changes `xaeian`
 
+## `1.2.3` Fixes
+
+- Fix: `xn release` waits for CI only where a workflow runs on push
+- Fix: `cstruct` keeps the sign of `-0.0`, refuses an empty `IntEnum`, fingerprints any name alike
+
 ## `1.2.2` PDF & processes
 
 - `media`: `pdf_insert`, `pdf_page_count`, PDFs locked with AES open

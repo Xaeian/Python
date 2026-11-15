@@ -107,7 +107,7 @@ Checked before anything leaves the machine:
 - a given version matches the first entry of the changes file, with `v` or without
 - `pyproject.toml`, when there is one, says the same version
 - no tag of the version exists, and the version is above every earlier tag
-- CI tests passed on the released commit, unless `--no-ci`, which the record keeps
+- CI tests passed on the released commit, unless `--no-ci` or no workflow on it runs on push, both of which the record keeps
 
 The release is named after the previous one: `Xaeian 1.1.1` → `Xaeian 1.2.0`.
 `--name` gives the name the first time.
