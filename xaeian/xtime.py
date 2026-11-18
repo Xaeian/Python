@@ -15,7 +15,7 @@ from __future__ import annotations
 
 __extras__ = ("time", ["pytz", "tzlocal"])
 
-from datetime import datetime, timedelta, tzinfo
+from datetime import datetime, timedelta, timezone, tzinfo
 from typing import overload
 import calendar, re
 
@@ -28,6 +28,8 @@ except ModuleNotFoundError as e:
   raise MissingExtra("Install with: pip install xaeian[time]") from e
 
 type TimeInput = str | int | float | datetime | timedelta | Time
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc) # unix seconds count from it
 
 class Time(datetime):
   """
@@ -91,6 +93,22 @@ class Time(datetime):
       self.microsecond, tzinfo=self.tzinfo, fold=self.fold,
     )
 
+  def _aware(self) -> datetime:
+    """Plain `datetime` with its zone: a naive `Time` is local."""
+    dt = self.to_datetime()
+    return dt if dt.tzinfo else dt.replace(tzinfo=tzlocal.get_localzone())
+
+  def _since_epoch(self) -> timedelta:
+    """
+    Exact time since 1970, counted, not asked of the OS: Windows refuses years before 1970.
+    Subtracting by offsets builds no date in UTC, which near the calendar's ends would not exist.
+    """
+    return self._aware() - _EPOCH
+
+  def timestamp(self) -> float:
+    """Unix seconds, a naive `Time` read as local."""
+    return self._since_epoch().total_seconds()
+
   def copy(self) -> Time:
     """Copy of this instance."""
     return Time._from_datetime(self.replace())
@@ -102,8 +120,8 @@ class Time(datetime):
     Convert or format by specifier:
 
     - "ts"|"timestamp": unix seconds (float)
-    - "s"|"second": unix seconds (int)
-    - "ms"|"millisecond": unix milliseconds (int)
+    - "s"|"second": whole unix seconds (int), rounded down, before 1970 too
+    - "ms"|"millisecond": whole unix milliseconds (int), rounded down
     - "utc"|"local": same instant as a `Time` in that zone
     - "iso": ISO 8601 string
     - "tz:Zone/Name"|"iso:Zone/Name": ISO 8601 string in that zone
@@ -113,21 +131,17 @@ class Time(datetime):
     cmd = raw.lower()
     match cmd:
       case "ts"|"timestamp": return self.timestamp()
-      case "s"|"second": return int(self.timestamp())
-      case "ms"|"millisecond": return int(self.timestamp() * 1000)
-      case "utc": return Time._from_datetime(self.astimezone(pytz.utc))
-      case "local": return Time._from_datetime(self.astimezone(tzlocal.get_localzone()))
-      case "iso":
-        dt = self
-        if dt.tzinfo is None: dt = dt.replace(tzinfo=tzlocal.get_localzone())
-        return dt.isoformat(timespec="seconds")
+      case "s"|"second": return self._since_epoch() // timedelta(seconds=1)
+      case "ms"|"millisecond": return self._since_epoch() // timedelta(milliseconds=1)
+      case "utc": return Time._from_datetime(self._to_utc())
+      case "local": return Time._from_datetime(self._aware().astimezone(tzlocal.get_localzone()))
+      case "iso": return self._aware().isoformat(timespec="seconds")
     if cmd.startswith("tz:") or cmd.startswith("iso:"):
       zone = raw.split(":", 1)[1].strip()
       if not zone: tz = self.tzinfo or tzlocal.get_localzone()
       elif zone.lower() == "utc": tz = pytz.utc
       else: tz = pytz.timezone(zone)
-      dt = self.astimezone(tz)
-      return dt.isoformat(timespec="seconds")
+      return self._aware().astimezone(tz).isoformat(timespec="seconds")
     return self.strftime(fmt)
 
   #--------------------------------------------------------------------------------------- Rounding
@@ -155,10 +169,7 @@ class Time(datetime):
 
   def __add__(self, v:str|int|float|timedelta) -> Time:
     """Add an interval string, a number of seconds, or a timedelta."""
-    if isinstance(v, (int, float)):
-      return Time._from_datetime(datetime.fromtimestamp(
-        self.timestamp() + v, tz=self.tzinfo or tzlocal.get_localzone(),
-      ))
+    if isinstance(v, (int, float)): return Time._from_timestamp(self.timestamp() + v, self.tzinfo)
     if isinstance(v, timedelta): return Time._from_datetime(datetime.__add__(self, v))
     if isinstance(v, str): return self._apply_intervals(v)
     raise TypeError(f"Unsupported operand: Time + {type(v).__name__}")
@@ -169,23 +180,18 @@ class Time(datetime):
   def __sub__(self, v:TimeInput|None) -> Time|timedelta:
     """Subtract interval/seconds/timedelta (→ Time) or datetime (→ timedelta). `None` → self."""
     if v is None: return self
-    if isinstance(v, (int, float)):
-      return Time._from_datetime(datetime.fromtimestamp(
-        self.timestamp() - v, tz=self.tzinfo or tzlocal.get_localzone(),
-      ))
+    if isinstance(v, (int, float)): return Time._from_timestamp(self.timestamp() - v, self.tzinfo)
     if isinstance(v, timedelta): return Time._from_datetime(datetime.__sub__(self, v))
-    if isinstance(v, (datetime, Time)):
-      return timedelta(seconds=self.timestamp() - Time._parse(v).timestamp())
-    if isinstance(v, str): return self._apply_intervals(self._flip_intervals(v))
+    # Each from 1970: two dates of one zone would subtract by the clock alone, past a DST change
+    if isinstance(v, (datetime, Time)): return self._since_epoch() - Time._parse(v)._since_epoch()
+    if isinstance(v, str): return self._apply_intervals(v, -1)
     raise TypeError(f"Unsupported operand: Time - {type(v).__name__}")
 
   #------------------------------------------------------------------------------------- Comparison
 
   def _to_utc(self) -> datetime:
     """Plain `datetime` in UTC: plain, so comparing and hashing do not re-enter this class."""
-    dt = self.to_datetime()
-    if dt.tzinfo is None: dt = dt.replace(tzinfo=tzlocal.get_localzone())
-    return dt.astimezone(pytz.utc)
+    return self._aware().astimezone(pytz.utc)
 
   @staticmethod
   def _other_utc(v) -> datetime|None:
@@ -240,8 +246,10 @@ class Time(datetime):
 
   #------------------------------------------------------------------------------- Interval parsing
 
-  # Unit alternation is longest-first: `m` must not shadow `mo` or `ms`
-  INTERVAL_PATTERN = r"[+\-]?[0-9]*\.?[0-9]+(?:mo|ms|µs|us|y|w|d|h|m|s)"
+  # A number reads one way only, `5`, `1.5` or `.5`:
+  # digits that split several ways make a long text that fails take exponential time.
+  # Unit alternation is longest-first: `m` must not shadow `mo` or `ms`.
+  INTERVAL_PATTERN = r"[+\-]?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:mo|ms|µs|us|y|w|d|h|m|s)"
   INTERVAL_RE = re.compile(INTERVAL_PATTERN)
   INTERVALS_RE = re.compile(rf"^(?:{INTERVAL_PATTERN}\s*)+$")
 
@@ -255,12 +263,13 @@ class Time(datetime):
     """`True` for a sequence of interval tokens, like `-6h 30m`."""
     return bool(cls.INTERVALS_RE.fullmatch(text.strip()))
 
-  def _apply_interval(self, interval:str) -> Time:
-    """Shift by one token; `y`/`mo` keep the day number, clamped to the target month length."""
-    match = re.search(r"-?[0-9]*\.?[0-9]+", interval)
-    if not match: return self
-    value = float(match.group())
-    unit = re.sub(r"[^a-zµ]", "", interval.lower())
+  def _apply_interval(self, interval:str, sign:int=1) -> Time:
+    """
+    Shift by one token, its number times `sign`;
+    `y`/`mo` keep the day number, clamped to the target month length.
+    """
+    unit = re.sub(r"[^a-zµ]", "", interval)
+    value = sign * float(re.sub(r"[a-zµ]", "", interval)) # what the unit leaves: `-1.5`, `+2`
     dt = self.to_datetime()
     if unit in ("y", "mo"):
       months = int(value * 12) if unit == "y" else int(value)
@@ -280,26 +289,16 @@ class Time(datetime):
       case _: return self
     return Time._from_datetime(dt + delta)
 
-  def _apply_intervals(self, text:str) -> Time:
+  def _apply_intervals(self, text:str, sign:int=1) -> Time:
+    """Shift by every token of `text`, each number times `sign`: `-1` subtracts."""
     text = text.strip()
     if not self.is_intervals(text): raise ValueError(f"Invalid interval: '{text}'")
-    tokens = self.INTERVAL_RE.findall(text)
     result = self
-    for token in tokens: result = result._apply_interval(token)
+    try:
+      for token in self.INTERVAL_RE.findall(text): result = result._apply_interval(token, sign)
+    except (OverflowError, ValueError): # `datetime` refuses a date past its calendar either way
+      raise ValueError(f"Interval '{text}' out of range") from None
     return result
-
-  @classmethod
-  def _flip_intervals(cls, text:str) -> str:
-    """Negate every token sign, so subtraction reuses the addition path."""
-    text = text.strip()
-    if not cls.is_intervals(text): return text
-    tokens = cls.INTERVAL_RE.findall(text)
-    flipped = []
-    for t in tokens:
-      if t.startswith("-"): flipped.append("+" + t[1:])
-      elif t.startswith("+"): flipped.append("-" + t[1:])
-      else: flipped.append("-" + t)
-    return " ".join(flipped)
 
   #---------------------------------------------------------------------------------------- Factory
 
@@ -322,14 +321,15 @@ class Time(datetime):
   ]
 
   @classmethod
-  def _from_timestamp(cls, seconds:float) -> Time:
+  def _from_timestamp(cls, seconds:float, zone:tzinfo|None=None) -> Time:
     """
-    Unix seconds → `Time`, in the local zone.
+    Unix seconds → `Time` in `zone`, else the local one, counted as `timestamp` counts them.
     Past the calendar it is refused in plain words: milliseconds, common on devices, land there.
     """
-    try: return cls._from_datetime(datetime.fromtimestamp(seconds, tz=tzlocal.get_localzone()))
-    except (OverflowError, OSError, ValueError):
+    try: dt = (_EPOCH + timedelta(seconds=seconds)).astimezone(zone or tzlocal.get_localzone())
+    except (OverflowError, ValueError):
       raise ValueError(f"Timestamp {seconds:.0f}s out of range: milliseconds?") from None
+    return cls._from_datetime(dt)
 
   @classmethod
   def _parse(cls, v:TimeInput) -> Time:

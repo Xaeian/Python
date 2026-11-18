@@ -2,8 +2,10 @@
 
 """Time: parsing, interval arithmetic, timezone-aware formatting, rounding."""
 
+import re, time
 from datetime import datetime, timezone, timedelta
-import pytest
+from zoneinfo import ZoneInfo
+import pytest, tzlocal
 from xaeian import Time, time_to
 
 # Aware inputs are used wherever the result depends on an instant (ts/utc/iso/tz);
@@ -33,7 +35,7 @@ def rejects_unparseable_string():
     Time("definitely not a date")
 
 def a_timestamp_in_milliseconds_is_refused_in_plain_words():
-  """Devices often send milliseconds; as seconds they lie past year 9999, `OSError` on Windows."""
+  """Devices often send milliseconds; as seconds they lie past year 9999."""
   for stamp in (1761652800000, "1761652800000"):
     with pytest.raises(ValueError, match="milliseconds"):
       Time(stamp)
@@ -62,6 +64,49 @@ def rejects_invalid_interval_string(bad):
     Time("2025-03-01 12:00") + bad
   with pytest.raises(ValueError):
     Time("2025-03-01 12:00") - bad
+
+@pytest.mark.parametrize("far", ["999999999999s", "-99999999d", "99999999y"])
+def an_interval_past_the_calendar_is_a_value_error_naming_it_as_written(far):
+  said = f"Interval '{re.escape(far)}' out of range"
+  with pytest.raises(ValueError, match=said):
+    Time(0) + far
+  with pytest.raises(ValueError, match=said):
+    Time(0) - far
+
+def whole_seconds_and_milliseconds_round_down_before_1970_too():
+  late = Time("1900-06-01T12:00:00.750+00:00")
+  assert Time(late.to("s")) == Time("1900-06-01T12:00:00+00:00")
+  assert late.to("ms") - late.to("s") * 1000 == 750
+
+def a_year_before_1970_or_after_3000_is_counted():
+  """Seconds are counted, not asked of the OS: Windows refuses all of these."""
+  old = Time("1900-01-01")
+  assert Time(old.to("ts")) == old
+  assert old + 60 == Time("1900-01-01 00:01")
+  assert Time(0) - 86400 == Time(-86400) == Time("1969-12-31T00:00:00+00:00")
+  assert Time(40000000000).to("s") == 40000000000
+  assert Time("9999-12-31T23:59:59-05:00").to("ts") == 253402318799 # the calendar's last day
+
+def a_timestamp_reads_back_to_the_same_time(monkeypatch):
+  """
+  Both ways read the zone's history, here Warsaw's, with no summer time in 1973.
+  An OS that applies today's rules, as Windows does, or runs in another zone would shift it.
+  """
+  monkeypatch.setattr(tzlocal, "get_localzone", lambda: ZoneInfo("Europe/Warsaw"))
+  summer = Time("1973-06-29 12:00")
+  assert Time(summer.to("ts")) == summer
+
+def two_times_of_one_zone_differ_by_the_time_that_passed(monkeypatch):
+  """Warsaw moves its clock an hour ahead on 2025-03-30: two days by the clock are 47 hours."""
+  monkeypatch.setattr(tzlocal, "get_localzone", lambda: ZoneInfo("Europe/Warsaw"))
+  assert Time("2025-03-31 12:00") - Time("2025-03-29 12:00") == timedelta(hours=47)
+
+def a_long_text_that_is_no_interval_is_refused_at_once():
+  """Digits that split several ways would double the time every 3 characters: seconds here."""
+  text = "99s" * 25 + "x"
+  start = time.perf_counter()
+  assert not Time.is_intervals(text)
+  assert time.perf_counter() - start < 1
 
 def fractional_time_intervals():
   base = Time("2025-03-01 12:00:00")

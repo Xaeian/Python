@@ -2,8 +2,10 @@
 
 ## `1.2.3` Fixes
 
-- Fix: `xn release` waits for CI only where a workflow runs on push
-- Fix: `cstruct` keeps the sign of `-0.0`, refuses an empty `IntEnum`, fingerprints any name alike
+- Fix: `xn release` waits for CI only with a push workflow
+- Fix: `cstruct` keeps `-0.0` signed and refuses an empty `IntEnum`
+- Fix: `Time` refuses a long non-interval text at once, a far interval with `ValueError`
+- Fix: `Time` handles dates before 1970 on Windows
 
 ## `1.2.2` PDF & processes
 
